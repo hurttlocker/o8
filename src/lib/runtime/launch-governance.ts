@@ -8,6 +8,7 @@ import { linkSessionToWorktree } from '@/lib/worktree';
 import { WorktreeManager } from '@/lib/worktree/manager';
 import type { AgentRuntime, RuntimeActionResult } from '@/lib/runtimes/types';
 import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
+import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
 
 /** A provider session exists, but its local governance registration did not settle. */
 export class RuntimeLaunchPostEffectError extends Error {
@@ -74,6 +75,7 @@ export async function settleRuntimeLaunchGovernance(input: {
     if (runtimeId === 'cloud' && laneRuntime) {
       try {
         const { createLane, attachSession, setLaneStatus } = await import('@/lib/lane/registry');
+        assertOwnedActionGuard();
         if (!laneId) {
           const lane = createLane({
             repoPath,

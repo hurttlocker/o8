@@ -396,6 +396,10 @@ export type LaneEventVerb =
   | 'dependency_materialized'
   | 'worktree_preparation_timing'
   | 'runtime_launch_step'
+  // Durable task launch admission; payload: { dispatchId, intentHash, packetId }.
+  | 'task_dispatch_accepted'
+  | 'task_dispatch_failed'
+  | 'task_dispatch_cleanup'
   | 'dependency_materialization_incomplete'
   // Worker-requested bounded scope expansion. Payload records requested paths,
   // effective allowlist, reason, and whether the request widened the scope.

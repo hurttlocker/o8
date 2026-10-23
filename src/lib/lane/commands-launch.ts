@@ -1,3 +1,5 @@
+import { assertLaunchAttachment } from '@/lib/lane/commands-launch-admission';
+import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -13,6 +15,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { capturePacketCapacitySnapshot } from '@/lib/orchestrator/capacity-snapshots';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
 import type { LaneCommand, LaneCommandResult, LaneEventActor, LaneRuntime } from '@/lib/lane/types';
 import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
@@ -53,6 +56,7 @@ export async function launchSession(
   command: LaunchSessionCommand,
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {
+  assertOwnedActionGuard();
   const lane = getLane(command.laneId);
   if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
   if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime) && !(lane.runtime === 'cloud' && lane.packetId)) {
@@ -103,6 +107,8 @@ export async function launchSession(
 
   if (command.clientMutationId) {
     const recovered = await findOwnedLaunchByMutationId(command.clientMutationId);
+    const recoveredRefusal = assertLaunchAttachment(command.laneId, recovered?.surfaceId);
+    if (recoveredRefusal) await recoveredRefusal;
     if (recovered) {
       if (recovered.outcome === 'failed') {
         const reason = 'Recovered a failed owned launch from its durable session record.';
@@ -113,6 +119,7 @@ export async function launchSession(
           note: reason,
         };
       }
+      assertOwnedActionGuard();
       updateLane(command.laneId, { model: resolvedLaunchModel(command, lane.runtime) }, 'system');
       attachSession(command.laneId, recovered.surfaceId, actor);
       setLaneStatus(command.laneId, 'running', actor, 'session_launch_recovered');
@@ -169,6 +176,7 @@ export async function launchSession(
         baseBranch: lane.baseBranch,
         branchName: lane.branch,
       });
+      assertOwnedActionGuard();
       appendEvent(command.laneId, 'worktree_refreshed', 'system', {
         packetId: lane.packetId,
         baseBranch: lane.baseBranch,
@@ -176,6 +184,9 @@ export async function launchSession(
       });
       fetchRecovery.recordFetchUnreachableRecoverySuccess(lane.repoPath);
     } catch (err) {
+      try { assertOwnedActionGuard(); } catch {
+        return { ok: false, laneId: command.laneId, note: 'Task launch was stopped or superseded.' };
+      }
       const note = err instanceof Error ? err.message : String(err);
       appendEvent(command.laneId, 'worktree_refresh_failed', 'system', {
         packetId: lane.packetId,
@@ -244,6 +255,8 @@ export async function launchSession(
       storageAdmissionReservationId: command.storageAdmissionReservationId,
     });
 
+    const attachmentRefusal = assertLaunchAttachment(command.laneId, result.surfaceId || undefined);
+    if (attachmentRefusal) await attachmentRefusal;
     if (!result.ok) {
       recordLaunchFailure(lane, 'idle', 'launch_failed', result.note);
       return { ok: false, laneId: command.laneId, note: result.note };
@@ -323,6 +336,13 @@ export async function launchSession(
       dependencyMaterializationMode: result.worktree?.dependencyMaterialization?.mode ?? null,
     };
   } catch (err) {
+    const refusal = assertLaunchAttachment(command.laneId,
+      err instanceof RuntimeLaunchPostEffectError ? err.result.surfaceId : undefined);
+    if (refusal) {
+      try { await refusal; } catch {
+        return { ok: false, laneId: command.laneId, note: 'Task launch was stopped or superseded.' };
+      }
+    }
     const message = err instanceof Error ? err.message : 'Launch failed.';
     if (getLane(command.laneId)?.status === 'launching') {
       recordLaunchFailure(lane, 'idle', 'launch_error', message);

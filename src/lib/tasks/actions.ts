@@ -1,9 +1,12 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
+import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
+import { dispatchWithReceipt } from './dispatch-receipt';
 
 import {
   archiveLane,
+  appendEvent,
   findLaneByPacket,
   getLane,
   setLaneStatus,
@@ -53,6 +56,9 @@ export interface TaskMutationResult {
   statusChanged?: boolean;
   workerRouting?: WorkerRouting;
   task: TaskPoolTask | null;
+  status?: TaskPoolTask['status'];
+  dispatchId?: string;
+  replayed?: boolean;
 }
 
 export interface TaskMutationInput {
@@ -84,6 +90,8 @@ export interface TaskClaimInput extends TaskMutationInput {
 }
 
 export interface TaskDispatchInput extends TaskMutationInput {
+  /** MCP returns the durable admission before worktree provisioning finishes. */
+  waitForLaunch?: boolean;
   message?: string | null;
   model?: string | null;
   requestedEffort?: ThinkingEffort | null;
@@ -211,10 +219,12 @@ async function syncPacketForLane(
     lastEventLabel?: string | null;
     workerRouting?: WorkerRouting;
   } = {},
+  guard?: () => void,
 ) {
   if (!task.packetId) return;
 
   await withLockedState((state) => {
+    guard?.();
     const index = state.packets.findIndex((packet) => packet.id === task.packetId);
     if (index === -1) return null;
 
@@ -504,46 +514,62 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     }
     throw error;
   }
-  const lane = await ensureLaneForTask(task, actor, workerRouting.selectedRuntime);
-  await syncPacketForLane(task, lane, {
-    lastEventLabel: 'dispatch_requested',
-    workerRouting,
+  const prompt = buildDispatchPrompt(task, workerRouting, input.message);
+  const priorLane = task.laneId ? getLane(task.laneId) : null;
+  if (priorLane && priorLane.runtime !== workerRouting.selectedRuntime) throw new TaskMutationError(409, `Task is claimed by a ${priorLane.runtime} lane; reset or reclaim it before dispatching with ${workerRouting.selectedRuntime}.`);
+  if (!task.packetId && !task.laneId) throw new TaskMutationError(409, 'Task has no lane or packet to dispatch.');
+  return dispatchWithReceipt({
+    packetId: task.packetId, laneId: task.laneId, actor,
+    intent: { runtime: workerRouting.selectedRuntime, model: workerRouting.selectedModel, effort: workerRouting.selectedEffort, prompt },
+    waitForLaunch: input.waitForLaunch !== false,
+    conflict: (message) => new TaskMutationError(409, message),
+    prepare: async (admission) => {
+      const fresh = await resolveTask(taskId, input);
+      const lane = await ensureLaneForTask(fresh, actor, workerRouting.selectedRuntime);
+      if (['completed', 'archived'].includes(lane.status)) throw new TaskMutationError(409, 'Reset the completed task before dispatching it.');
+      let accepted = lane;
+      const admit = () => {
+        if (fresh.packetId) {
+          const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === fresh.packetId);
+          const explicit = packet?.queueState === 'held' && packet.holdIntent === 'explicit-dispatch'
+            && !packet.operatorStopped && !packet.archivedAt && packet.releaseState !== 'released'
+            && ['queued', 'draft', 'blocked'].includes(packet.status)
+            && (!packet.blockedReason || packet.blockedReason === 'Awaiting explicit dispatch');
+          if (!explicit && !inspectPacketManagedRunAdmission(fresh.packetId).allowed) throw new TaskMutationError(409, 'Task is held or stopped. Reset it before dispatching.');
+        }
+        appendEvent(lane.id, 'task_dispatch_accepted', actor, { ...admission });
+        accepted = setLaneStatus(lane.id, 'launching', actor, 'dispatch_accepted') ?? lane;
+      };
+      try {
+        if (!fresh.packetId) admit();
+        await syncPacketForLane(fresh, lane, { status: 'launching', blockedReason: null, lastEventLabel: 'dispatch_accepted', workerRouting }, admit);
+      } catch (error) {
+        if (getLane(lane.id)?.lastEventLabel === 'dispatch_accepted') setLaneStatus(lane.id, lane.status, actor, lane.lastEventLabel ?? 'dispatch_refused');
+        throw error;
+      }
+      return accepted;
+    },
+    receipt: async (lane, admission, replayed) => ({
+      ...(await mutationResult('dispatch', task, lane, 'Dispatch accepted. Follow progress with mission_tail.')),
+      status: lane.status, dispatchId: admission?.dispatchId, replayed, workerRouting,
+    }),
+    launch: (lane, clientMutationId) => dispatchLaneCommand({
+      verb: 'launch_session', laneId: lane.id, prompt,
+      model: workerRouting.selectedModel ?? undefined, effort: workerRouting.selectedEffort ?? undefined, actor, clientMutationId,
+    }),
+    settle: async (lane, result, guard) => {
+      guard();
+      const latest = result.lane ?? getLane(lane.id) ?? lane;
+      const settled = !result.ok
+        ? setLaneStatus(latest.id, 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latest : latest;
+      await syncPacketForLane(task, settled, {
+        status: result.ok ? settled.status === 'running' ? 'running' : 'launching' : 'blocked',
+        blockedReason: result.ok ? null : result.note,
+        lastEventLabel: result.ok ? settled.lastEventLabel ?? 'session_launched' : 'dispatch_failed', workerRouting,
+      }, guard);
+      return { ...(await mutationResult('dispatch', task, settled, result.note || 'Task dispatched.', { ok: result.ok })), workerRouting };
+    },
   });
-
-  const result = await dispatchLaneCommand({
-    verb: 'launch_session',
-    laneId: lane.id,
-    prompt: buildDispatchPrompt(task, workerRouting, input.message),
-    model: workerRouting.selectedModel ?? undefined,
-    effort: workerRouting.selectedEffort ?? undefined,
-    actor,
-  });
-
-  const latestLane = result.lane ?? getLane(lane.id) ?? lane;
-  if (!result.ok) {
-    const blockedLane = setLaneStatus(latestLane.id, 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latestLane;
-    await syncPacketForLane(task, blockedLane, {
-      status: 'blocked',
-      blockedReason: result.note,
-      lastEventLabel: 'dispatch_failed',
-      workerRouting,
-    });
-    return {
-      ...(await mutationResult('dispatch', task, blockedLane, result.note || 'Dispatch failed.', { ok: false })),
-      workerRouting,
-    };
-  }
-
-  await syncPacketForLane(task, latestLane, {
-    status: latestLane.status === 'running' ? 'running' : 'launching',
-    blockedReason: null,
-    lastEventLabel: latestLane.lastEventLabel ?? 'session_launched',
-    workerRouting,
-  });
-  return {
-    ...(await mutationResult('dispatch', task, latestLane, result.note || 'Task dispatched.')),
-    workerRouting,
-  };
 }
 
 export async function blockTask(taskId: string, input: TaskBlockInput): Promise<TaskMutationResult> {
