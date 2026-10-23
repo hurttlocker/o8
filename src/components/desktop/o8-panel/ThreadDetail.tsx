@@ -10,6 +10,7 @@ import { THREAD_GROUPS, threadModelLabel, threadStatusLine } from './threads-mod
 import { useOrchestratorData } from '../orchestrator-data-context';
 import { usePendingThreadSteer } from './thread-steer-state';
 import { ThreadActionButton } from './ThreadActions';
+import { useWorkspaceChatDraftRetention } from '../workspace-terminal/workspace-chat-drafts';
 
 interface Evidence {
   jobId: string;
@@ -41,7 +42,9 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const pending = usePendingThreadSteer(task.packetId);
   const pendingSteer = pending.request;
-  const [message, setMessage] = useState(() => pendingSteer?.message ?? '');
+  const { draft: message, setDraft: setMessage, retentionWarning } = useWorkspaceChatDraftRetention(
+    JSON.stringify(['thread-steer', task.packetId ?? task.id]),
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const sendController = useRef<AbortController | null>(null);
@@ -91,8 +94,9 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
         if (payload?.ok === false && !unknown) pending.clear(request.id);
         throw new Error(payload?.message || failure?.message || (typeof payload?.error === 'string' ? payload.error : null) || 'The thread could not accept this message.');
       }
+      const matchesPending = pending.readCurrent()?.id === request.id;
       pending.clear(request.id);
-      setMessage('');
+      if (matchesPending) setMessage((current) => current.trim() === request.message ? '' : current);
       setNotice(payload.result?.note || 'Message accepted by this thread.');
     } catch (err) {
       if (!controller.signal.aborted) setNotice(err instanceof Error ? err.message : 'Delivery is unconfirmed. Retry to check the same message.');
@@ -140,9 +144,9 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
         ) : null}
       </div>
       <div style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, borderTop: '1px solid var(--t-divider-subtle)' }}>
-        <textarea aria-label="Steer this thread" placeholder="Steer this thread…" rows={2} value={message} disabled={busy || Boolean(pendingSteer) || !task.packetId || task.group === 'done'} onChange={(event) => setMessage(event.currentTarget.value)} style={{ width: '100%', boxSizing: 'border-box', resize: 'none', border: '1px solid var(--t-divider-subtle)', borderRadius: 10, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 13, paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10 }} />
+        <textarea aria-label="Steer this thread" placeholder="Steer this thread…" rows={2} value={pendingSteer?.message ?? message} disabled={busy || Boolean(pendingSteer) || !task.packetId || task.group === 'done'} onChange={(event) => setMessage(event.currentTarget.value)} style={{ width: '100%', boxSizing: 'border-box', resize: 'none', border: '1px solid var(--t-divider-subtle)', borderRadius: 10, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 13, paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <span role="status" style={{ flex: 1, fontSize: 11, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>{notice || (pendingSteer ? 'Delivery is unconfirmed. Check this message before sending another.' : task.group === 'done' ? 'This thread has finished.' : threadModelLabel(task))}</span>
+          <span role="status" style={{ flex: 1, fontSize: 11, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>{retentionWarning || notice || (pendingSteer ? 'Delivery is unconfirmed. Check this message before sending another.' : task.group === 'done' ? 'This thread has finished.' : threadModelLabel(task))}</span>
           <ActionButton label={busy ? 'Sending…' : pendingSteer ? 'Check delivery' : 'Send'} primary disabled={busy || !task.packetId || task.group === 'done' && !pendingSteer || (!pendingSteer && !message.trim())} onClick={() => { void send(); }} />
         </div>
       </div>
