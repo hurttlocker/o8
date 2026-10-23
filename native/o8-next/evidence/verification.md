@@ -40,9 +40,9 @@ strike-through, and the scroll timing boundary. Runtime receipts above were run
 by the implementation owner; the source review was not treated as execution proof.
 
 Measurement UI source SHA-256:
-`5ec941aa0169852ec41b869924343d54dbe559960a004d0ee4718b73744f2ef6`.
+`30bf81079086d7fb5b23864cd0627f77b2fc6924e4c10079a637895474ae2703`.
 Measured release binary SHA-256:
-`dd347d1c6bd3d7e5b3d0096014572026c4d3956b61b8f7e18818007cff628469`.
+`c0b231d4235ff6fc00faa738f17fd6796b7ed5fa6297b0d015bcdb1c2d99436b`.
 
 Residual: this is static saved orchestrator history over authored disposable
 recordings. It is not live-provider, WebSocket, GPU/compositor, full rich-event,

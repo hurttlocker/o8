@@ -335,6 +335,7 @@ impl Render for Surface {
             .bg(rgb(0x1a1e24))
             .text_color(rgb(0xe8ecf2))
             .font_family(".AppleSystemUIFont")
+            .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
