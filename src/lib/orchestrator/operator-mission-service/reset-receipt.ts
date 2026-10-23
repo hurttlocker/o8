@@ -7,6 +7,7 @@ import {
   ResetSessionArchiveUnconfirmedError,
   type ResetCleanupFailureResult,
 } from './reset-errors';
+import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 
 /**
  * Terminal shape of one reset_packet / retry_packet request (#2313).
@@ -41,6 +42,9 @@ export type ResetReceipt =
   | ResetFailureReceipt;
 
 export function resetFailureReceipt(error: unknown): ResetFailureReceipt {
+  if (error instanceof ControlPlaneLockTimeoutError) {
+    return { ok: false, code: 'mission_store_busy', message: 'Mission store is busy; wait before retrying.', status: 503 };
+  }
   const message = error instanceof Error ? error.message : 'Unable to reset packet.';
   if (error instanceof ResetPacketNotFoundError) return { ok: false, code: 'packet_not_found', message, status: 404 };
   if (error instanceof ResetStateChangedError) return { ok: false, code: 'reset_state_changed', message, status: 409 };

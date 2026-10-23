@@ -3075,6 +3075,12 @@
       ]
     },
     {
+      "path": "tests/lifecycle-mcp-errors-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/live-process-guard-deletion-seam.test.ts",
       "reasons": [
         "child-process",
