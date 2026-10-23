@@ -698,6 +698,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 managedVoiceControl={voiceControl}
                 permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
                   ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
+                    allowOutsideWorkspace={(activeBackend === 'o8' || activeBackend === 'pi') && composerMode !== 'moa'}
                     // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
                     fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
                 inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
