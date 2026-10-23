@@ -13,12 +13,13 @@ const EMPTY_EXTRAS: ActivityExtras = { issues: [], prs: [], ciRuns: [], repoComm
 const PAUSED = 'GitHub rate limit — paused until reset';
 
 function pauseUntil(response: Response): number {
+  const now = Date.now();
   const retry = response.headers.get('retry-after');
   const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
   const retryMs = retry ? Number(retry) * 1000 : NaN;
-  if (Number.isFinite(retryMs) && retryMs > 0) return Date.now() + retryMs;
-  if (Number.isFinite(reset) && reset > 0) return Math.max(reset, Date.now() + 60_000);
-  return Date.now() + 300_000;
+  const retryAt = Number.isFinite(retryMs) && retryMs > 0 ? now + retryMs : Date.parse(retry ?? '');
+  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(reset) ? reset : 0);
+  return deadline > now ? deadline : now + 300_000;
 }
 
 /** Keep successful streams scoped to their repository through failed refreshes. */
