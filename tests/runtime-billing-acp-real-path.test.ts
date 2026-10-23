@@ -12,7 +12,7 @@ vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 72).toString('base64url'));
 vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 const children = new Set<number>();
 afterAll(() => { for (const pid of children) try { process.kill(pid, 'SIGTERM'); } catch { /* Already retired. */ } vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
-it.each(['hermes', 'acp'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
+it.each(['muse', 'opencode'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
   const backend = makeAcpBackend({ id: runtimeId, label: 'Billing fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
   const mode = async (mode: string) => expect((await billing.POST(request('runtime/billing', { runtimeId, mode }))).status).toBe(200);
   const save = async () => expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-acp-key' }))).status).toBe(200);
@@ -25,7 +25,7 @@ it.each(['hermes', 'acp'] as const)('%s established processes recycle after save
   };
   await mode('subscription'); await save(); const subscription = await turn();
   expect(subscription.key).toBeNull(); expect(subscription.alias).toBeNull();
-  const authorizedKey = runtimeId === 'hermes' ? 'fixture-acp-key' : null;
+  const authorizedKey = 'fixture-acp-key';
   await mode('api'); const api = await turn(); expect(api.key).toBe(authorizedKey); expect(api.pid).not.toBe(subscription.pid);
   expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
   const removed = await turn(); expect(removed.key).toBeNull(); expect(removed.alias).toBeNull(); expect(removed.pid).not.toBe(api.pid);

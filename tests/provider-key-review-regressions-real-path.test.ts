@@ -25,6 +25,7 @@ beforeEach(() => {
   for (const f of ['.env.local', 'owned-credential-artifacts.json'])
     rmSync(join(s.dir, f), { force: true });
   rmSync(join(s.dir, 'runtime-billing'), { force: true, recursive: true });
+  rmSync(join(s.home, '.hermes'), { recursive: true, force: true });
   mutateProviderKey('OPENAI_API_KEY', { key: saved });
 });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(s.home, { force: true, recursive: true }); });
@@ -35,15 +36,8 @@ it('unidentified ACP launch does not receive a saved key from a prepared owned H
   writeFileSync(join(home, 'config.yaml'), '');
   const peer = join(s.home, 'acp-peer.cjs');
   writeFileSync(peer, `const fs=require('node:fs'),p=require('node:path');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:1}:m.method==='session/new'?{sessionId:'review',configOptions:[{id:'model',type:'select',currentValue:String(JSON.parse(fs.readFileSync(p.join(process.env.HERMES_HOME,'auth.json'),'utf8')).OPENAI_API_KEY!==undefined),options:[]}]}:{}})+'\\n')});`.replaceAll("'\\\\n'", "'\\n'"));
-  const client = new AcpClient({ command: process.execPath, args: [peer], env: { HERMES_HOME: home } } as never);
-  try {
-    await client.initialize();
-    const session = await client.newSession(s.home, []);
-    expect(session.configOptions[0].currentValue).toBe('false');
-  }
-  finally {
-    client.kill();
-  }
+  expect(() => new AcpClient({ command: process.execPath, args: [peer], env: { HERMES_HOME: home } } as never)).toThrow(/#4340/);
+  expect(readFileSync(join(home, 'auth.json'), 'utf8')).toContain(saved);
 });
 it('git-backed guard catches createRequire aliases and destructuring', async () => {
   const fixture = join(s.home, 'guard');

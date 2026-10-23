@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 const state = vi.hoisted(() => ({ dir: '', spawned: false, hook: undefined as undefined | (() => Promise<void>), envs: [] as NodeJS.ProcessEnv[], children: [] as Array<EventEmitter & { killed: boolean }> }));
+vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => state.dir }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir, migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => ({ entries: [] }) }));
 vi.mock('node:net', () => ({ createConnection: () => {
@@ -23,23 +24,23 @@ vi.mock('node:child_process', async original => ({ ...await original<typeof impo
 state.dir = mkdtempSync(join(tmpdir(), 'o8-gateway-policy-'));
 const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
 beforeEach(() => {
+  vi.stubEnv('HOME', state.dir);
   state.spawned = false; state.hook = undefined; state.envs = []; state.children = [];
   rmSync(join(state.dir, '.env.local'), { force: true }); rmSync(join(state.dir, 'runtime-billing'), { recursive: true, force: true }); rmSync(join(state.dir, 'openclaw-gateway-policy'), { force: true });
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 73).toString('base64url')); vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} }))); vi.resetModules();
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { recursive: true, force: true }); });
-it.each(['subscription', 'disable', 'remove'])('refuses a gateway whose launch policy changes to %s during readiness', async action => {
+it.each(['disable', 'remove'])('refuses a gateway whose launch policy changes to %s during readiness', async action => {
   const keys = await import('@/app/api/v2/keys/route'); const billing = await import('@/app/api/runtime/billing/route');
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-gateway-key' }))).status).toBe(200);
-  expect((await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: 'api' }))).status).toBe(200);
+  expect((await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: 'api' }))).status).toBe(409);
   state.hook = async () => {
-    const response = action === 'subscription' ? await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: 'subscription' }))
-      : action === 'disable' ? await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH')) : await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'));
+    const response = action === 'disable' ? await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH')) : await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'));
     expect(response.status).toBe(200);
   };
   const { ensureOpenclawGateway } = await import('./openclaw-gateway');
   await expect(ensureOpenclawGateway(34124, 'fixture-gateway')).rejects.toThrow('changed during gateway startup');
-  expect(state.envs[0].OPENAI_API_KEY).toBe('fixture-gateway-key'); expect(state.children[0].killed).toBe(true);
+  expect(state.envs[0].OPENAI_API_KEY || null).toBeNull(); expect(state.children[0].killed).toBe(true);
   expect(existsSync(join(state.dir, 'openclaw-gateway-policy'))).toBe(false);
   await ensureOpenclawGateway(34124, 'fixture-gateway');
   expect(state.envs[1].OPENAI_API_KEY || null).toBeNull(); expect(existsSync(join(state.dir, 'openclaw-gateway-policy'))).toBe(true);

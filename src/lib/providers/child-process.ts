@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { assertChildArguments, childEnvironmentContext, refreshChildEnvironment, stampChildPolicy } from './spawn-environment';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
-import { assertOwnedArtifactsForLaunch } from './owned-artifacts';
+import { assertLegacyRuntimeConfigSelection } from './legacy-runtime-config';
 export type * from 'node:child_process';
 
 /** Keychain bootstrap cannot read the provider store it unlocks. Inherit nothing. */
@@ -41,7 +41,7 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    assertOwnedArtifactsForLaunch(env, args);
+    if (context?.runtimeId || context?.runtimeLaunch) assertLegacyRuntimeConfigSelection(context.runtimeId, env, args);
     stampChildPolicy(env);
     return create(env);
   };

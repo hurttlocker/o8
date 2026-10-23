@@ -45,8 +45,8 @@ it.each(['openrouter', 'codex-subscription'])('preserves explicit %s gateway tra
 
 it.each(['', 'fixture-ambient-xai'])('preserves an explicit unmanaged key through the resolver when ambient is %s', ambient => {
   vi.stubEnv('XAI_API_KEY', ambient);
-  saveRuntimeBillingMode('hermes', 'api');
-  expect(providerSpawnEnvironment({ XAI_API_KEY: 'fixture-explicit-xai' }, { runtimeId: 'hermes' }).XAI_API_KEY).toBe('fixture-explicit-xai');
+  saveRuntimeBillingMode('gemini', 'api');
+  expect(providerSpawnEnvironment({ XAI_API_KEY: 'fixture-explicit-xai' }, { runtimeId: 'gemini' }).XAI_API_KEY).toBe('fixture-explicit-xai');
 });
 
 it.each(['enabled', 'disabled', 'removed'])('preserves a freshly authorized OpenRouter carrier when Anthropic is %s', state => {

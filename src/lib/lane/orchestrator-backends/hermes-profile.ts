@@ -1,5 +1,6 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
-import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertNewRuntimeProfile } from '@/lib/providers/legacy-runtime-config';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Governed Hermes profile — the #1075 orchestrator≠worker lockout for Hermes.
@@ -20,7 +21,7 @@ import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
  */
 
 import { execFileSync } from '@/lib/providers/child-process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -53,7 +54,12 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   if (!existsSync(join(userDir, 'config.yaml'))) return null; // hermes not set up
 
   const home = governedHermesHome();
+  assertNewRuntimeProfile(home);
   const governedHermes = join(home, '.hermes');
+  for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) {
+    const from = join(userDir, file);
+    if (existsSync(from)) assertRuntimeConfigText(from, readFileSync(from, 'utf8'), 'hermes');
+  }
   mkdirSync(governedHermes, { recursive: true });
 
   // Carry the operator's own config + credentials (their provider, not ours).
@@ -62,7 +68,6 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
     if (existsSync(src)) {
       copyRuntimeConfigFile(src, join(governedHermes, file), 'hermes');
     }
-    reconcileRuntimeConfigFile(join(governedHermes, file), 'hermes');
   }
 
   // Apply the deny via Hermes's own CLI against the ISOLATED home — never touches

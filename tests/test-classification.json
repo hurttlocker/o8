@@ -4535,13 +4535,14 @@
       ]
     },
     {
-      "path": "tests/provider-key-model-probe-real-path.test.ts",
+      "path": "tests/provider-key-file-billing-disabled-real-path.test.ts",
       "reasons": [
+        "child-process",
         "real-path"
       ]
     },
     {
-      "path": "tests/provider-key-owned-artifacts-real-path.test.ts",
+      "path": "tests/provider-key-model-probe-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

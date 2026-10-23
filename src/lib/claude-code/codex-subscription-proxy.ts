@@ -1,3 +1,4 @@
+import { assertRuntimeConfigText } from '@/lib/providers/runtime-config';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
@@ -412,6 +413,7 @@ async function seedNativeWorkerCredentials(
     throw new ClaudeCodeWorkerAuthenticationError('No live Claude OAuth credential was available to seed.');
   }
   const destCredentialsPath = path.join(configDir, '.credentials.json');
+  assertRuntimeConfigText(sourceCredentialsPath, credentials, 'claude-code');
   await writeFile(destCredentialsPath, credentials, { mode: 0o600 });
   await chmod(destCredentialsPath, 0o600);
 }

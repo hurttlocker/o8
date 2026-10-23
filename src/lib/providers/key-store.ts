@@ -1,6 +1,6 @@
 import { invalidateLaunchPolicy } from './launch-policy';
 import { credentialPolicyChanged } from './policy-events';
-import { purgeOwnedRuntimeArtifacts } from './owned-artifacts';
+import { warnLegacyRuntimeConfigs } from './legacy-runtime-config';
 /** Persisted provider credentials, shared by ordinary Node launch paths. */
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
@@ -128,7 +128,7 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     const lines = raw.split('\n').filter(line => !updates.has(line.split('=')[0].trim()));
     for (const [key, value] of updates) if (value !== null) lines.push(`${key}=${value}`);
     invalidateLaunchPolicy();
-    purgeOwnedRuntimeArtifacts();
+    warnLegacyRuntimeConfigs();
     // Preserve all untouched ciphertext and unrelated lines, including comments.
     temporary = join(dir, `.provider-keys.${randomUUID()}.tmp`);
     writeFileSync(temporary, lines.join('\n'), { mode: 0o600, flag: 'wx' });

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const state = vi.hoisted(() => ({ dir: '' }));
+vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => state.dir }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => {} }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('Fixture has no tools'); } }));
@@ -82,7 +83,8 @@ async function residentTurn(threadId: string, model: string) {
   const output = text?.type === 'text' ? JSON.parse(text.text) as { sessionId: string; model: string; turns: string[]; modelWrites: string[] } : null;
   return { events, output };
 }
-beforeEach(() => { vi.stubEnv('O8_ACP_COMMAND', ''); vi.stubEnv('OPENROUTER_API_KEY', 'fixture-old'); });
+beforeEach(() => {
+  vi.stubEnv('HOME', state.dir); vi.stubEnv('O8_ACP_COMMAND', ''); vi.stubEnv('OPENROUTER_API_KEY', 'fixture-old'); });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force: true }); });
 
 it('replaces cached models when the configured agent changes, including optional enumeration', async () => {
@@ -108,8 +110,8 @@ it('refreshes an unused child after the connection changes and excludes unchecke
 });
 
 it('uses the latest opted-in key for a concrete runtime when hydration happened after ensureSession but before sendTurn', async () => {
-  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('hermes', 'api');
-  const keyedBackend = makeAcpBackend({ id: 'hermes', label: 'Concrete ACP fixture', resolveLaunch: () => localAcpProcessLaunch() });
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('opencode', 'api');
+  const keyedBackend = makeAcpBackend({ id: 'opencode', label: 'Concrete ACP fixture', resolveLaunch: () => localAcpProcessLaunch() });
   connect('default', true);
   keyedBackend.ensureSession(state.dir, 'default', 'key-change');
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-new');

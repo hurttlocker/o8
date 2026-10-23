@@ -61,9 +61,9 @@ it('refuses Codex API mode through the authenticated route while ignoring a stal
   expect(await current.json()).toMatchObject({ mode: 'subscription' });
 });
 it('still delivers saved API credentials to a non-Codex runtime opted in through the billing route', async () => {
-  expect((await billing.POST(request({ runtimeId: 'hermes', mode: 'api' }))).status).toBe(200);
+  expect((await billing.POST(request({ runtimeId: 'gemini', mode: 'api' }))).status).toBe(200);
   const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.OPENAI_API_KEY||"missing")'], {
-    env: childEnvironment({ runtimeId: 'hermes' }), encoding: 'utf8',
+    env: childEnvironment({ runtimeId: 'gemini' }), encoding: 'utf8',
   });
   expect(result).toBe('fixture-codex-saved');
 });

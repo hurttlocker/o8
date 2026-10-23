@@ -1,9 +1,8 @@
 import { providerCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { writeOwnedRuntimeArtifact } from './owned-artifacts';
 
 const PROVIDER_NAMES = new Set(['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_AI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY']);
 const PROVIDERS: Record<string, string> = { openai: 'OPENAI_API_KEY', codex: 'OPENAI_API_KEY', 'openai-codex': 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', 'claude-code': 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY', google: 'GEMINI_API_KEY', gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', groq: 'GROQ_API_KEY' };
@@ -74,12 +73,31 @@ export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: 
 }
 
 export function copyRuntimeConfigFile(source: string, destination: string, runtimeId: string): void {
-  writeOwnedRuntimeArtifact(destination, runtimeId, readFileSync(source, 'utf8'));
+  const raw = readFileSync(source);
+  assertRuntimeConfigText(source, raw.toString('utf8'), runtimeId);
+  // Baseline seeding may create a new file, never rewrite an existing profile.
+  if (!existsSync(destination)) writeFileSync(destination, raw, { flag: 'wx', mode: 0o600 });
 }
 
-/** Reconcile and register existing owned profiles on every preparation. */
-export function reconcileRuntimeConfigFile(file: string, runtimeId: string): void {
-  if (!existsSync(file)) return;
-  if (!lstatSync(file).isFile()) throw new Error('Runtime credential overlays must be regular files.');
-  writeOwnedRuntimeArtifact(file, runtimeId, readFileSync(file, 'utf8'));
+const meaningful = (value: unknown): unknown => {
+  if (value == null || value === '' || typeof value === 'string' && /^\$\{[A-Z_][A-Z0-9_]*\}$/.test(value)) return undefined;
+  if (Array.isArray(value)) return value.map(meaningful).filter(item => item !== undefined);
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, meaningful(item)]).filter(([, item]) => item !== undefined));
+  return value;
+};
+
+/** Reject a credential-bearing source. Never sanitize or repair its contents. */
+export function assertRuntimeConfigText(file: string, raw: string, runtimeId: string): string {
+  const materials = providerCredentialMaterials();
+  const original = file.endsWith('.json') ? parseWithoutSecrets(() => JSON.parse(raw))
+    : file.endsWith('.toml') ? parseWithoutSecrets(() => parseToml(raw))
+      : /\.ya?ml$/.test(file) ? parseWithoutSecrets(() => parseYaml(raw, { logLevel: 'error' }))
+        : Object.fromEntries(raw.split('\n').flatMap(line => {
+          const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+          return match ? [[match[1], match[2]]] : [];
+        }));
+  if (matchesProviderCredential(raw, materials) || JSON.stringify(meaningful(original)) !== JSON.stringify(meaningful(filterRuntimeConfig(original, runtimeId, runtimeId, [], materials)))) {
+    throw new Error('Runtime config contains provider credentials and was left unchanged. File authentication requires #4340.');
+  }
+  return raw;
 }

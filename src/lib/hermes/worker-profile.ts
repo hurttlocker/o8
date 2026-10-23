@@ -1,5 +1,6 @@
-import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { assertRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertNewRuntimeProfile } from '@/lib/providers/legacy-runtime-config';
+import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -20,18 +21,15 @@ function operatorHermesHome(): string {
  */
 export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: string } {
   const hermesHome = path.join(sessionDir, 'hermes-home');
-
-  // Seed once. After the first launch this profile is the durable session
-  // authority; an ACP reconnect must not overwrite worker state from ~/.hermes
-  // or fail merely because the operator later moved their default profile.
-  if (existsSync(path.join(hermesHome, 'config.yaml'))) {
-    for (const file of HERMES_WORKER_PROFILE_FILES) reconcileRuntimeConfigFile(path.join(hermesHome, file), 'hermes');
-    return { hermesHome };
-  }
+  assertNewRuntimeProfile(hermesHome);
 
   const source = operatorHermesHome();
   if (!existsSync(path.join(source, 'config.yaml'))) {
     throw new Error('Hermes worker refused: ~/.hermes/config.yaml is missing. Run `hermes setup` first.');
+  }
+  for (const file of HERMES_WORKER_PROFILE_FILES) {
+    const from = path.join(source, file);
+    if (existsSync(from)) assertRuntimeConfigText(from, readFileSync(from, 'utf8'), 'hermes');
   }
 
   mkdirSync(hermesHome, { recursive: true, mode: 0o700 });
@@ -42,7 +40,6 @@ export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: strin
     if (!existsSync(from)) continue;
     const to = path.join(hermesHome, file);
     copyRuntimeConfigFile(from, to, 'hermes');
-    reconcileRuntimeConfigFile(to, 'hermes');
     try { chmodSync(to, 0o600); } catch { /* best-effort on Windows */ }
   }
   return { hermesHome };

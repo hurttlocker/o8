@@ -1,11 +1,11 @@
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
-import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
-import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
+import { assertRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertNewRuntimeProfile } from '@/lib/providers/legacy-runtime-config';
 export const OPENCLAW_PROFILE = 'o8';
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 export const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
@@ -51,20 +51,6 @@ function governOpenclawAgent(agent: Record<string, unknown>): Record<string, unk
     systemPromptOverride?: unknown;
   };
   return { ...rest, tools };
-}
-
-/** True when the generated o8 profile is current — schema marker + mtime. */
-function o8ProfileIsCurrent(): boolean {
-  if (!existsSync(OPENCLAW_O8_CONFIG)) return false;
-  if (statSync(OPENCLAW_O8_CONFIG).mtimeMs < statSync(OPENCLAW_SOURCE_CONFIG).mtimeMs) {
-    return false;
-  }
-  try {
-    const schema = Number.parseInt(readFileSync(OPENCLAW_PROFILE_SCHEMA_FILE, 'utf8').trim(), 10);
-    return schema === O8_PROFILE_SCHEMA;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -146,9 +132,10 @@ export function buildGovernedO8Profile(source: Record<string, unknown>, o8Entry:
  * the npm/plugins runtime dirs are symlink-borrowed, so the isolated profile
  * can authenticate and load the codex harness.
  *
- * Re-derives whenever the source config is newer OR the schema marker is stale.
+ * Existing profiles are left untouched and deferred to #4340.
  */
 export function prepareOpenclawProfile(gatewayPort: number): void {
+  assertNewRuntimeProfile(OPENCLAW_O8_HOME);
   assertOwnedDirectory(OPENCLAW_O8_HOME);
   assertOwnedFile(OPENCLAW_O8_CONFIG);
   if (!existsSync(OPENCLAW_SOURCE_CONFIG)) {
@@ -158,18 +145,13 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     );
   }
 
+  const source = JSON.parse(assertRuntimeConfigText(OPENCLAW_SOURCE_CONFIG, readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8'), 'openclaw')) as Record<string, unknown>;
   mkdirSync(OPENCLAW_O8_HOME, { recursive: true });
   // The plugin runtime (incl. the codex agent-runtime) is symlink-borrowed —
   // ensured every call (cheap), even when the config itself is up to date.
   linkProfileDir('npm');
   linkProfileDir('plugins');
 
-  if (o8ProfileIsCurrent()) {
-    reconcileOpenclawCredentials();
-    return; // Config up to date.
-  }
-
-  const source = JSON.parse(readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8')) as Record<string, unknown>;
   const sourceAgents = (source.agents as Record<string, unknown> | undefined) ?? {};
   const sourceAgentList = Array.isArray(sourceAgents.list)
     ? (sourceAgents.list as Array<Record<string, unknown>>)
@@ -200,7 +182,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8, gatewayPort,
   );
 
-  writeOwnedRuntimeArtifact(OPENCLAW_O8_CONFIG, 'openclaw', JSON.stringify(o8Config));
+  writeFileSync(OPENCLAW_O8_CONFIG, assertRuntimeConfigText(OPENCLAW_O8_CONFIG, JSON.stringify(o8Config), 'openclaw'), { flag: 'wx', mode: 0o600 });
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
   // unrecognized keys inside its own config).
   mkdirSync(getDataDir(), { recursive: true });
@@ -214,11 +196,10 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
   // then the next regen pastes the source's DEAD token back over the o8
   // profile's working one ("Your refresh token has already been used…",
   // live-hit during the runtime sweep). Copy only when the destination is
-  // missing OR the source file is strictly newer (= the operator re-logged-in
-  // at the source profile and we should adopt the fresh credential).
-  const seedIfMissingOrNewer = (srcFile: string, destFile: string): void => {
+  // missing. Existing profiles and their tokens are never reconciled here.
+  const seedIfMissing = (srcFile: string, destFile: string): void => {
     if (!existsSync(srcFile)) return;
-    if (existsSync(destFile) && statSync(srcFile).mtimeMs <= statSync(destFile).mtimeMs) return;
+    if (existsSync(destFile)) return;
     assertOwnedDirectory(join(destFile, '..')); assertOwnedFile(destFile);
     mkdirSync(join(destFile, '..'), { recursive: true });
     copyRuntimeConfigFile(srcFile, destFile, 'openclaw');
@@ -243,38 +224,13 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     const srcAgentDir = join(OPENCLAW_SOURCE_HOME, 'agents', agentId, 'agent');
     const destAgentDir = join(OPENCLAW_O8_HOME, 'agents', agentId, 'agent');
     for (const file of ['auth-profiles.json', 'auth-state.json']) {
-      seedIfMissingOrNewer(join(srcAgentDir, file), join(destAgentDir, file));
+      seedIfMissing(join(srcAgentDir, file), join(destAgentDir, file));
     }
   }
 
-  reconcileOpenclawCredentials();
   console.log(`[openclaw-orchestrator] Wrote o8 profile config to ${OPENCLAW_O8_CONFIG}`);
 }
 
-
-function reconcileOpenclawCredentials(): void {
-  assertOwnedDirectory(OPENCLAW_O8_HOME);
-  reconcileRuntimeConfigFile(OPENCLAW_O8_CONFIG, 'openclaw');
-  const reconcile = (dir: string): void => {
-    if (!existsSync(dir)) return;
-    if (!lstatSync(dir).isDirectory()) throw new Error('OpenClaw credential overlays must be owned directories.');
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const file = join(dir, entry.name);
-      if (entry.isSymbolicLink()) throw new Error('OpenClaw credential overlays cannot follow links.');
-      if (entry.isDirectory()) reconcile(file);
-      else if (entry.isFile() && entry.name.endsWith('.json')) reconcileRuntimeConfigFile(file, 'openclaw');
-    }
-  };
-  reconcile(join(OPENCLAW_O8_HOME, 'credentials'));
-  const agents = join(OPENCLAW_O8_HOME, 'agents');
-  assertOwnedDirectory(agents);
-  if (existsSync(agents)) for (const entry of readdirSync(agents, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) throw new Error('OpenClaw owned credential directories cannot follow links.');
-    if (!entry.isDirectory()) continue;
-    assertOwnedDirectory(join(agents, entry.name, 'agent'));
-    for (const name of ['auth-profiles.json', 'auth-state.json']) reconcileRuntimeConfigFile(join(agents, entry.name, 'agent', name), 'openclaw');
-  }
-}
 
 function existingEntry(file: string) {
   try { return lstatSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
@@ -294,7 +250,7 @@ function assertOwnedFile(file: string): void {
   if (entry && !entry.isFile()) throw new Error('OpenClaw owned credential files cannot follow links.');
 }
 
-/** Sanitize JSON before creating any owned destination, including nested credentials. */
+/** Seed only new files whose original bytes contain no provider credentials. */
 function copyOpenclawCredentials(source: string, destination: string): void {
   mkdirSync(destination, { recursive: true, mode: 0o700 });
   for (const entry of readdirSync(source, { withFileTypes: true })) {
@@ -303,7 +259,6 @@ function copyOpenclawCredentials(source: string, destination: string): void {
     assertOwnedDirectory(destination);
     if (!entry.isDirectory()) assertOwnedFile(to);
     if (entry.isDirectory()) copyOpenclawCredentials(from, to);
-    else if (entry.isFile() && entry.name.endsWith('.json')) copyRuntimeConfigFile(from, to, 'openclaw');
-    else if (entry.isFile()) copyFileSync(from, to);
+    else if (entry.isFile()) copyRuntimeConfigFile(from, to, 'openclaw');
   }
 }

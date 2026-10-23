@@ -249,7 +249,7 @@ export class AcpClient {
     // see below.
     const launch = cliInvocation(opts.command, opts.args);
     this.viaInterpreter = spawnsViaInterpreter(opts.command);
-    const env = childEnvironment({ runtimeId: opts.runtimeId, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+    const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
     this.credentialRuntimeId = opts.runtimeId;
     this.credentialPolicy = childEnvironmentContext(env)?.policy;
     this.proc = spawn(launch.command, launch.args, {

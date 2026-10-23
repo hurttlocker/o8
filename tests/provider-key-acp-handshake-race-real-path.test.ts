@@ -18,14 +18,14 @@ it.each(['remove', 'subscription'])('rejects a first prompt after real API %s wh
   const dir = join(state.dir, action); mkdirSync(dir);
   const ready = join(dir, 'ready'); const release = join(dir, 'release'); const prompted = join(dir, 'prompted');
   const peer = `const fs=require('node:fs');const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='initialize')send({jsonrpc:'2.0',id:m.id,result:{protocolVersion:1}});else if(m.method==='session/new'){fs.writeFileSync(${JSON.stringify(ready)},'ready');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);send({jsonrpc:'2.0',id:m.id,result:{sessionId:'fixture'}});}},10);}else if(m.method==='session/prompt'){fs.writeFileSync(${JSON.stringify(prompted)},'prompt');send({jsonrpc:'2.0',id:m.id,result:{stopReason:'end_turn'}});}else if(m.id)send({jsonrpc:'2.0',id:m.id,result:{}});});`;
-  expect((await billing.POST(request('runtime/billing', { runtimeId: 'acp', mode: 'api' }))).status).toBe(200);
+  expect((await billing.POST(request('runtime/billing', { runtimeId: 'opencode', mode: 'api' }))).status).toBe(200);
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-handshake-provider' }))).status).toBe(200);
-  const backend = makeAcpBackend({ id: 'acp', label: 'Fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
+  const backend = makeAcpBackend({ id: 'opencode', label: 'Fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
   const events: OrchestratorEvent[] = [];
   const turn = backend.sendTurn(dir, 'Fixture', event => events.push(event), { threadId: action });
   try {
     await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 5_000 });
-    const result = action === 'remove' ? await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE')) : await billing.POST(request('runtime/billing', { runtimeId: 'acp', mode: 'subscription' }));
+    const result = action === 'remove' ? await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE')) : await billing.POST(request('runtime/billing', { runtimeId: 'opencode', mode: 'subscription' }));
     expect(result.status).toBe(200);
   } finally { writeFileSync(release, 'release'); }
   await turn;

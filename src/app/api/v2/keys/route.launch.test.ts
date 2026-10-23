@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -98,8 +98,8 @@ beforeEach(() => {
   for (const name of [...keys, ...aliases]) vi.stubEnv(name, `fixture-ambient-${name}`);
   vi.stubEnv('XAI_API_KEY', 'fixture-unmanaged-xai'); vi.stubEnv('NOUS_API_KEY', 'fixture-unmanaged-nous');
   const hermes = join(state.dir, 'operator-hermes'); mkdirSync(hermes, { recursive: true });
-  writeFileSync(join(hermes, 'config.yaml'), 'model:\n  provider: openai\n  api_key: fixture-stale-profile\n');
-  writeFileSync(join(hermes, '.env'), 'OPENAI_API_KEY=fixture-stale-profile\nLLM_API_KEY=fixture-stale-profile\n');
+  writeFileSync(join(hermes, 'config.yaml'), 'model:\n  provider: openai\n');
+  writeFileSync(join(hermes, '.env'), 'SEARCH_API_KEY=fixture-unrelated-search\n');
   vi.stubEnv('HERMES_HOME', hermes);
   writeFileSync(join(state.dir, '.env.local'), '');
   rmSync(join(state.dir, 'runtime-billing'), { recursive: true, force: true });
@@ -112,20 +112,22 @@ const cases = [...[...generic, ...declarative].flatMap(runtime => ['direct', 'br
 it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys persisted %s for all provider families', async (runtime, mode, action) => {
   state.runtime = runtime;
   const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(runtime === 'codex' ? 409 : 200);
+  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(['codex', 'hermes'].includes(runtime) ? 409 : 200);
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', mode === 'bridge' ? '0' : '1');
   for (const provider of providers) {
     await changeProvider(provider, { key: `fixture-saved-${provider}` });
     if (action !== 'enabled') await changeProvider(provider, action === 'disable' ? { enabled: false } : { key: null });
   }
   const result = await modules[runtime].launch({ cwd: repo, prompt: 'fixture', runtimeConfig: { museConfigRoot: join(state.dir, 'muse-config'), museDataRoot: join(state.dir, 'muse-data') } } as never);
+  if (runtime === 'hermes') {
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).toContain('#4340');
+    expect(state.envs).toEqual([]);
+    return;
+  }
   expect(result).toMatchObject({ ok: true });
   expect(state.envs.length).toBeGreaterThan(0);
   for (const env of state.envs) {
-    if (runtime === 'hermes' && action !== 'enabled') {
-      expect(readFileSync(join(env.HERMES_HOME!, '.env'), 'utf8')).not.toContain('fixture-stale-profile');
-      expect(readFileSync(join(env.HERMES_HOME!, 'config.yaml'), 'utf8')).not.toContain('fixture-stale-profile');
-    }
     for (const [index, key] of keys.entries()) {
       const enabled = runtime !== 'codex' && action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(enabled ? `fixture-saved-${providers[index]}` : null);
@@ -149,8 +151,8 @@ it('Windows owned launch uses direct spawn when the POSIX bridge is enabled', as
 });
 it('ACP launch retains an explicit unmanaged provider override instead of an ambient key', async () => {
   const { AcpClient } = await import('@/lib/acp/client');
-  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('hermes', 'api');
-  const client = new AcpClient({ runtimeId: 'hermes', command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
+  vi.stubEnv('HERMES_HOME', '');
+  const client = new AcpClient({ runtimeId: 'grok', command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
   expect(state.envs.at(-1)?.XAI_API_KEY).toBe('fixture-explicit-xai');
   client.kill();
 });
@@ -178,7 +180,7 @@ it.each(['codex', 'claude-code'])('%s API billing requests preserve the supporte
   state.runtime = runtime;
   const billing = await import('@/app/api/runtime/billing/route');
   const url = 'http://localhost/api/runtime/billing';
-  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(runtime === 'codex' ? 409 : 200);
+  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(['codex', 'hermes'].includes(runtime) ? 409 : 200);
   expect(await (await billing.GET(new NextRequest(`${url}?runtimeId=${runtime}`, { headers: { host: 'localhost' } }))).json()).toMatchObject({ mode: runtime === 'codex' ? 'subscription' : 'api' });
   expect((await routes.POST(request('POST', runtime === 'codex' ? 'openai' : 'anthropic', { key: 'fixture-billed-api' }))).status).toBe(200);
   expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });

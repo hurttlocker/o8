@@ -33,7 +33,7 @@ export function providerCanonicalName(input: Record<string, string | undefined>,
   return Object.entries(PROVIDER_KEY_ALIASES).find(([, aliases]) => aliases.includes(name))?.[0] ?? (providerCredentialName(name) ? name : null);
 }
 
-export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; onlyExisting?: boolean; omitEnv?: readonly string[] };
+export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; runtimeLaunch?: boolean; onlyExisting?: boolean; omitEnv?: readonly string[] };
 type Context = SpawnOptions & { deniedValues?: readonly string[]; policy?: string; transport?: Record<string, string>; brokerKey?: string };
 const contexts = new WeakMap<object, Context>();
 const observedSecrets = new Set<string>();

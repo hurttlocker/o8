@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { PickerMenu } from './dispatch-shared';
 import { SettingsRow } from './grouped';
+import { runtimeApiBillingUnavailable } from '@/lib/providers/runtime-billing-capabilities';
 
 type BillingMode = 'subscription' | 'api';
 export function RuntimeBillingRow({ runtimeId }: { runtimeId: string }) {
@@ -26,7 +27,8 @@ export function RuntimeBillingRow({ runtimeId }: { runtimeId: string }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
-  if (runtimeId === 'codex') return <SettingsRow label="Who pays" subtitle={<>API billing for Codex is not available yet. <a href="https://github.com/hurttlocker/o8/issues/4334" target="_blank" rel="noreferrer" style={{ color: 'var(--t-text)' }}>Track #4334</a></>} accessory={<span style={{ color: 'var(--t-text-muted)' }}>CLI subscription</span>} divider />;
+  const unavailable = runtimeApiBillingUnavailable(runtimeId);
+  if (unavailable) return <SettingsRow label="Who pays" subtitle={<>API billing for {unavailable.label} is not available yet. <a href={unavailable.url} target="_blank" rel="noreferrer" style={{ color: 'var(--t-text)' }}>Track #{unavailable.issue}</a></>} accessory={<span style={{ color: 'var(--t-text-muted)' }}>CLI subscription</span>} divider />;
   return <>
     <SettingsRow label="Who pays" subtitle={mode === 'api' ? 'Your API account pays when this runtime uses a saved key. Applies to new launches.' : 'Your CLI account or subscription pays. o8 does not send saved API keys. Applies to new launches.'}
       accessory={<PickerMenu<BillingMode> value={mode ?? 'subscription'} options={[{ value: 'subscription', label: 'CLI subscription' }, { value: 'api', label: 'My API key' }]} disabled={busy || mode === null} onChange={value => { void save(value); }} minWidth={150} />} divider />
