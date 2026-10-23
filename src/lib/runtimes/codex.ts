@@ -373,6 +373,7 @@ export const codexRuntime: AgentRuntime = {
       ok: result.ok,
       note: result.note,
       sessionKey: result.surfaceId,
+      sideEffect: result.sideEffect,
     };
   },
 

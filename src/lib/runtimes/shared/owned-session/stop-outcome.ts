@@ -24,6 +24,7 @@ export function registerOwnedStopHandler(
     if (!run || !expected.id || run.id !== expected.id
       || run.pid !== expected.pid || run.tmuxSession !== expected.tmuxSession
       || run.processMarker !== expected.processMarker
+      || JSON.stringify(run.processIdentity) !== JSON.stringify(expected.processIdentity)
       || run.processGroupId !== expected.processGroupId) {
       return {
         attempted: false, confirmedDead: false, alreadyDead: false, steps: [],

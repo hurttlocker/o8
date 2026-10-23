@@ -50,6 +50,17 @@ Additional dependencies: `codex-subscription-proxy.ts:247` uses ignore/file/file
 
 ## What restart ends today
 
+Slice 1 native ownership contract: `supervise_next_sidecar` registers the PID
+returned by the bundled Node server's `Child::id()`. Its generic restart loop
+registers the replacement server's `Child::id()`. The only two production callers
+are `spawn_and_supervise_bundled_next` and `spawn_and_supervise_bundled_ws`;
+their commands run the bundled Node binary with the respective server entry.
+Neither Node worker launch nor its PID crosses into this registry. On Unix the
+quit and update cleanup signals these positive PIDs, never their process groups.
+Detached Codex packet workers therefore survive this native cleanup boundary.
+`tests/native-worker-shutdown-contract.test.ts` pins both registration sources,
+both callers, replacement registration, and the TERM/KILL argument boundary.
+
 - [Native startup](../../src-tauri/src/lib.rs#L6920) starts bundled Next and WS children with ordinary `Command::spawn`, no new session/group. Next stdout/stderr go directly to append logs (null fallback); WS stdout/stderr are pipes read by native capture threads into logs. Stdin is inherited. Registered sidecar PIDs are watched by native threads that can respawn them.
 - [Native exit](../../src-tauri/src/lib.rs#L9334), panic and signal cleanup use [sidecar lifecycle](../../src-tauri/src/sidecar_lifecycle.rs#L248): TERM each positive registered server PID, wait one second, then KILL survivors. This Unix path is not a recursive process-group kill. Comments about group termination do not establish that every child receives TERM. An already verified desktop-attached daemon is explicitly left running. Update `RestartSafety` calls the same cleanup after admission.
 - [WS shutdown](../../src/ws-server.ts#L9947) explicitly calls every attachment's PTY `kill()`, disposes the terminal host and exits within three seconds. Installed node-pty's Unix `kill()` defaults to SIGHUP. Killing a tmux attach client leaves its backing session alive; a plain shell loses its actual terminal.
@@ -59,7 +70,21 @@ Additional dependencies: `codex-subscription-proxy.ts:247` uses ignore/file/file
 
 ## Existing durable state and gaps
 
-Owned sessions persist surface, lane, packet, provider thread, run identity, prepared/started spawn journal, PID, process group, inherited marker, output paths, outcome and child-exit evidence. [Lane reconciliation](../../src/lib/lane/reconcile.ts#L339) preserves a lane whose session is rediscovered. Its ordinary [liveness helper](../../src/lib/runtimes/shared/owned-session/helpers.ts#L371) still accepts any live PID; marker/group checks used before signaling do not make that reattachment check safe against PID reuse. There is no kernel process start cookie in `OwnedRunRecord`.
+At the inventory baseline, owned sessions persisted surface, lane, packet,
+provider thread, run identity, prepared/started spawn journal, PID, process group,
+inherited marker, output paths, outcome and child-exit evidence, but no kernel
+start cookie. Slice 1 adds boot identity plus kernel process start time for
+detached Codex packets. On macOS the bundled native helper reads
+`PROC_PIDTBSDINFO` seconds/microseconds and `kern.bootsessionuuid`; display time
+from `ps` is insufficient. Capture brackets the run-marker check with matching
+kernel probes. Startup rebind and Stop require the persisted identity. Missing,
+unreadable or mismatched live identity holds the record, including orphan sweeps;
+it cannot fall back to PID or cwd. An uncertain initial launch retains an
+outcome-unknown receipt so an exact mutation retry cannot start a second worker.
+Strict Stop rechecks the live leader before each group signal. If that leader
+exits or a descendant escapes its group, Stop may remain unconfirmed: this slice
+does not signal descendant PIDs without start identities. Supervisor-owned tree
+identity and exit receipts remain later work.
 
 Orchestrator turn records retain session name, thread/message identity, PID, log paths, byte offset and settlement; rehydrated liveness uses PID plus a wall-clock ceiling. Interactive session maps, pipe handles and pending requests are memory-only. Owned ACP persists remote session/thread ID and `rpcPid`, but `retireUnattachedProcess` explicitly terminates an unattached survivor before launching another transport. Pi persists session ID/file and logs, but its live RPC client is memory-only. Dashboard tabs have a stable owner-key-derived tmux name and tmux scrollback. Managed runs also persist pane/group/marker, logs and exit receipts.
 

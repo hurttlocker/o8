@@ -74,6 +74,7 @@ describe('owned Stop outcome transaction', () => {
   it.each([
     { id: 'successor' }, { id: undefined }, { pid: 43 }, { processGroupId: 43 },
     { processMarker: 'successor-marker' }, { tmuxSession: 'successor-bridge' },
+    { processIdentity: { version: 1 as const, platform: 'darwin' as const, bootId: 'boot', startId: 'kernel:1:000001' } },
   ])('refuses changed or missing exact-run evidence %j', async (change) => {
     const operation = vi.fn(async () => delivered);
     expect(await withOwnedStopOutcome(surfaceId, { ...expected, ...change }, operation))

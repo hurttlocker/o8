@@ -25,10 +25,13 @@ import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
 import { readOwnedSessionMetadata } from './owned-session/metadata-read';
 import type { OwnedSessionRecord } from './owned-session/types';
+import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 
 export interface OwnedActiveRun {
   id?: string;
   pid?: number;
+  processIdentity?: MetadataLockProcessIdentity;
+  processIdentityRequired?: boolean;
   processGroupId?: number;
   tmuxSession?: string;
   commandIdentity?: string;
@@ -168,7 +171,7 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
   await Promise.all(entries.map(async (entry) => {
     if (!entry.isDirectory()) return;
     const metadataPath = path.join(root, entry.name, 'session.json');
-    let parsed: { surfaceId?: string; activeRun?: OwnedActiveRun };
+    let parsed: { surfaceId?: string; packetId?: string; activeRun?: OwnedActiveRun };
     try {
       parsed = await readOwnedSessionMetadata(metadataPath);
       if (!parsed || typeof parsed.surfaceId !== 'string') throw new Error('Missing owned session identity.');
@@ -180,6 +183,10 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
       ? {
           id: typeof parsed.activeRun.id === 'string' ? parsed.activeRun.id : undefined,
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
+          processIdentity: parsed.activeRun.processIdentity,
+          ...((parsed.activeRun.processIdentityRequired || (process.platform !== 'win32'
+            && parsed.surfaceId.startsWith('codex-owned:') && Boolean(parsed.packetId) && !parsed.activeRun.tmuxSession))
+            ? { processIdentityRequired: true } : {}),
           processGroupId: typeof parsed.activeRun.processGroupId === 'number'
             ? parsed.activeRun.processGroupId
             : undefined,

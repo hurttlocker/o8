@@ -1,4 +1,4 @@
-Design for #4229. No runtime changes.
+Design for #4229; Codex packet identity/rebind slice implemented.
 
 Owned CLI workers already detach to files. Direct PTYs and RPC sessions still depend on server I/O.
 
@@ -10,6 +10,6 @@ Persist surface/run/lane/provider session IDs, worker/supervisor PIDs, boot ID a
 
 Target restart: close mutation admission; drain only git/publication. Journal intent, child identity and settlement. Recover crashed/pre-Git intents within 30s using monotonic deadlines and outcome reconciliation (#4189). Live operations defer restart; unknown publication is reconciled before retry.
 
-First slice: Codex packet launch, strict identity and survivor rebind. Out: other RPC migrations, native voice, Windows/Linux, global idle-guard removal until all paths pass.
+First slice: Codex packets, kernel identity and survivor rebind. Out: other RPC migrations, native voice, Windows/Linux, global idle-guard removal until all paths pass.
 
 Proof: real launch route -> worker -> TERM/KILL server -> fresh server; same PID/start, session and lane, growing transcript, no duplicate. Test PID reuse, offline output, stop after reattach, and crash before Git/publication.
