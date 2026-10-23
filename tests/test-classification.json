@@ -4020,6 +4020,16 @@
       ]
     },
     {
+      "path": "tests/packet-clone-refs-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/packet-discard-missing-worktree-real-path.test.ts",
       "reasons": [
         "real-path",

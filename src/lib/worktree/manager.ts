@@ -35,6 +35,7 @@ import type {
   WorkspaceIsolationPreference,
 } from './types';
 import { getApfsCowCapability } from './apfs';
+import { finalizeCloneBranchRefs } from './clone-branch-refs';
 import { worktreeActivityMtimeMs } from './activity';
 import {
   readWorktreeMetaSnapshot,
@@ -815,6 +816,8 @@ export class WorktreeManager {
           throw err;
         }
       }
+
+      await finalizeCloneBranchRefs(this.repoRoot, worktreePath, branchName, baseBranch, Boolean(originUrl));
 
       // #1132 — Reset to HEAD so operator WIP can't leak into the agent's
       // commit. Cheap belt-and-braces against any path that could have
@@ -2520,9 +2523,9 @@ export class WorktreeManager {
     // If HEAD is already an ancestor of base, the work is merged — o8 rebases
     // before merge, so a merged branch fast-forwards into base. Nothing to do.
     try {
-      await execFileAsync('git', ['merge-base', '--is-ancestor', 'HEAD', base], {
+      await execFileAsync('git', ['merge-base', '--is-ancestor', headSha, base], {
         windowsHide: true,
-        cwd: worktreePath,
+        cwd: isolationKind === 'apfs-cow-clone' ? this.repoRoot : worktreePath,
         timeout: 10_000,
       });
       return 'clean'; // exit 0 → HEAD ⊆ base
