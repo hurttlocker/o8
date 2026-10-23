@@ -1,4 +1,4 @@
-import { guardedWorkspaceInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { guardedWorkspaceReadScriptInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import type { DependencyInstallRecipe } from './dependency-install';
 import { RECIPE_CONFIG_NAMES } from './dependency-manager-config';
@@ -46,7 +46,7 @@ console.log(JSON.stringify({matches, tree}));
 export function dependencyCloneSourceMatcher(sourceWorkspace: string, identity: WorktreeMaterializationIdentity, recipe: DependencyInstallRecipe, requireSameTree: boolean) {
   let sourceTree: string | undefined;
   return async () => {
-    const invocation = guardedWorkspaceInvocation(process.execPath, ['-e', CHECK_SOURCE_RECIPE,
+    const invocation = guardedWorkspaceReadScriptInvocation(CHECK_SOURCE_RECIPE, [
       JSON.stringify({ recipe, configNames: [...RECIPE_CONFIG_NAMES], sourceTree, requireSameTree }),
     ], identity);
     const result = await materializationAwareExecFile(invocation.command, invocation.args, { cwd: sourceWorkspace, timeout: 10_000 });

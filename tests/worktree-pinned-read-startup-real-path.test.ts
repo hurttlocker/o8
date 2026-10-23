@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, linkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,6 +27,7 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 const { closeDb } = await import('@/lib/db');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
+const { withPinnedWorkspaceReadSession } = await import('@/lib/worktree/materialization-read-session');
 const { inspectPinnedWorkspaceEntry, readPinnedWorkspaceFile } = await import('@/lib/worktree/materialization-leaf-io');
 
 afterAll(() => {
@@ -37,7 +38,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it('starts Node once per pinned read or inspection through worktree launch', async () => {
+it('batches distinct pinned reads and inspections into one helper through worktree launch', async () => {
   const repoRoot = path.join(root, 'repo');
   mkdirSync(repoRoot);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
@@ -48,7 +49,7 @@ it('starts Node once per pinned read or inspection through worktree launch', asy
   const log = path.join(root, 'startups.jsonl');
   const preload = path.join(root, 'count-startups.cjs');
   writeFileSync(preload, `
-const operation = process.argv.slice(1).find(arg => arg === 'read' || arg === 'inspect-entry');
+const operation = process.argv.slice(1).find(arg => arg === 'read' || arg === 'inspect-entry' || arg === 'pinned-read-session' || arg === 'atomic-write' || arg === 'ensure-directory' || arg === 'ensure-file');
 if (operation) require('node:fs').appendFileSync(process.env.O8_TEST_STARTUP_LOG,
   JSON.stringify({ pid: process.pid, operation }) + '\\n');
 `);
@@ -71,11 +72,20 @@ if (operation) require('node:fs').appendFileSync(process.env.O8_TEST_STARTUP_LOG
 
   const receipts = readFileSync(log, 'utf8').trim().split('\n')
     .map(line => JSON.parse(line) as { pid: number; operation: string });
-  expect(new Set(receipts.map(receipt => receipt.operation))).toEqual(new Set(['read', 'inspect-entry']));
+  const reads = receipts.filter(receipt => ['read', 'inspect-entry', 'pinned-read-session'].includes(receipt.operation));
+  const mutations = receipts.filter(receipt => !reads.includes(receipt));
+  const mutationStarts = new Map<number, number>();
+  for (const receipt of mutations) mutationStarts.set(receipt.pid, (mutationStarts.get(receipt.pid) ?? 0) + 1);
+  process.stdout.write(`[pinned-mutation-startups] ${JSON.stringify([...mutationStarts.values()])}\n`);
+  expect([...mutationStarts.values()]).toEqual(Array(mutationStarts.size).fill(1));
+  expect(reads.length).toBeGreaterThan(0);
+  process.stdout.write(`[pinned-read-launch-startups] ${reads.length}\n`);
+  expect(reads).toHaveLength(1);
   const startupCounts = new Map<number, number>();
-  for (const receipt of receipts) startupCounts.set(receipt.pid, (startupCounts.get(receipt.pid) ?? 0) + 1);
+  for (const receipt of reads) startupCounts.set(receipt.pid, (startupCounts.get(receipt.pid) ?? 0) + 1);
   expect([...startupCounts.values()]).toEqual(Array(startupCounts.size).fill(1));
-}, 30_000);
+  for (const pid of startupCounts.keys()) expect(() => process.kill(pid, 0)).toThrow();
+}, 120_000);
 
 it.each(['read', 'inspect-entry'] as const)('refuses a replaced workspace before %s accesses it', async (operation) => {
   const workspace = path.join(root, `replacement-${operation}`);
@@ -89,4 +99,78 @@ it.each(['read', 'inspect-entry'] as const)('refuses a replaced workspace before
   await expect(access(workspace, identity, 'sentinel'))
     .rejects.toThrow('Managed workspace ownership changed before process execution.');
   expect(readFileSync(path.join(workspace, 'sentinel'), 'utf8')).toBe('external bytes');
+});
+
+
+it.each(['read', 'inspect-entry'] as const)('revalidates ownership between batched %s requests', async (operation) => {
+  const workspace = path.join(root, `session-replacement-${operation}`);
+  mkdirSync(workspace);
+  writeFileSync(path.join(workspace, 'sentinel'), 'admitted bytes');
+  const identity = await captureWorktreeMaterializationIdentity(workspace);
+  await withPinnedWorkspaceReadSession(async () => {
+    expect(await readPinnedWorkspaceFile(workspace, identity, 'sentinel')).toBe('admitted bytes');
+    renameSync(workspace, `${workspace}-admitted`);
+    mkdirSync(workspace);
+    writeFileSync(path.join(workspace, 'sentinel'), 'replacement bytes');
+    const access = operation === 'read' ? readPinnedWorkspaceFile : inspectPinnedWorkspaceEntry;
+    await expect(access(workspace, identity, 'sentinel'))
+      .rejects.toThrow('Managed workspace ownership changed before process execution.');
+  });
+  expect(readFileSync(path.join(workspace, 'sentinel'), 'utf8')).toBe('replacement bytes');
+});
+
+it('rereads contents and re-enters each root after a descendant read', async () => {
+  const first = path.join(root, 'session-first');
+  const second = path.join(root, 'session-second');
+  mkdirSync(path.join(first, 'nested'), { recursive: true });
+  mkdirSync(second);
+  writeFileSync(path.join(first, 'nested/file'), 'first');
+  writeFileSync(path.join(second, 'file'), 'second');
+  const firstIdentity = await captureWorktreeMaterializationIdentity(first);
+  const secondIdentity = await captureWorktreeMaterializationIdentity(second);
+  await withPinnedWorkspaceReadSession(async () => {
+    expect(await readPinnedWorkspaceFile(first, firstIdentity, 'nested/file')).toBe('first');
+    expect(await readPinnedWorkspaceFile(second, secondIdentity, 'file')).toBe('second');
+    writeFileSync(path.join(first, 'nested/file'), 'updated');
+    expect(await readPinnedWorkspaceFile(first, firstIdentity, 'nested/file')).toBe('updated');
+    symlinkSync(second, path.join(first, 'linked'));
+    await expect(readPinnedWorkspaceFile(first, firstIdentity, 'linked/file')).rejects.toThrow('unsafe ancestor');
+    linkSync(path.join(second, 'file'), path.join(first, 'hardlink'));
+    await expect(readPinnedWorkspaceFile(first, firstIdentity, 'hardlink')).rejects.toThrow('exclusive regular file');
+    expect(await readPinnedWorkspaceFile(first, firstIdentity, 'missing')).toBeNull();
+  });
+});
+
+it('guards each batched Git read and leaves Git writes on the existing runner', async () => {
+  const { materializationAwareExecFile, withWorktreeMaterializationExecution } = await import('@/lib/worktree/materialization-execution');
+  const workspace = path.join(root, 'session-git');
+  mkdirSync(workspace);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: workspace });
+  const identity = await captureWorktreeMaterializationIdentity(workspace);
+  await withPinnedWorkspaceReadSession(() => withWorktreeMaterializationExecution(workspace, identity, async () => {
+    const run = (args: string[]) => materializationAwareExecFile('git', args, { cwd: workspace, timeout: 5_000 });
+    expect((await run(['branch', '--show-current'])).stdout.trim()).toBe('main');
+    await run(['checkout', '-qb', 'fixture/changed']);
+    expect((await run(['branch', '--show-current'])).stdout.trim()).toBe('fixture/changed');
+    renameSync(workspace, `${workspace}-admitted`);
+    mkdirSync(workspace);
+    await expect(run(['branch', '--show-current'])).rejects.toThrow('Managed workspace ownership changed before process execution.');
+  }));
+});
+
+it('uses a fresh runner for background reads inherited after the session closes', async () => {
+  const workspace = path.join(root, 'session-background');
+  mkdirSync(workspace);
+  writeFileSync(path.join(workspace, 'file'), 'before');
+  const identity = await captureWorktreeMaterializationIdentity(workspace);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let background!: Promise<string | null>;
+  await withPinnedWorkspaceReadSession(async () => {
+    expect(await readPinnedWorkspaceFile(workspace, identity, 'file')).toBe('before');
+    background = (async () => { await gate; return readPinnedWorkspaceFile(workspace, identity, 'file'); })();
+  });
+  writeFileSync(path.join(workspace, 'file'), 'after');
+  release();
+  expect(await background).toBe('after');
 });

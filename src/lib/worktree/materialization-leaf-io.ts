@@ -1,14 +1,13 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-import {
-  guardedWorkspaceInvocation,
-  guardedWorkspaceReadScriptInvocation,
-} from './materialization-execution';
+import { guardedWorkspaceScriptInvocation } from './materialization-execution';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
 import { resolveStorageVolumeId } from './storage-telemetry';
 import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit } from './maintenance-budget';
 import { APFS_DIRECTORY_CLONE_SCRIPT } from './apfs-directory-clone';
+import { PINNED_WORKSPACE_PATH_SCRIPT, PINNED_WORKSPACE_READ_SCRIPT } from './materialization-read-script';
+import { tryPinnedWorkspaceRead } from './materialization-read-session';
 
 export interface PinnedWorkspaceFileIdentity {
   device: number;
@@ -34,69 +33,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 ${APFS_DIRECTORY_CLONE_SCRIPT}
 
-function safeRelative(value) {
-  const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '');
-  if (!normalized || path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) {
-    throw new Error('Pinned workspace path is unsafe.');
-  }
-  return normalized;
-}
-
-async function waitForStep(name) {
-  if (process.env.O8_PINNED_STEP_HANDSHAKE !== '1') return;
-  process.stdout.write('O8_PINNED_STEP ' + Buffer.from(name).toString('base64url') + '\n');
-  await new Promise((resolve, reject) => {
-    process.stdin.once('data', () => {
-      process.stdin.pause();
-      resolve();
-    });
-    process.stdin.once('error', reject);
-    process.stdin.resume();
-  });
-}
-
-async function prepareParent(relative, createMissing = true) {
-  const parts = safeRelative(relative).split('/');
-  const leaf = parts.pop();
-  const canonicalRoot = fs.realpathSync('.');
-  for (const part of parts) {
-    let entry;
-    try {
-      entry = fs.lstatSync(part);
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      if (!createMissing) throw error;
-      fs.mkdirSync(part);
-      entry = fs.lstatSync(part);
-    }
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new Error('Pinned workspace destination has an unsafe ancestor.');
-    }
-    await waitForStep(part);
-    process.chdir(part);
-    const captured = fs.lstatSync('.');
-    const canonical = fs.realpathSync('.');
-    const relativeCanonical = path.relative(canonicalRoot, canonical);
-    if (!captured.isDirectory() || captured.isSymbolicLink()
-      || captured.dev !== entry.dev || captured.ino !== entry.ino
-      || relativeCanonical.startsWith('..') || path.isAbsolute(relativeCanonical)) {
-      throw new Error('Pinned workspace ancestor changed during capture.');
-    }
-  }
-  return { parent: '.', leaf, target: leaf };
-}
-
-function readExactHandle(handle, size) {
-  const content = Buffer.alloc(size);
-  let offset = 0;
-  while (offset < size) {
-    const read = fs.readSync(handle, content, offset, size - offset, offset);
-    if (read === 0) throw new Error('Pinned workspace file ended before its receipt.');
-    offset += read;
-  }
-  return content;
-}
-
+${PINNED_WORKSPACE_PATH_SCRIPT}
+${PINNED_WORKSPACE_READ_SCRIPT}
 async function copyFileExact(sourcePath, targetPath) {
   const source = fs.openSync(sourcePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   let target;
@@ -250,62 +188,13 @@ function fingerprintTree(candidatePath, relative = '.') {
 async function main() {
   const operation = process.argv[1];
   const relative = process.argv[2];
-  let prepared;
-  try {
-    prepared = await prepareParent(relative, operation !== 'read' && operation !== 'inspect-entry');
-  } catch (error) {
-    if ((operation === 'read' || operation === 'inspect-entry') && error.code === 'ENOENT') {
-      process.exitCode = 44;
-      return;
-    }
-    throw error;
-  }
-  if (operation === 'read') {
-    try {
-      const handle = fs.openSync(prepared.target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
-      try {
-        const identity = fs.fstatSync(handle);
-        if (!identity.isFile() || identity.nlink !== 1) {
-          throw new Error('Pinned workspace target is not an exclusive regular file.');
-        }
-        const limit = process.argv[3] === undefined ? Infinity : Number(process.argv[3]);
-        if (!Number.isSafeInteger(identity.size) || identity.size > limit) {
-          throw new Error('Pinned workspace metadata exceeds the automatic read allowance.');
-        }
-        const content = readExactHandle(handle, identity.size);
-        const after = fs.fstatSync(handle);
-        if (after.size !== identity.size || after.mtimeMs !== identity.mtimeMs) {
-          throw new Error('Pinned workspace metadata changed during bounded read.');
-        }
-        process.stdout.write(JSON.stringify({
-          content: content.toString('base64'),
-          device: identity.dev,
-          inode: identity.ino,
-          canonicalPath: fs.realpathSync(prepared.target),
-        }));
-      } finally {
-        fs.closeSync(handle);
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      process.exitCode = 44;
-    }
+  if (operation === 'read' || operation === 'inspect-entry') {
+    const receipt = await readPinnedEntry(operation, relative, process.argv[3]);
+    process.stdout.write(receipt.stdout);
+    process.exitCode = receipt.code;
     return;
   }
-  if (operation === 'inspect-entry') {
-    try {
-      const entry = fs.lstatSync(prepared.target);
-      const kind = entry.isSymbolicLink() ? 'symlink'
-        : entry.isDirectory() ? 'directory'
-        : entry.isFile() ? 'file'
-        : 'other';
-      process.stdout.write(JSON.stringify({ kind, device: entry.dev, inode: entry.ino }));
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      process.exitCode = 44;
-    }
-    return;
-  }
+  const prepared = await prepareParent(relative);
   if (operation === 'atomic-write') {
     const injectedContent = process.env.O8_PINNED_ATOMIC_CONTENT;
     const content = injectedContent === undefined
@@ -541,9 +430,11 @@ async function runPinnedLeaf(
     operation, safeRelativePath(relativePath),
     ...(sourceOrTarget ? [sourceOrTarget] : []),
   ];
-  const invocation = operation === 'read' || operation === 'inspect-entry'
-    ? guardedWorkspaceReadScriptInvocation(PINNED_LEAF_IO_SCRIPT, args, identity)
-    : guardedWorkspaceInvocation(process.execPath, ['-e', PINNED_LEAF_IO_SCRIPT, ...args], identity);
+  if ((operation === 'read' || operation === 'inspect-entry') && !afterPinnedStep) {
+    const pending = tryPinnedWorkspaceRead(workspacePath, identity, operation, args.slice(1));
+    if (pending) return pending;
+  }
+  const invocation = guardedWorkspaceScriptInvocation(PINNED_LEAF_IO_SCRIPT, args, identity);
   const child = spawn(invocation.command, invocation.args, {
     cwd: workspacePath,
     env: {

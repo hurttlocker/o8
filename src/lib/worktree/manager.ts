@@ -1009,16 +1009,17 @@ export class WorktreeManager {
       // will land on; rebase onto it when it's ahead. (Diverged histories
       // keep origin — a conflict there is real and must surface.)
       try {
-        const { stdout: aheadRaw } = await execFileAsync(
-          'git',
-          ['rev-list', '--count', `${target}..${baseBranch}`],
-          { windowsHide: true, cwd, timeout: 5000 },
-        );
-        const { stdout: behindRaw } = await execFileAsync(
-          'git',
-          ['rev-list', '--count', `${baseBranch}..${target}`],
-          { windowsHide: true, cwd, timeout: 5000 },
-        );
+        const comparisons = await Promise.allSettled([
+          execFileAsync('git', ['rev-list', '--count', `${target}..${baseBranch}`],
+            { windowsHide: true, cwd, timeout: 5000 }),
+          execFileAsync('git', ['rev-list', '--count', `${baseBranch}..${target}`],
+            { windowsHide: true, cwd, timeout: 5000 }),
+        ]);
+        const [aheadResult, behindResult] = comparisons;
+        if (aheadResult.status === 'rejected') throw aheadResult.reason;
+        if (behindResult.status === 'rejected') throw behindResult.reason;
+        const aheadRaw = aheadResult.value.stdout;
+        const behindRaw = behindResult.value.stdout;
         const ahead = Number.parseInt(aheadRaw.trim(), 10) || 0;
         const behind = Number.parseInt(behindRaw.trim(), 10) || 0;
         if (ahead > 0 && behind === 0) {
