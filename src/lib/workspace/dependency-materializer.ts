@@ -30,6 +30,8 @@ import {
   type DependencyInstallReceipt,
 } from './dependency-install';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
+import { tryCloneDependencyDirectory } from './dependency-directory-clone';
+import { profileDependencyClone } from './dependency-clone-profile';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
 
@@ -48,6 +50,7 @@ export interface DependencyMaterializationReceipt {
   generation: string | null;
   workspaceDevice: number;
   workspaceInode: number;
+  source?: 'directory-clone';
 }
 
 export interface DependencyMaterializationResult {
@@ -111,6 +114,9 @@ export interface DependencyImageProvider {
 export interface DependencyMaterializerOptions extends Pick<DependencyInstallOptions,
   'run' | 'resolveVersion' | 'cacheRoot' | 'now' | 'materializationIdentity'> {
   preparedRecipe?: DependencyInstallRecipe;
+  cloneSourceWorkspace?: string;
+  /** Deterministic race seam after native publication, before source revalidation. */
+  afterDependencyDirectoryClone?: () => Promise<void>;
   imageRegistryRoot?: string;
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
@@ -321,11 +327,11 @@ export async function materializeDependencyInstall(
   options: DependencyMaterializerOptions = {},
 ): Promise<DependencyMaterializationResult> {
   const workspace = path.resolve(workspacePath);
-  const recipe = options.preparedRecipe ?? await deriveDependencyInstallRecipe(
+  const recipe = options.preparedRecipe ?? await profileDependencyClone('recipe', () => deriveDependencyInstallRecipe(
     workspace,
     installCommand,
     { resolveVersion: options.resolveVersion },
-  );
+  ));
   const identity = await dependencyMaterializationWorkspaceIdentity(
     workspace,
     options.materializationIdentity,
@@ -343,6 +349,22 @@ export async function materializeDependencyInstall(
     );
   }
   const imageRequired = Boolean(options.expectedLease || options.exactGenerationRemount);
+  if (!imageRequired && options.cloneSourceWorkspace && await tryCloneDependencyDirectory({
+    sourceWorkspace: options.cloneSourceWorkspace,
+    afterClone: options.afterDependencyDirectoryClone,
+    workspace,
+    identity,
+    recipe,
+    options,
+  })) {
+    const receipt: DependencyMaterializationReceipt = {
+      mode: 'native', status: 'mounted', installCommand, recipeKey: recipe.key,
+      leaseId: null, generation: null, workspaceDevice: identity.device, workspaceInode: identity.inode,
+      source: 'directory-clone',
+    };
+    await options.persistReceipt?.(receipt);
+    return { receipt, installReceipt: null };
+  }
   if ((!enabled && !imageRequired) || platform !== 'darwin'
     || !await isDependencyImageRecipeEligible(workspace, recipe)) {
     if (imageRequired) {

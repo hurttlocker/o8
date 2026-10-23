@@ -7,6 +7,7 @@ import {
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
 import { resolveStorageVolumeId } from './storage-telemetry';
 import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit } from './maintenance-budget';
+import { APFS_DIRECTORY_CLONE_SCRIPT } from './apfs-directory-clone';
 
 export interface PinnedWorkspaceFileIdentity {
   device: number;
@@ -30,6 +31,7 @@ const PINNED_LEAF_IO_SCRIPT = String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+${APFS_DIRECTORY_CLONE_SCRIPT}
 
 function safeRelative(value) {
   const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '');
@@ -451,7 +453,13 @@ async function main() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
+  if (operation === 'clone-tree') {
+    const input = JSON.parse(process.argv[3]);
+    const receipt = await cloneDirectory(input.source, prepared.target);
+    if (!receipt) process.exitCode = 46;
+    else process.stdout.write(JSON.stringify(receipt));
+  }
+  else if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
   else if (operation === 'symlink') {
     fs.symlinkSync(process.argv[3], prepared.target);
     const receipt = fs.lstatSync(prepared.target);
@@ -521,7 +529,7 @@ function safeRelativePath(value: string): string {
 async function runPinnedLeaf(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
-  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'ensure-directory' | 'ensure-file',
+  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree' | 'ensure-directory' | 'ensure-file',
   relativePath: string,
   sourceOrTarget?: string,
   content?: string,
@@ -583,9 +591,9 @@ async function runPinnedLeaf(
   child.stdin.end();
   stdout += pendingStdout;
   if (code === null) throw new Error('Pinned workspace operation ended without an exit receipt.');
-  if (code !== 0 && code !== 44 && code !== 45) {
+  if (code !== 0 && code !== 44 && code !== 45 && !(code === 46 && operation === 'clone-tree')) {
     const message = stderr.trim() || 'Pinned workspace operation failed.';
-    if (operation === 'copy-tree'
+    if (operation === 'copy-tree' || operation === 'clone-tree'
       || (operation === 'copy-file'
         && (message.includes('copied target') || message.includes('target did not match')))
       || (operation === 'symlink' && message.includes('symlink target changed'))
@@ -599,6 +607,10 @@ async function runPinnedLeaf(
       throw new PinnedWorkspacePublishError(message);
     }
     throw new Error(message);
+  }
+  if (operation === 'clone-tree' && process.env.O8_DEPENDENCY_CLONE_PROFILE === '1') {
+    const native = stderr.match(/^\[dependency-clone-native-ms\] (\d+)$/m);
+    if (native) console.log('[dependency-clone-profile]', JSON.stringify({ stage: 'native-directory-clone', durationMs: Number(native[1]) }));
   }
   return { code, stdout };
 }
@@ -728,13 +740,17 @@ export async function createPinnedWorkspaceBinding(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
-  input: { mode: 'copy-file' | 'symlink' | 'copy-tree'; source: string },
+  input: { mode: 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree'; source: string },
   afterPinnedStep?: (segment: string) => Promise<void>,
-): Promise<'created' | 'exists'> {
+): Promise<'created' | 'exists' | 'unsupported'> {
   const receipt = await runPinnedLeaf(
-    workspacePath, identity, input.mode, relativePath, input.source, undefined, afterPinnedStep,
+    workspacePath, identity, input.mode, relativePath,
+    input.mode === 'clone-tree' ? JSON.stringify(input) : input.source, undefined, afterPinnedStep,
   );
-  return receipt.code === 45 ? 'exists' : 'created';
+  if (input.mode === 'clone-tree' && receipt.code === 0 && JSON.parse(receipt.stdout).sourceChanged) {
+    throw new PinnedWorkspacePublishError('Pinned clone source changed during cloning.');
+  }
+  return receipt.code === 46 ? 'unsupported' : receipt.code === 45 ? 'exists' : 'created';
 }
 
 export async function ensurePinnedWorkspaceDirectory(
@@ -755,4 +771,15 @@ export async function ensurePinnedWorkspaceDirectory(
   }
   const result = parsed as WorktreeMaterializationIdentity;
   return { ...result, volumeId: await resolveStorageVolumeId(result.canonicalPath) };
+}
+
+/** The native publication receipt is the only authority for discarding a clone. */
+export async function clonePinnedWorkspaceDirectory(
+  workspacePath: string, identity: WorktreeMaterializationIdentity, relativePath: string, source: string,
+): Promise<{ disposition: 'created'; device: number; inode: number; sourceChanged: boolean } | { disposition: 'exists' | 'unsupported' }> {
+  const result = await runPinnedLeaf(workspacePath, identity, 'clone-tree', relativePath, JSON.stringify({ source }));
+  if (result.code !== 0) return { disposition: result.code === 46 ? 'unsupported' : 'exists' };
+  const receipt = JSON.parse(result.stdout) as { device: number; inode: number; sourceChanged: boolean };
+  if (!Number.isSafeInteger(receipt.device) || !Number.isSafeInteger(receipt.inode)) throw new PinnedWorkspacePublishError('Invalid native clone identity.');
+  return { disposition: 'created', ...receipt };
 }
