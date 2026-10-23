@@ -124,7 +124,8 @@ export async function POST(request: NextRequest) {
             void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
               console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
             });
-            return { initiated: true, async: true, missionId: targetMissionId };
+            return { initiated: true, async: true, missionId: targetMissionId, status: 'queued', queued: admitted.queued,
+              note: 'Dispatch admitted; this response does not confirm a worker launch. Check mission status.' };
           },
         );
         if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
@@ -141,7 +142,8 @@ export async function POST(request: NextRequest) {
       void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
         console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
       });
-      return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId });
+      return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId, status: 'queued', queued: admitted.queued,
+        note: 'Dispatch admitted; this response does not confirm a worker launch. Check mission status.' });
     } catch (error) {
       if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
       if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);

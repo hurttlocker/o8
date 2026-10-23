@@ -2503,6 +2503,14 @@
       ]
     },
     {
+      "path": "tests/dispatch-queue-receipt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dispatch-stale-base-refresh.test.ts",
       "reasons": [
         "child-process",
