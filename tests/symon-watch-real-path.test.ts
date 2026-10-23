@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-watch-data-'));
 const repoPath = mkdtempSync(join(tmpdir(), 'o8-symon-watch-repo-'));
@@ -468,6 +468,151 @@ describe('Symon standing watches through their durable production seams', () => 
       await session.close();
     }
   }, 40_000);
+
+  it.each(['report', 'plan'] as const)('expires a parked %s on phone reconnect without a scheduler tick', async (kind) => {
+    const watch = await createWatch({
+      text: `report packet reconnect-expiry-${kind} before the deadline`,
+      sourceId: `reconnect-expiry-${kind}`,
+      events: ['merged'],
+      then: {
+        kind,
+        say: 'The packet merged.',
+        ...(kind === 'plan' ? { steps: [{ tool: 'o8_status', args: {} }] } : {}),
+      },
+      deadlineMs: 60_000,
+    });
+    firePacketEvent(`reconnect-expiry-${kind}`, 'merged');
+    await tick(Date.now(), `symon-watch-reconnect-expiry-${kind}`);
+    expect(listSymonWatches().find((entry) => entry.id === watch.id)?.state).toBe('parked');
+
+    // Persist the elapsed deadline. The server's scheduler is disabled: only
+    // registering a real phone session can enforce it on the next action.
+    getSqlite().prepare('UPDATE automations SET watch_expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1, watch.id);
+    const session = await openSymonSession(`symon-watch-reconnect-expiry-${kind}`);
+    try {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        if (reportsFor(watch.id, session).length > 0
+          || readSymonWatchLedger(watch.id).some((entry) => entry.phase === 'watch_expired')) break;
+        await settle(50);
+      }
+      expect(reportsFor(watch.id, session)).toHaveLength(0);
+      expect(listSymonWatches().find((entry) => entry.id === watch.id)).toMatchObject({
+        state: 'closed',
+        lastErrorMessage: 'Watch expired.',
+      });
+      expect(readSymonWatchLedger(watch.id).map((entry) => entry.phase))
+        .toEqual(['watch_expired', 'watch_parked', 'watch_registered']);
+      await drainParkedSymonWatches();
+      expect(readSymonWatchLedger(watch.id).filter((entry) => entry.phase === 'watch_expired')).toHaveLength(1);
+    } finally {
+      await session.close();
+    }
+  }, 30_000);
+
+  it('refuses an expired parked plan at the run-claim API before the next tick', async () => {
+    const watch = await createWatch({
+      text: 'run the follow-up before the deadline',
+      sourceId: 'claim-expiry',
+      events: ['merged'],
+      then: { kind: 'plan', say: 'The packet merged.', steps: [{ tool: 'o8_status', args: {} }] },
+      deadlineMs: 60_000,
+    });
+    firePacketEvent('claim-expiry', 'merged');
+    await tick(Date.now(), 'symon-watch-claim-expiry');
+    getSqlite().prepare('UPDATE automations SET watch_expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1, watch.id);
+
+    const response = await watchRoute.GET(new Request(`http://localhost/api/symon/watches/${watch.id}?claim=1`), {
+      params: Promise.resolve({ id: watch.id }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      watch: { state: 'closed', lastErrorMessage: 'Watch expired.' },
+      plan: null,
+      planError: 'this watch has expired',
+    });
+    expect(getSqlite().prepare('SELECT symon_run_claimed_at FROM automations WHERE id = ?').get(watch.id))
+      .toEqual({ symon_run_claimed_at: null });
+    expect(readSymonWatchLedger(watch.id).map((entry) => entry.phase))
+      .toEqual(['watch_expired', 'watch_parked', 'watch_registered']);
+    await watchRoute.GET(new Request(`http://localhost/api/symon/watches/${watch.id}?claim=1`), {
+      params: Promise.resolve({ id: watch.id }),
+    });
+    expect(readSymonWatchLedger(watch.id).filter((entry) => entry.phase === 'watch_expired')).toHaveLength(1);
+  }, 30_000);
+
+  it('still claims an unexpired parked plan once through the run API', async () => {
+    const watch = await createWatch({
+      text: 'run this follow-up before the deadline',
+      sourceId: 'claim-in-time',
+      events: ['merged'],
+      then: { kind: 'plan', say: 'The packet merged.', steps: [{ tool: 'o8_status', args: {} }] },
+      deadlineMs: 60_000,
+    });
+    firePacketEvent('claim-in-time', 'merged');
+    await tick(Date.now(), 'symon-watch-claim-in-time');
+    const request = () => watchRoute.GET(new Request(`http://localhost/api/symon/watches/${watch.id}?claim=1`), {
+      params: Promise.resolve({ id: watch.id }),
+    });
+    expect(await (await request()).json()).toMatchObject({
+      watch: { state: 'parked' },
+      plan: { steps: [{ tool: 'o8_status' }], condition: 'run this follow-up before the deadline' },
+      planError: null,
+    });
+    expect(await (await request()).json()).toMatchObject({
+      plan: null,
+      planError: 'this watch is already being run; wait for that confirmation card',
+    });
+    expect(readSymonWatchLedger(watch.id).map((entry) => entry.phase))
+      .toEqual(['watch_parked', 'watch_registered']);
+  }, 30_000);
+
+  it('rechecks deadlines after an earlier delivery waits in the scheduler drain', async () => {
+    const watches: Array<Awaited<ReturnType<typeof createWatch>>> = [];
+    for (const sourceId of ['batch-first', 'batch-expiring']) {
+      watches.push(await createWatch({
+        text: `report ${sourceId} before the deadline`,
+        sourceId,
+        events: ['merged'],
+        then: { kind: 'report', say: `${sourceId} merged.` },
+        deadlineMs: 60_000,
+      }));
+      firePacketEvent(sourceId, 'merged');
+    }
+    await tick(Date.now(), 'symon-watch-batch-park');
+    expect(watches.map((watch) => listSymonWatches().find((entry) => entry.id === watch.id)?.state))
+      .toEqual(['parked', 'parked']);
+
+    let clock = Date.now();
+    const deadline = clock + 10;
+    getSqlite().prepare('UPDATE automations SET watch_expires_at = ? WHERE id = ?')
+      .run(deadline, watches[1].id);
+    const announced: string[] = [];
+    const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const deliverySpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      expect(String(input)).toBe(`http://127.0.0.1:${wsPort}/symon-task-complete`);
+      announced.push((JSON.parse(String(init?.body)) as { taskId: string }).taskId);
+      // Model the bounded network wait at the delivery boundary, without a
+      // real sleep. The next watch expires exactly as the first reply arrives.
+      clock = deadline;
+      return Response.json({ delivered: 1 });
+    });
+    try {
+      // No supplied timestamp: production ticks must refresh their clock after
+      // async work, while explicit test timestamps still stay deterministic.
+      await runAutomationSchedulerTick({ workerId: 'symon-watch-batch-drain' });
+      expect(announced).toEqual([watches[0].id]);
+      expect(listSymonWatches().find((entry) => entry.id === watches[1].id))
+        .toMatchObject({ state: 'closed', lastErrorMessage: 'Watch expired.' });
+      expect(readSymonWatchLedger(watches[1].id).map((entry) => entry.phase))
+        .toEqual(['watch_expired', 'watch_parked', 'watch_registered']);
+    } finally {
+      deliverySpy.mockRestore();
+      clockSpy.mockRestore();
+    }
+  }, 30_000);
 
   it('expires a parked watch on its deadline rather than holding it forever', async () => {
     const watch = await createWatch({
