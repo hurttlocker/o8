@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { DEFAULT_GITHUB_REPO, fetchGitHubWorkflowRunDetail, resolveRepoSlug } from '@/lib/github-broker';
+import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 
 export async function GET(
   request: Request,
@@ -20,6 +21,12 @@ export async function GET(
     const detail = await fetchGitHubWorkflowRunDetail(repo, runId);
     return NextResponse.json({ ...detail, repo });
   } catch (err) {
+    if (err instanceof GitHubRequestDeferredError) {
+      return NextResponse.json({ error: err.message }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil((err.retryAt - Date.now()) / 1000))) },
+      });
+    }
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
