@@ -18,7 +18,7 @@ function attentionFor(packet: OrchestratorPacket) {
 
 /** Compact, evidence-backed next step beside the worker's live transcript. */
 export function WorkerPaneSummary({ packet, onOpenReview, onReply }: WorkerPaneSummaryProps) {
-  if (!packet) return null;
+  if (!packet || ['running', 'launching', 'recovering'].includes(packet.status)) return null;
   const attention = attentionFor(packet);
   const summary = packet.completionSummary?.trim() || packet.review?.summary?.trim() || null;
   const fileCount = packet.explainer?.changedFileCount;
