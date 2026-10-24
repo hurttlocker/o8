@@ -21,7 +21,7 @@
  * public read endpoint, add it to ALLOWLIST_PATHS below.
  */
 
-import { clerkMiddleware } from '@clerk/nextjs/server';
+import type { NextFetchEvent, NextMiddleware } from 'next/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
@@ -478,11 +478,15 @@ const clerkSecretKey = optionalEnv('CLERK_SECRET_KEY');
 // when BOTH keys are present (the hosted/web path); otherwise — fresh install OR the
 // desktop (publishable-only) — run the bare loopback gate. Clerk-gated routes like
 // /api/v2/chat still fail closed inside their own handlers.
-export default clerkPublishableKey && clerkSecretKey
-  ? clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
+let hostedMiddleware: Promise<NextMiddleware> | undefined;
+export default async function middleware(req: NextRequest, event?: NextFetchEvent) {
+  if (!clerkPublishableKey || !clerkSecretKey) return panelGateMiddleware(req);
+  hostedMiddleware ??= import('@clerk/nextjs/server').then(({ clerkMiddleware }) =>
+    clerkMiddleware((_auth, request) => panelGateMiddleware(request), {
       publishableKey: clerkPublishableKey,
       secretKey: clerkSecretKey,
-    })
-  : (req: NextRequest) => panelGateMiddleware(req);
+    }));
+  return (await hostedMiddleware)(req, event!);
+}
 
 // Default-deny is a love language.

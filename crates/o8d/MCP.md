@@ -20,9 +20,11 @@ This slice ports JSON-RPC handling and successful read-tool projections into Rus
 The protected TypeScript read APIs remain responsible for the shared SQLite state,
 JSON registries, runtime/transcript observations, and lease reconciliation. Rust
 does not independently open SQLite. The TypeScript process remains required.
-There is no snapshot, alternate database, or response cache.
+There is no alternate database or Rust response cache. `o8_status` shares the
+existing bounded TypeScript snapshot and honors its `fresh` argument.
 
-For each native request, Rust obtains current tool metadata with the opt-in
+For each native request, Rust obtains current tool metadata and any requested raw
+status snapshot with the opt-in
 `o8d/read-context` method on the original `/api/mcp` endpoint. That request carries
 the caller's credential and profile through the existing middleware. A refusal is
 returned before reading any state. Server and requested profiles are intersected
@@ -65,7 +67,7 @@ node --import=tsx scripts/mcp-parity.ts --reference="$REFERENCE_API_BASE" --cand
 
 The comparator checks status, protocol headers, JSON-RPC fields, array positions,
 and JSON nested inside text content. Missing/extra fields fail. Valid timestamps
-named `createdAt`, `updatedAt`, `decidedAt`, `generatedAt`, `checkedAt`, `observedAt`
+named `capturedAt`, `createdAt`, `updatedAt`, `decidedAt`, `generatedAt`, `checkedAt`, `observedAt`
 or `timestamp` may differ; other freshness differences require exact JSON pointer
 declarations in the recording. Only the documented freshness field names are
 accepted. Types and field presence must still match. Mismatch reports include
@@ -77,5 +79,6 @@ JSON output path, then run the real fixture suite. It interleaves both servers,
 alternates their order, uses 10 warmups and 100 samples per tool, and calls the
 same `rpc` client and `distribution` helper as `scripts/speed/mcp.mjs`. Reports
 contain sample counts, p50 (`median`) and p95 milliseconds. These numbers include
-the metadata/auth round trip and all source API calls. They describe the fixture
+the metadata/auth round trip and all source API calls, including the shared status
+snapshot behavior. They describe the fixture
 HTTP adapter, not a production Next.js process, and establish no speedup claim.

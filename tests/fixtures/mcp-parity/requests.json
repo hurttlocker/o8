@@ -9,7 +9,10 @@
         "name": "o8_status",
         "arguments": {}
       }
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "get_mission_status",
@@ -83,7 +86,10 @@
           "includeEvidence": true
         }
       }
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "status preserves whitespace sessionKey",
@@ -97,7 +103,10 @@
           "sessionKey": " "
         }
       }
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "o8_status {'sessionKey': 'missing'}",
@@ -111,7 +120,10 @@
           "sessionKey": "missing"
         }
       }
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "get_mission_status {'includeCost': True, 'includeTiming': True}",
@@ -237,7 +249,10 @@
     },
     "headers": {
       "x-o8-mcp-profile": "full"
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "profile dogfood",
@@ -263,7 +278,10 @@
     },
     "headers": {
       "x-o8-mcp-profile": "dogfood"
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "profile visualizations",
@@ -289,7 +307,10 @@
     },
     "headers": {
       "x-o8-mcp-profile": "visualizations"
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "profile unknown",
@@ -315,7 +336,10 @@
     },
     "headers": {
       "x-o8-mcp-profile": "unknown"
-    }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   },
   {
     "name": "notification",
@@ -394,5 +418,81 @@
         "arguments": {}
       }
     }
+  },
+  {
+    "name": "status freshness {'fresh': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "freshness",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {
+          "fresh": true
+        }
+      }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
+  },
+  {
+    "name": "status freshness {'fresh': 'invalid'}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "freshness",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {
+          "fresh": "invalid"
+        }
+      }
+    },
+    "freshness": [
+      "/body/result/content/0/text/json/data/snapshot/ageMs"
+    ]
+  },
+  {
+    "name": "status snapshot batch index correlation",
+    "body": [
+      {
+        "jsonrpc": "2.0",
+        "id": "evidence",
+        "method": "tools/call",
+        "params": {
+          "name": "o8_status",
+          "arguments": {
+            "includeEvidence": true
+          }
+        }
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": "refresh",
+        "method": "tools/call",
+        "params": {
+          "name": "o8_status",
+          "arguments": {
+            "fresh": true
+          }
+        }
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": "invalid",
+        "method": "tools/call",
+        "params": {
+          "name": "o8_status",
+          "arguments": {
+            "fresh": "invalid"
+          }
+        }
+      }
+    ],
+    "freshness": [
+      "/body/0/result/content/0/text/json/data/snapshot/ageMs",
+      "/body/1/result/content/0/text/json/data/snapshot/ageMs"
+    ]
   }
 ]

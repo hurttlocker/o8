@@ -2,9 +2,6 @@ use serde_json::{json, Value};
 fn array(value: &Value) -> Vec<Value> {
     value.as_array().cloned().unwrap_or_default()
 }
-fn or_null(value: &Value, key: &str) -> Value {
-    value.get(key).cloned().unwrap_or(Value::Null)
-}
 
 pub fn repos(data: Value) -> Value {
     let repos: Vec<Value> = array(&data["repos"])
@@ -85,7 +82,7 @@ pub fn tasks(data: Value, args: &Value) -> Value {
         .unwrap_or_default();
     json!({"schema":"o8/mcp/task.pool/v1","tasks":compact,"groups":Value::Object(groups),"counts":data["counts"]})
 }
-pub fn status(data: Value, connections: Value, args: &Value) -> Value {
+pub fn status(data: Value, runtime: Value, snapshot: Value, args: &Value) -> Value {
     let agents = array(&data["agents"]);
     let approvals = if data["approvals"].is_array() {
         array(&data["approvals"])
@@ -168,17 +165,8 @@ pub fn status(data: Value, connections: Value, args: &Value) -> Value {
             agent
         })
         .collect();
-    let runtime = match connections["dispatchableRuntimes"].as_array() {
-        Some(rows) => json!({"status":"available", "runtimes": rows.iter().map(|row| {
-            let mut result = serde_json::Map::new();
-            for key in ["id", "label", "available"] { if let Some(value) = row.get(key) { result.insert(key.into(), value.clone()); } }
-            result.insert("connection".into(), or_null(row, "connection"));
-            Value::Object(result)
-        }).collect::<Vec<_>>()}),
-        None => json!({"status":"unavailable","runtimes":[]}),
-    };
     json!({"summary":format!("{}.",pieces.join(". ")),"data":{
-        "runtimeConnections":runtime,"agents":projected,"approvals":approvals,"approvalCount":count,
+        "runtimeConnections":runtime,"snapshot":snapshot,"agents":projected,"approvals":approvals,"approvalCount":count,
         "recentActivity":recent,"spendCapHits":array(&data["spendCapHits"])
     }})
 }

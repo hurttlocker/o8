@@ -5,11 +5,11 @@ export interface RecordedMcpRequest {
   body: unknown;
   headers?: Record<string, string>;
   credential?: 'operator' | 'absent' | 'invalid' | 'read-only';
-  /** Exact JSON pointers after parsing text content. No fields are ignored by default. */
+  /** Exact freshness pointers after parsing text content; validated timestamp fields are also allowed. */
   freshness?: string[];
 }
 export interface McpExchange { status: number; headers: Record<string, string>; body: unknown }
-const timestampNames = new Set(['createdAt', 'updatedAt', 'decidedAt', 'generatedAt', 'checkedAt', 'observedAt', 'timestamp']);
+const timestampNames = new Set(['capturedAt', 'createdAt', 'updatedAt', 'decidedAt', 'generatedAt', 'checkedAt', 'observedAt', 'timestamp']);
 function timestamp(value: unknown): boolean {
   return typeof value === 'number' ? Number.isFinite(value) && value >= 946684800000
     : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));

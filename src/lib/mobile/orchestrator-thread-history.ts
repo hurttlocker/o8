@@ -1,7 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { getDataDir } from '@/lib/data-dir-migration';
 import { persistCanonicalChatHistoryRecord, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
@@ -10,7 +9,7 @@ import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
-import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
+import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import {
   effectiveBackend,
@@ -56,6 +55,7 @@ const historyParseCache = new Map<string, CachedHistoryRecord>();
 let historyWriteVersion = 0;
 
 function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
+  ensureHistoryReady();
   try {
     return JSON.parse(readFileSync(safeOrchestratorHistoryPath(tabId), 'utf-8')) as OrchestratorHistoryRecord;
   } catch {
@@ -147,92 +147,15 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   historyParseCache.delete(filePath);
   historyWriteVersion += 1;
 }
-// Marker so the one-time transcript-order repair runs once per install.
-const TRANSCRIPT_REPAIR_MARKER = join(getDataDir(), '.transcript-order-repaired-v1');
-// Pre-v0.1.229, ws-server froze the assistant timestamp at turn START — a
-// millisecond BEFORE the user message was persisted — so timestamp-sorted
-// transcripts rendered the reply above the question. The inverted pair sits
-// 0-1ms apart, while a genuine reply→next-question boundary is minutes apart,
-// so an adjacent [assistant→user] pair inside this window is unambiguously a
-// flipped turn (the live scan found the nearest real boundary ~40min away).
-const TRANSCRIPT_FLIP_GAP_MS = 5000;
-
-/**
- * One-time, marker-gated repair of transcripts flipped by the pre-v0.1.229
- * assistant-timestamp bug. Swaps the inverted [assistant, user] pair's
- * timestamps so the question precedes the reply, then rewrites the file in
- * corrected order. Idempotent and never throws — safe to call on every boot;
- * after the marker lands it returns immediately. The persistence-layer clamp
- * in upsertMobileOrchestratorAssistantMessage prevents new flips, so this only
- * heals history written before the fix shipped.
- */
 export function repairFlippedOrchestratorTranscripts(): void {
-  try {
-    if (existsSync(TRANSCRIPT_REPAIR_MARKER)) return;
-    let files: string[] = [];
-    try {
-      files = readdirSync(ORCHESTRATOR_HISTORY_DIR).filter((file) => file.endsWith('.json'));
-    } catch {
-      files = [];
-    }
-    let fixedThreads = 0;
-    let fixedPairs = 0;
-    for (const file of files) {
-      const fullPath = join(ORCHESTRATOR_HISTORY_DIR, file);
-      let record: OrchestratorHistoryRecord | null;
-      try {
-        record = JSON.parse(readFileSync(fullPath, 'utf-8')) as OrchestratorHistoryRecord;
-      } catch {
-        continue;
-      }
-      if (!record || !Array.isArray(record.messages)) continue;
-      // Walk in render order (timestamp-sorted); the message objects are shared
-      // with record.messages (shallow slice), so swapping their timestamps here
-      // lands on the stored record.
-      const sorted = record.messages.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-      let changed = false;
-      for (let i = 0; i < sorted.length - 1; i += 1) {
-        const reply = sorted[i];
-        const prompt = sorted[i + 1];
-        if (
-          reply.role === 'assistant'
-          && prompt.role === 'user'
-          && typeof reply.timestamp === 'number'
-          && typeof prompt.timestamp === 'number'
-        ) {
-          const gap = prompt.timestamp - reply.timestamp;
-          if (gap >= 0 && gap < TRANSCRIPT_FLIP_GAP_MS) {
-            const tmp = reply.timestamp;
-            reply.timestamp = prompt.timestamp;
-            prompt.timestamp = tmp;
-            changed = true;
-            fixedPairs += 1;
-          }
-        }
-      }
-      if (changed) {
-        record.messages = record.messages
-          .slice()
-          .sort((x, y) => (x.timestamp ?? 0) - (y.timestamp ?? 0));
-        try {
-          writeHistoryRecord(basename(file, '.json'), record);
-          fixedThreads += 1;
-        } catch {
-          // best-effort per file
-        }
-      }
-    }
-    try {
-      writeFileSync(TRANSCRIPT_REPAIR_MARKER, new Date().toISOString());
-    } catch {
-      // best-effort marker; a failed write just means we retry next boot (idempotent)
-    }
-    if (fixedPairs > 0) {
-      console.log(`[transcript-repair] fixed ${fixedPairs} flipped turn(s) across ${fixedThreads} thread(s)`);
-    }
-  } catch (err) {
-    console.warn('[transcript-repair] skipped:', err);
-  }
+  repairFlippedTranscriptHistory(ORCHESTRATOR_HISTORY_DIR, writeHistoryRecord);
+}
+let historyReady = false;
+function ensureHistoryReady(): void {
+  if (historyReady) return;
+  historyReady = true;
+  repairFlippedOrchestratorTranscripts();
+  repairComposerPreamblePollution();
 }
 export function repairComposerPreamblePollution(): void {
   repairComposerPreambleHistory(ORCHESTRATOR_HISTORY_DIR, (tabId, record, filePath) => {
@@ -254,6 +177,7 @@ function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
 }
 
 function listThoughtHistoryFileStats(): OrchestratorHistoryFileStat[] {
+  ensureHistoryReady();
   if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) {
     historyParseCache.clear();
     return [];
@@ -317,6 +241,7 @@ export function mobileOrchestratorThreadHistoryStatToken(): string {
 // readdirSync + per-file statSync blocked that loop every second. Same
 // filtering, sorting, and parse-cache eviction; only the fs calls are async.
 async function listThoughtHistoryFileStatsAsync(): Promise<OrchestratorHistoryFileStat[]> {
+  ensureHistoryReady();
   let entries: string[];
   try {
     entries = await readdirAsync(ORCHESTRATOR_HISTORY_DIR);

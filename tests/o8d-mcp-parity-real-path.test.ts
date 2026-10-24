@@ -185,6 +185,15 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     },
   );
 
+  it.each([undefined, null])('does not refresh status for a notification id %s', async (id) => {
+    seen.length = 0;
+    const result = await sendRecordedMcp(rust, token, { name: 'status notification', body: {
+      jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'o8_status', arguments: { fresh: true } },
+    } });
+    expect(result.status).toBe(202);
+    expect(seen.map((entry) => entry.path)).toEqual(['/api/mcp']);
+  });
+
   it('observes persisted updates after startup and returns compact/detailed tasks', async () => {
     const compact = toolPayload(await call(rust, 'o8_task_list', { includeDone: true }));
     expect(compact.tasks.length).toBeGreaterThanOrEqual(4);

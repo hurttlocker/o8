@@ -3727,6 +3727,12 @@
       ]
     },
     {
+      "path": "tests/next-render-parity.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/o8-model-pi-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3869,6 +3875,12 @@
         "real-path",
         "terminal-tool",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/operator-mcp-status-snapshot-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -5055,6 +5067,17 @@
       "reasons": [
         "child-process",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/server-boot-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-host"
       ]
     },
     {

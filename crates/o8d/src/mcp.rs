@@ -101,7 +101,13 @@ impl McpServer {
         }
         response.json().await.map_err(|_| ())
     }
-    async fn tool(&self, name: &str, args: &Value, headers: &HeaderMap) -> Result<Value, ()> {
+    async fn tool(
+        &self,
+        name: &str,
+        args: &Value,
+        headers: &HeaderMap,
+        status_source: Option<&Value>,
+    ) -> Result<Value, ()> {
         // Keep the TS path expansion contract for tilde paths and unusual inputs.
         if name == "o8_status"
             && args
@@ -115,13 +121,19 @@ impl McpServer {
         }
         let data = match name {
             "o8_status" => {
-                let path = query("/api/operator/status", args, &["sessionKey"], &[]);
-                let status = self.source(&path, headers).await?;
-                let connections = self
-                    .source("/api/panel/operator-defaults", headers)
-                    .await
-                    .unwrap_or(Value::Null);
-                projections::status(status, connections, args)
+                let source = status_source.ok_or(())?;
+                if source.get("data").is_none()
+                    || source.get("runtimeConnections").is_none()
+                    || source.get("snapshot").is_none()
+                {
+                    return Err(());
+                }
+                projections::status(
+                    source["data"].clone(),
+                    source["runtimeConnections"].clone(),
+                    source["snapshot"].clone(),
+                    args,
+                )
             }
             "get_mission_status" => {
                 let path = query(
@@ -254,7 +266,9 @@ async fn handle(
     if messages.is_empty() || messages.iter().any(|message| !native(message)) {
         return server.proxy(method, &headers, body).await;
     }
-    let context = json!({"jsonrpc":"2.0","id":"o8d-context","method":"o8d/read-context"});
+    let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null())
+        .map(|(index, message)| json!({"index": index, "arguments":message["params"].get("arguments").cloned().unwrap_or(json!({}))})).collect();
+    let context = json!({"jsonrpc":"2.0","id":"o8d-context","method":"o8d/read-context","params":{"statusRequests":status_requests}});
     let upstream = match server
         .request(
             Method::POST,
@@ -280,7 +294,7 @@ async fn handle(
     };
     let profile = context["result"]["profile"].as_str().unwrap_or("full");
     let mut responses = Vec::new();
-    for message in messages {
+    for (index, message) in messages.into_iter().enumerate() {
         let id = &message["id"];
         if id.is_null() {
             continue;
@@ -298,7 +312,11 @@ async fn handle(
                     .unwrap_or(json!({}));
                 // Path expansion and error/retry policy remain authoritative in TS.
                 // Fall back only for this read, never replay a mutating batch.
-                match server.tool(name, &args, &headers).await {
+                let status_source = context["result"]["statusSources"]
+                    .as_array()
+                    .and_then(|sources| sources.iter().find(|source| source["index"] == index))
+                    .and_then(|source| source.get("source"));
+                match server.tool(name, &args, &headers, status_source).await {
                     Ok(value) => value,
                     Err(_) => {
                         let original = Bytes::from(message.to_string());

@@ -14,6 +14,14 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as { action?: unknown; laneId?: unknown };
   const action = typeof body.action === 'string' ? body.action : '';
 
+  if (action === 'bootstrap') {
+    const { ensureNextServerInitialized } = await import('@/lib/startup/next');
+    await ensureNextServerInitialized();
+    return NextResponse.json({ ok: true }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
+
   if (action === 'start') {
     ensureReviewQueueDrainStarted();
     return NextResponse.json({ ok: true }, {
