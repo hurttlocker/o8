@@ -26,7 +26,7 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const { HUDDLE_READY_EVENT_LABEL } = await import('@/lib/orchestrator/huddle-zero-diff');
 const { HUDDLE_PROMPT_SECTION } = await import('@/lib/orchestrator/huddle-access');
-const { getSqlite } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 afterAll(() => {
@@ -139,6 +139,63 @@ describe('huddle zero-diff classification', () => {
     expect(packet?.lastEventLabel).toBe(HUDDLE_READY_EVENT_LABEL);
     expect(packet?.status).not.toBe('failed');
     expect(listLanes()).toHaveLength(1);
+  });
+
+  it.each([true, false])('classifies a durable mission after selection changes (huddle=%s) and retains its session', async (huddle) => {
+    const packetId = `pkt-huddle-background-${huddle}`;
+    const missionId = `mission-huddle-background-${huddle}`;
+    const sessionKey = `test-runtime:huddle-background-${huddle}`;
+    const worktreePath = makeCleanWorktree();
+    const lane = createLane({
+      repoPath: worktreePath, worktreePath, branch: 'pkt/huddle-background',
+      baseBranch: 'main', runtime: 'codex', sessionKey, packetId,
+    });
+    const packet = { ...packetFor(packetId, worktreePath, lane.id, sessionKey), huddle };
+    const state = {
+      ...createEmptyOrchestratorMissionState(), missionId, repoPath: worktreePath,
+      runtime: 'codex' as const, packets: [packet],
+    };
+    const now = Date.now();
+    getSqlite().prepare(`INSERT INTO missions (
+      id, repo_path, runtime, prompt, summary, constraints, packet_meta_json,
+      total_waves, created_at, updated_at, archived_at, mission_state_json
+    ) VALUES (?, ?, 'codex', '', '', '', '[]', 1, ?, ?, NULL, ?)`)
+      .run(missionId, worktreePath, now, now, JSON.stringify(state));
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(), missionId: 'mission-selected-unrelated', packets: [],
+    });
+    if (huddle) {
+      reportAgentEvent({
+        laneId: lane.id, actor: 'system', event: 'huddle',
+        message: 'Plan: inspect, verify, then implement after alignment.',
+      });
+    }
+
+    const result = await dispatch({ verb: 'request_review', laneId: lane.id, actor: 'system' });
+    closeDb();
+    if (!huddle) {
+      expect(result).toMatchObject({ ok: false, note: 'no_changes_produced' });
+      expect(getLane(lane.id)?.status).toBe('failed');
+      expect(readOrchestratorControlPlaneState().packets).toEqual([]);
+      rmSync(worktreePath, { recursive: true, force: true });
+      return;
+    }
+    expect(result).toMatchObject({ ok: false, note: HUDDLE_READY_EVENT_LABEL });
+    expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_orchestrator', sessionKey });
+    expect(readMissionRegistryEntry(missionId)?.mission.packets.find((candidate) => candidate.id === packetId))
+      .toMatchObject({ status: 'blocked', blockedReason: HUDDLE_READY_EVENT_LABEL, lane: { sessionKey } });
+    expect(readOrchestratorControlPlaneState().packets).toEqual([]);
+
+    performRuntimeActionMock.mockResolvedValue({
+      ok: true, action: 'steer', surfaceId: sessionKey, sessionKey,
+      runtime: 'codex', status: 'running', note: 'Steered test runtime.',
+    });
+    await steerPacket({ packetId, message: 'Plan approved. Continue.' });
+    expect(performRuntimeActionMock).toHaveBeenCalledWith(expect.objectContaining({ action: 'steer', surfaceId: sessionKey }));
+    expect(getLane(lane.id)).toMatchObject({ status: 'running', sessionKey });
+    expect(readMissionRegistryEntry(missionId)?.mission.packets.find((candidate) => candidate.id === packetId)?.alignmentResolvedAt)
+      .toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    rmSync(worktreePath, { recursive: true, force: true });
   });
 
   it('consumes alignment on steer and preserves a later typed blocker through zero-diff completion', async () => {
