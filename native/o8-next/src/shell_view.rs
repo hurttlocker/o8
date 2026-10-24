@@ -11,6 +11,7 @@ impl Render for Shell {
             .map(|c| match c {
                 Content::Session(s) => s.clone().into_any_element(),
                 Content::Grid(g) => g.clone().into_any_element(),
+                Content::Inbox(inbox) => inbox.clone().into_any_element(),
             });
         div()
             .size_full()
@@ -138,7 +139,7 @@ impl Render for Shell {
                                         this.capture(window, cx);
                                         this.state
                                             .workspaces
-                                            .get_mut(this.state.selected.as_ref().unwrap())
+                                            .get_mut(this.state.selected.as_deref().unwrap_or(""))
                                             .unwrap()
                                             .active = i;
                                         this.ensure(window, cx);

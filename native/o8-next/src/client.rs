@@ -316,6 +316,29 @@ impl Client {
     pub fn review_state(&self, packet: &str) -> Result<Value, String> {
         self.get("/api/orchestrator/review-state", &[("packetId", packet)])
     }
+    /// The desktop Inbox's decision endpoint owns principal checks and durable resolution.
+    pub fn inbox_decision(&self, id: &str, approve: bool) -> Result<Value, String> {
+        let url = self.origin.join("/api/panel/approvals").unwrap();
+        let mut request = self.agent.post(url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        match request.send_json(json!({"id":id,"action":if approve {"approve"} else {"reject"}})) {
+            Ok(response) => {
+                let body: Value = Self::read(response)?;
+                if body["ok"] == false {
+                    return Err(body["error"].as_str().or(body["note"].as_str()).unwrap_or("Approval could not be resolved").into());
+                }
+                Ok(body)
+            }
+            Err(ureq::Error::Status(status, response)) => {
+                let body = Self::read::<Value>(response).unwrap_or_default();
+                Err(body["error"].as_str().or(body["note"].as_str())
+                    .map(|message| format!("{message} (HTTP {status})")).unwrap_or_else(|| format!("Approval refused (HTTP {status})")))
+            }
+            Err(_) => Err("Decision unconfirmed. Refresh to inspect the recorded approval before another action.".into()),
+        }
+    }
     pub fn review(&self, body: &Value) -> Result<Value, String> {
         let url = self.origin.join("/api/orchestrator/review").unwrap();
         let mut request = self.agent.post(url.as_str());
