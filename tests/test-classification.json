@@ -5144,6 +5144,14 @@
       ]
     },
     {
+      "path": "tests/reviewer-tool-contract-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/runtime-action-idempotency-real-path.test.ts",
       "reasons": [
         "child-process",
