@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ensureSharedCheckoutTeam, finishSharedCheckoutTeam, inspectSharedCheckoutTeam, readSharedCheckoutTeam, recordSharedCheckoutMember, reserveSharedCheckoutMember } from './shared-checkout-team';
+import { ensureSharedCheckoutTeam, finishSharedCheckoutTeam, inspectSharedCheckoutTeam, readSharedCheckoutTeam, recordSharedCheckoutMember, reconcileSharedCheckoutTeam, reserveSharedCheckoutMember } from './shared-checkout-team';
 import { findOwnedLaunchByMutationId, ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
 
 const roots: string[] = [];
@@ -230,6 +230,25 @@ describe('shared checkout team', () => {
     expect(readFileSync(indexPath)).toEqual(index);
     expect(readFileSync(join(repoPath, 'README.md'))).toEqual(working);
     expect(git(repoPath, 'rev-parse', 'HEAD')).toBe(head);
+  });
+
+  it('finishes an unverifiable legacy baseline only after an explicit reconciliation', async () => {
+    const { root, repoPath } = fixture();
+    writeFileSync(join(repoPath, 'README.md'), '# operator edit\n');
+    const input = { repoPath, parentThreadId: 'thoughts-legacy-reconcile', dataDir: join(root, 'state') };
+    const initial = await ensureSharedCheckoutTeam(input);
+    const receiptPath = join(input.dataDir, 'shared-checkout-teams', `${initial.id}.json`);
+    writeFileSync(receiptPath, `${JSON.stringify({ ...initial, initialChangedFingerprints: { 'README.md': '0'.repeat(64) } }, null, 2)}\n`);
+    const finish = () => finishSharedCheckoutTeam({
+      ...input, reviewSummary: 'Legacy baseline reviewed.', verification: 'Receipt and working file inspected.',
+    });
+    await expect(finish()).rejects.toThrow(/cannot be verified.*README.md/i);
+    const status = inspectSharedCheckoutTeam(input)!;
+    expect(status.baselineUnverifiable).toEqual(['README.md']);
+    const receipt = await reconcileSharedCheckoutTeam({ ...input, reviewId: status.review.id, reviewedHead: status.review.head,
+      acknowledgedPaths: status.review.paths, reviewSummary: 'Operator reviewed the legacy README edit.' });
+    expect(receipt.paths).toContain('README.md');
+    await expect(finish()).resolves.toBeDefined();
   });
 
   it('can finish an unchanged versioned dirty baseline', async () => {
