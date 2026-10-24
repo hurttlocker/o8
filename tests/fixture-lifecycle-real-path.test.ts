@@ -7,13 +7,14 @@ import {
   readdirSync,
   rmSync,
   utimesSync,
+  writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { TEST_RUN_RETAIN_FILE, writeTestRunOwner } from './test-fixture-lifecycle';
+import { TEST_RUN_OWNER_FILE, TEST_RUN_RETAIN_FILE, writeTestRunOwner } from './test-fixture-lifecycle';
 
 interface AttachedImage {
   baseDevice: string;
@@ -148,7 +149,7 @@ describe('fixture lifecycle through consecutive Vitest suites', () => {
     expect(swept.stdout).toMatch(/\[fixture-cleanup] Reclaimed [1-9]\d* fixture bytes/);
   });
 
-  it('retains a timed-out worker cwd, then reclaims it through the stale sweep', async () => {
+  it('preserves a timed-out worker cwd and its evidence through the stale sweep', async () => {
     const parent = mkdtempSync(path.join(os.tmpdir(), 'o8-timeout-retain-real-'));
     const rootMarker = path.join(parent, 'run-root.json');
     const childMarker = path.join(parent, 'child-result.txt');
@@ -180,10 +181,10 @@ describe('fixture lifecycle through consecutive Vitest suites', () => {
     utimesSync(retained.runRoot, stale, stale);
     const swept = nestedVitest('tests/fixtures/fixture-sweep-probe.test.ts', {
       ...commonEnv,
-      O8_TEST_EXPECT_REMOVED_PATH: retained.runRoot,
+      O8_TEST_EXPECT_RETAINED_PATH: retained.runRoot,
     });
     expect(swept.status, `${swept.stdout}\n${swept.stderr}`).toBe(0);
-    expect(existsSync(retained.runRoot)).toBe(false);
+    expect(existsSync(retained.runRoot)).toBe(true);
   });
 
   it.runIf(process.platform === 'darwin')(
@@ -194,6 +195,13 @@ describe('fixture lifecycle through consecutive Vitest suites', () => {
       const orphan = attachImage(parent, 'o8-apfs-orphan-', 'O8OrphanFixture');
       const mounted = attachImage(parent, 'o8-mounted-skip-', 'O8MountedFixture');
       const old = new Date(Date.now() - 60_000);
+      // The creator is this live test process; model genuinely orphaned owners
+      // explicitly rather than relying on category-specific PID omissions.
+      for (const root of [orphan.root, mounted.root]) {
+        writeFileSync(path.join(root, TEST_RUN_OWNER_FILE), JSON.stringify({
+          pid: Number.MAX_SAFE_INTEGER, startedAt: new Date(0).toISOString(),
+        }));
+      }
       utimesSync(orphan.root, old, old);
       utimesSync(mounted.root, old, old);
 
