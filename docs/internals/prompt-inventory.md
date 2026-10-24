@@ -382,7 +382,7 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/lane/orchestrator-resident-process.ts](../../src/lib/lane/orchestrator-resident-process.ts) | withOrchestratorPromptPolicy | Orchestration and tool authority | 20 | 20 | 0 |
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | buildOrchestratorSystemPrompt | Orchestration and tool authority | 49 | 49 | 6 |
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | FALLBACK_PROMPT | Orchestration and tool authority | 70 | 70 | 0 |
-| [src/lib/lane/orchestrator.md](../../src/lib/lane/orchestrator.md) | asset | Orchestration and tool authority | 8315 | 7426 | 0 |
+| [src/lib/lane/orchestrator.md](../../src/lib/lane/orchestrator.md) | asset | Orchestration and tool authority | 8315 | 7427 | 0 |
 | [src/lib/lane/packet-explainer.ts](../../src/lib/lane/packet-explainer.ts) | buildExplainerPrompt | Worker scope, launch and completion | 196 | 196 | 4 |
 | [src/lib/lane/review-risk.ts](../../src/lib/lane/review-risk.ts) | buildAdversarialReviewProtocol | Independent review and evidence | 95 | 87 | 0 |
 | [src/lib/llm/context.ts](../../src/lib/llm/context.ts) | buildSystemPrompt | Model input and output contract | 287 | 287 | 10 |
@@ -599,8 +599,8 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/orchestrator/project-verification-prompt.ts](../../src/lib/orchestrator/project-verification-prompt.ts) | projectGuidance | Orchestration and tool authority | 302 | 302 | 0 |
 | [src/lib/orchestrator/quality-search.ts](../../src/lib/orchestrator/quality-search.ts) | buildQualitySearchRolePrompt | Orchestration and tool authority | 186 | 186 | 0 |
 | [src/lib/orchestrator/quick-actions.ts](../../src/lib/orchestrator/quick-actions.ts) | QUICK_ACTIONS:message | Orchestration and tool authority | 110 | 110 | 0 |
-| [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketCompletionInstructions | Independent review and evidence | 0 | 110 | 0 |
-| [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketSelfReviewInstructions | Independent review and evidence | 573 | 501 | 3 |
+| [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketCompletionInstructions | Independent review and evidence | 0 | 136 | 0 |
+| [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketSelfReviewInstructions | Independent review and evidence | 573 | 516 | 3 |
 | [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildReadOnlyPacketSelfReviewInstructions | Independent review and evidence | 226 | 226 | 2 |
 | [src/lib/pi-builtin/owned.ts](../../src/lib/pi-builtin/owned.ts) | SYSTEM_PROMPT | Model input and output contract | 106 | 106 | 0 |
 | [src/lib/projects/suggest.ts](../../src/lib/projects/suggest.ts) | buildPrompt | Project suggestion | 668 | 668 | 1 |

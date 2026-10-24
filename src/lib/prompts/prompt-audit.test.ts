@@ -70,6 +70,10 @@ describe('prompt audit: required rules survive real renderers', () => {
         'Style-only lint warnings are advisory', 'warnings that reveal real breakage',
         'set `decision: "partial"`', 'passed: false', 'authority remains',
         'verification passed', 'an exhausted retry', 'not commit a one-site patch',
+        'Do not report completion without the self-review block.',
+        'check `git status` before committing',
+        'commit every file you created or changed for this task, including new untracked files',
+        'Do not commit generated artifacts or files outside the task.',
         'Every file-backed requirement ID must appear in smallestRoute',
         'Never map a process constraint to a changed file as proof', '## Deviations']) {
         expect(prompt.toLowerCase(), rule).toContain(rule.toLowerCase());
@@ -108,6 +112,12 @@ describe('prompt audit: required rules survive real renderers', () => {
       'o8 packet report --event huddle', 'stops before editing',
       'Claim only dispatches that happened', 'governance']) expect(prompt.toLowerCase(), rule).toContain(rule.toLowerCase());
     expect(prompt).not.toContain('more than 2 sequential read');
+    const verdictTemplate = prompt.split('\n').find((line) => line.startsWith('VERDICT #'));
+    expect(verdictTemplate).toBe('VERDICT #<issue>: <approve | reject | needs-follow-up>');
+    expect(verdictTemplate).toMatch(/VERDICT\s*[#-]/);
+    expect(prompt).toContain('You are the orchestrator for o8: the fleet-level brain');
+    expect(prompt).toContain("`directivesApplied: ['<directive-title-or-filename>', ...]`: names");
+    expect(prompt).toContain('`directivesViolated: [{directive, file, line, snippet?}, ...]`: names');
     expect(prompt).not.toMatch(shouting);
     expect(solo).not.toContain('cortex_launch_agent');
     expect(solo).toContain('scope and authority');

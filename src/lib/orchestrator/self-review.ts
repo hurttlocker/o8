@@ -147,6 +147,7 @@ export function buildPacketSelfReviewInstructions(baseBranch = 'main'): string[]
     `5. End your final response with a machine-readable block in this exact format: ${PACKET_SELF_REVIEW_TAG_START} {"passed":true,"confidence":"high|medium|low","summary":"one sentence","issuesFound":["issue you found and fixed"],"outcome":"observable result the implementation supports","evidence":["command, artifact, or real-path observation"],"residual":"remaining uncertainty or none","decision":"implementation_ready|partial|blocked","recurrenceProtection":"test, invariant, validation, automation, durable learning, or none"} ${PACKET_SELF_REVIEW_TAG_END}`,
     '6. Use `decision: "implementation_ready"` and `passed: true` only when the scoped implementation and its verification are ready for independent review. This does not declare the user-facing outcome closed. Use `decision: "partial"` or `"blocked"` with `passed: false` whenever notable work or authority remains.',
     '7. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk, an unfixable lint warning, or an exhausted retry; use `low` when notable uncertainty remains.',
+    '8. Do not report completion without the self-review block.',
   ];
 }
 
@@ -169,6 +170,6 @@ export function buildPacketCompletionInstructions(readOnly: boolean, baseBranch 
       ]
     : [
         ...buildPacketSelfReviewInstructions(baseBranch),
-        'Before reporting completion, commit all packet changes with a descriptive message. Uncommitted changes can be lost during worktree cleanup. Preserve unrelated edits and stage only assigned paths.',
+        'Before reporting completion, commit every file you created or changed for this task, including new untracked files, with a descriptive message (check `git status` before committing). Do not commit generated artifacts or files outside the task. Uncommitted changes can be lost during worktree cleanup.',
       ];
 }
