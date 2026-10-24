@@ -109,6 +109,7 @@ export function O8HandoffsPane({
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
   const scopeVersionRef = useRef(0);
+  const replyFormVersionRef = useRef(0);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
@@ -182,6 +183,7 @@ export function O8HandoffsPane({
     const text = draft.trim();
     if (!scopedRepo || !target || !replyToId || !agents.some((agent) => agent.name === target && agent.live !== false) || !text || sendInFlightRef.current) return;
     const scopeVersion = scopeVersionRef.current;
+    const replyFormVersion = replyFormVersionRef.current;
     sendInFlightRef.current = true;
     setSending(true);
     setSendError(null);
@@ -195,11 +197,14 @@ export function O8HandoffsPane({
       if (!response.ok || !body.message) throw new Error(errorText(response, body));
       if (scopeVersionRef.current !== scopeVersion) return;
       setMessages((current) => [body.message!, ...current.filter((message) => message.id !== body.message!.id)].slice(0, MESSAGE_LIMIT));
+      if (replyFormVersionRef.current !== replyFormVersion) return;
       setDraft('');
       setReplyToId(null);
       setTarget('');
     } catch (caught) {
-      if (scopeVersionRef.current === scopeVersion) setSendError(caught instanceof Error ? caught.message : 'Message could not be sent.');
+      if (scopeVersionRef.current === scopeVersion && replyFormVersionRef.current === replyFormVersion) {
+        setSendError(caught instanceof Error ? caught.message : 'Message could not be sent.');
+      }
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
@@ -337,7 +342,7 @@ export function O8HandoffsPane({
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 11 }}>
                         <span title={message.deliveryNote ?? undefined} style={{ flex: 1, color: message.delivery === 'failed' ? 'var(--t-danger)' : 'var(--t-text-faint)', fontSize: 11 }}>{deliveryLabel(message, selectedGroup.messages.some((reply) => reply.conversation?.replyToId === message.id))} · {new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
                         {message.id === latest.id && message.to === 'operator' && conversation?.status === 'open' && liveAgents.some((agent) => agent.name === message.from) ? (
-                          <button type="button" onClick={() => { setTarget(message.from); setReplyToId(message.id); setSendError(null); setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 34, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', fontSize: 11.5, cursor: 'pointer' }}>Reply</button>
+                          <button type="button" onClick={() => { replyFormVersionRef.current += 1; setTarget(message.from); setReplyToId(message.id); setSendError(null); setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 34, paddingTop: 5, paddingRight: 10, paddingBottom: 5, paddingLeft: 10, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-accent)', fontSize: 11.5, cursor: 'pointer' }}>Reply</button>
                         ) : null}
                       </div>
                     </article>
@@ -352,7 +357,7 @@ export function O8HandoffsPane({
 
       {actionError ? <div role="alert" style={{ paddingTop: 8, paddingRight: 18, paddingBottom: 8, paddingLeft: 18, color: 'var(--t-danger)', fontSize: 11.5 }}>{actionError}</div> : null}
       {replyToId ? <div style={{ paddingTop: 14, paddingRight: 18, paddingBottom: 17, paddingLeft: 18, borderTop: '1px solid var(--t-divider)', background: 'var(--t-bg)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><strong style={{ flex: 1, fontSize: 11.5, fontWeight: 300 }}>Reply to @{target}</strong><button type="button" onClick={() => { setReplyToId(null); setTarget(''); }} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 11 }}>Close</button></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}><strong style={{ flex: 1, fontSize: 11.5, fontWeight: 300 }}>Reply to @{target}</strong><button type="button" onClick={() => { replyFormVersionRef.current += 1; setReplyToId(null); setTarget(''); }} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 11 }}>Close</button></div>
         {!liveAgents.some((agent) => agent.name === target) ? <div role="status" style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>This agent is no longer live. Your draft stays here.</div> : null}
         <label htmlFor="o8-handoff-message" style={{ display: 'block', marginTop: 12, marginBottom: 7, color: 'var(--t-text-muted)', fontSize: 11 }}>Message</label>
         <textarea id="o8-handoff-message" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={TEXT_LIMIT} disabled={!scopedRepo || sending} placeholder="Give the agent a clear request or update…" rows={3} style={{ ...fieldStyle, resize: 'vertical', minHeight: 72, maxHeight: 180, paddingTop: 9, paddingRight: 10, paddingBottom: 9, paddingLeft: 10, lineHeight: 1.45 }} />

@@ -355,6 +355,65 @@ describe('O8HandoffsPane', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 
+  it.each([
+    { outcome: 'success', reopenSame: false },
+    { outcome: 'failure', reopenSame: false },
+    { outcome: 'success', reopenSame: true },
+    { outcome: 'failure', reopenSame: true },
+  ])('preserves a new reply form after an earlier $outcome (same reply=$reopenSame)', async ({ outcome, reopenSame }) => {
+    const otherAgent = { ...agent, agentId: 'agent-iris', name: 'Iris', sessionKey: 'session-iris' };
+    const otherIncoming: AgentMessage = {
+      ...incoming, id: 'message-iris', sequence: 2, from: 'Iris', text: 'Another conversation.',
+      refs: { laneId: null, packetId: null, identities: { from: { runtime: 'codex', sessionKey: otherAgent.sessionKey }, to: null } },
+      conversation: { ...incoming.conversation!, id: 'conversation-iris', lastMessageId: 'message-iris' },
+    };
+    let finishReply!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { finishReply = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/agents/message' && init?.method === 'POST') return pending;
+      if (String(input).startsWith('/api/agents/presence?')) return jsonResponse({ agents: [agent, otherAgent] });
+      if (String(input).startsWith('/api/agents/message?')) return jsonResponse({ messages: [otherIncoming, incoming] });
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => root.render(createElement(O8HandoffsPane, {
+      active: true, repoPath: repo.localPath, registeredRepos: [repo], allRepos: false,
+    })));
+    await vi.waitFor(() => expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')).not.toBeNull());
+    await openReply(host);
+    await act(async () => enterMessage(host, 'Pending original reply.'));
+    await act(async () => {
+      const send = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Send reply');
+      send?.click(); send?.click();
+    });
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String(posts[0][1]?.body))).toMatchObject({
+      repo: repo.localPath, to: 'Keen', replyToId: incoming.id, text: 'Pending original reply.',
+    });
+    await act(async () => Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Close')?.click());
+    const conversationId = reopenSame ? 'conversation-reply' : 'conversation-iris';
+    await act(async () => host.querySelector<HTMLButtonElement>(`[data-agent-conversation-id="${conversationId}"]`)?.click());
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === 'Reply')?.click());
+    const currentForm = host.querySelector<HTMLTextAreaElement>('#o8-handoff-message');
+    expect(currentForm).not.toBeNull();
+    expect(currentForm?.disabled).toBe(true);
+    expect(currentForm?.value).toBe('Pending original reply.');
+    await act(async () => finishReply(outcome === 'success'
+      ? jsonResponse({ message: { ...message, id: 'reply-original', sequence: 3, text: 'Pending original reply.',
+          conversation: { ...incoming.conversation!, replyToId: incoming.id, turnIndex: 2, remainingTurns: 6, lastMessageId: 'reply-original' } } }, 201)
+      : jsonResponse({ error: { message: 'Earlier reply failed.' } }, 409)));
+    expect(host.querySelector('#o8-handoff-message')).toBe(currentForm);
+    expect(currentForm?.value).toBe('Pending original reply.');
+    expect(currentForm?.disabled).toBe(false);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain(`Reply to @${reopenSame ? 'Keen' : 'Iris'}`);
+    if (outcome === 'success') expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')?.textContent).toContain('Pending original reply.');
+    await act(async () => enterMessage(host, 'Draft in the newly opened form.'));
+    expect(currentForm?.value).toBe('Draft in the newly opened form.');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
   it('restores a selected exchange after remount and reopens an exact transcript link', async () => {
     const linked: AgentMessage = {
       ...message,
