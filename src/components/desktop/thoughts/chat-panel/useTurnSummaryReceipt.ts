@@ -84,6 +84,10 @@ export function sumTurnUsageTokens(
     + (entry.tokens?.cacheWrite ?? 0), 0);
 }
 
+function observedTokenCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
 export function useTurnSummaryReceipt(input: {
   displayMessages: MobileTranscriptEntry[];
   isChatMode: boolean;
@@ -160,10 +164,13 @@ export function useTurnSummaryReceipt(input: {
 
     const distinctNames = [...new Set(toolNamesAll)];
     const usageEntries = newEntries.filter((entry) => entry.role === 'assistant' && entry.tokens);
-    const cacheObserved = usageEntries.some((entry) => Object.prototype.hasOwnProperty.call(entry.tokens ?? {}, 'cacheRead'));
     const freshInputTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.input ?? 0), 0);
     const cacheReadTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheRead ?? 0), 0);
     const cacheWriteTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheWrite ?? 0), 0);
+    const cacheObserved = usageEntries.length > 0 && usageEntries.every(({ tokens }) => (
+      observedTokenCount(tokens?.input) && observedTokenCount(tokens?.cacheRead)
+      && (tokens?.cacheWrite === undefined || observedTokenCount(tokens.cacheWrite))
+    )) && Number.isFinite(freshInputTokens + cacheReadTokens + cacheWriteTokens);
     const reportedTurnTokens = sumTurnUsageTokens(usageEntries);
     const runningTotalDelta = Math.max(0, input.stream.runningTotal - start.runningTotalAtStart);
     const currentMission = missionStateRef.current;
