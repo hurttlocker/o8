@@ -1050,6 +1050,13 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/stdio-json-rpc.test.ts",
+      "reasons": [
+        "process-signal",
+        "stdio-json-rpc-peer"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/threecode-live.integration.test.ts",
       "reasons": [
         "child-process",
@@ -3573,7 +3580,8 @@
       "path": "tests/mcp-deferred-tools-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
+        "real-path",
+        "stdio-json-rpc-peer"
       ]
     },
     {
@@ -4473,7 +4481,8 @@
       "reasons": [
         "git-cli",
         "network-listener",
-        "real-path"
+        "real-path",
+        "stdio-json-rpc-peer"
       ]
     },
     {

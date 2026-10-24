@@ -20,6 +20,7 @@ const PATH_RULES = [
 ];
 
 const SOURCE_RULES = [
+  ['stdio-json-rpc-peer', /\bnew\s+StdioJsonRpcPeer\s*\(/],
   ['child-process', /(?:node:)?child_process|\bspawnSync?\s*\(|\bexecFile(?:Sync)?\s*\(|\bexecSync\s*\(/],
   ['executable-fixture', /\bchmodSync\s*\(|#!\/usr\/bin\/env (?:node|bash|sh)\b/],
   ['fixture-lifecycle', /test-fixture-lifecycle/],
