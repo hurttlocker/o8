@@ -74,16 +74,22 @@ locator now points to the existing repository workflow document. Every source an
 rule digest must match; there is no general rewrite exception.
 
 The default check uses the included manifest and needs neither network access nor full Git history.
-To audit the manifest against the exact original file as well:
+To audit the manifest against the full rule file as well, fetch the published pre-rebase revision
+that records the intentional R19 update:
 
 ```sh
-git show f8c0c58bb0a76ea823d78637c1b6d828731682d8:AGENTS.md > /tmp/agents-before.md
+git fetch origin 5e5a45d8b515c366cba49f9fdae32c11ed466448
+git show 5e5a45d8b515c366cba49f9fdae32c11ed466448:AGENTS.md > /tmp/agents-before.md
 node scripts/check-agent-rules.mjs --baseline-file /tmp/agents-before.md
 node scripts/check-agent-rules.mjs
 ```
 
-The baseline-file run verified all 30 original units. Treat changes to the coverage manifest as
-policy changes that require review, rather than a way to clear a failed check.
+The initial baseline-file run verified all 30 original units. The current baseline intentionally
+updates R19 for `npm run typecheck:fast`, the tsc 5.8 fallback on Intel Macs and Windows, and the
+`npm run typecheck:tsc` cross-check. Both R19 digests and the baseline commit, byte count, and file
+digest were refreshed from the full pre-compaction rule file; the other 29 rule digests are unchanged.
+Treat changes to the coverage manifest as policy changes that require review, rather than a way
+to clear a failed check.
 
 | Original rule unit | Current destination |
 | --- | --- |

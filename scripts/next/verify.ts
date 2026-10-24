@@ -68,7 +68,7 @@ async function main() {
         assert.deepEqual(history, JSON.parse(readFileSync(recorded, 'utf8')));
         assert.deepEqual(expected, JSON.parse(readFileSync(treePath, 'utf8')));
       }
-      const native = JSON.parse(execFileSync(binary, ['--render-tree', actualPath], { encoding: 'utf8', timeout: 8000 }));
+      const native: unknown = JSON.parse(execFileSync(binary, ['--render-tree', actualPath], { encoding: 'utf8', timeout: 8000 }));
       assert.deepEqual(native, expected, `${name}: native tree must match production web tree`);
       console.log('[o8-next]', `${name}: ${history.transcript.length} API messages, ${expected.length} parity rows`);
     }

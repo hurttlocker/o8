@@ -5942,6 +5942,12 @@
       ]
     },
     {
+      "path": "tests/typecheck-parity.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/typecheck-tsconfig-clean.test.ts",
       "reasons": [
         "child-process",

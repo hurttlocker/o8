@@ -42,8 +42,8 @@ describe('immutable GitHub action sources through the operator route', () => {
       if (url.endsWith(`/git/commits/${pinnedCommit}`)) return Response.json({ sha: pinnedCommit, tree: { sha: rootTree } });
       if (url.endsWith(`/git/trees/${rootTree}`)) return Response.json({ sha: rootTree, truncated: false, tree: [{ path: 'package', mode: '040000', type: 'tree', sha: packageTree }] });
       if (url.endsWith(`/git/trees/${packageTree}`)) return Response.json({ sha: packageTree, truncated: false, tree: entries });
-      if (url.endsWith('/package/o8-actions.json')) return new Response(manifest);
-      if (url.endsWith('/package/run.sh')) return new Response(script);
+      if (url.endsWith('/package/o8-actions.json')) return new Response(new Uint8Array(manifest));
+      if (url.endsWith('/package/run.sh')) return new Response(new Uint8Array(script));
       throw new Error(`Unexpected source request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchSource);

@@ -86,7 +86,8 @@ async function fetchVapidPublicKey(): Promise<string | null> {
   }
 }
 
-function urlBase64ToUint8Array(base64: string): Uint8Array {
+// Infer the freshly allocated ArrayBuffer backing instead of widening to ArrayBufferLike.
+function urlBase64ToUint8Array(base64: string) {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
   const normalized = (base64 + padding).replaceAll('-', '+').replaceAll('_', '/');
   const raw = window.atob(normalized);

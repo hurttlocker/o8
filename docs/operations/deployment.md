@@ -36,7 +36,8 @@ Changed releases reuse verified web, native, and speech compiler intermediates t
 Before a release candidate:
 
 ```bash
-npx tsc --noEmit
+npm run typecheck:fast
+# Slower TypeScript 5.8.2 cross-check: npm run typecheck:tsc
 npm test
 cd src-tauri && cargo check
 ```

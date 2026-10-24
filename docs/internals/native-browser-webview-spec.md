@@ -80,7 +80,7 @@ Gate the whole native-webview path behind an operator setting (default OFF until
 
 ## Implementation constraints
 - Inline styles only (no CSS classes/shorthand), theme tokens (`var(--t-*)`), `as React.CSSProperties` for vendor props.
-- `npx tsc --noEmit` before every commit; `npm test` at the end. Rust: `cargo build` (and `cargo test --lib` from `src-tauri/`).
+- `npm run typecheck:fast` before every commit; `npm test` at the end. Rust: `cargo build` (and `cargo test --lib` from `src-tauri/`). Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 - Native behavior must be verified in a built Tauri app because the child webview does not exist in `next dev`.
 
 ## Definition of done

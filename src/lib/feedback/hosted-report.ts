@@ -33,7 +33,7 @@ export async function postHostedPayload(
       const form = new FormData();
       form.append('payload_json', JSON.stringify(payload));
       files.forEach((file, i) => {
-        form.append(`files[${i}]`, new Blob([file.bytes], { type: file.mime }), file.filename);
+        form.append(`files[${i}]`, new Blob([new Uint8Array(file.bytes)], { type: file.mime }), file.filename);
       });
       body = form;
     } else {

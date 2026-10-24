@@ -18,7 +18,7 @@ Each open arc on [ROADMAP.md](../../ROADMAP.md) links one tracking issue. A trac
 
 A pull request fixes one issue, from a branch cut from `main`. Its body has the mechanic, what changed, how it was verified with test file names, and `Fixes #n`.
 
-Verification means a test that drives the real entry point: the route handler, the CLI command, the merge path, or persisted state, not the helper in isolation. The test is written first and fails, then the fix makes it pass, and both tails appear in the pull request. `npx tsc --noEmit` and `npm test` run before push. See CLAUDE.md, "Real-path tests", for why.
+Verification means a test that drives the real entry point: the route handler, the CLI command, the merge path, or persisted state, not the helper in isolation. The test is written first and fails, then the fix makes it pass, and both tails appear in the pull request. `npm run typecheck:fast` and `npm test` run before push. See CLAUDE.md, "Real-path tests", for why. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 
 Documentation uses plain punctuation and states what ships. A claim the roadmap contradicts does not go in.
 

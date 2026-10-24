@@ -61,7 +61,7 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
     const response = await (options.fetchImpl ?? fetch)(plan.url, {
       method: plan.method,
       headers: plan.headers,
-      body: plan.body,
+      body: plan.body === undefined ? undefined : new Uint8Array(plan.body),
       signal: controller.signal,
     });
     const buffer = Buffer.from(await response.arrayBuffer());

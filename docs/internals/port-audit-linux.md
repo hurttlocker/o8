@@ -227,7 +227,7 @@ The remaining open Linux blockers are release artifacts ([#1898](https://github.
   - `git ls-files 'src/*' | awk '{print tolower($0)}' | sort | uniq -d` produced no duplicates.
   - `find src -type f | sed 's#^src/##' | awk '{print tolower($0)}' | sort | uniq -d` produced no duplicates.
 - Why it matters on Linux: Linux's case-sensitive default should not immediately explode due to duplicate source paths.
-- Suggested direction: still rely on `npx tsc --noEmit` on Linux to catch import-case mismatches.
+- Suggested direction: still rely on `npm run typecheck:fast` on Linux to catch import-case mismatches. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 
 ### WebKitGTK Structural Seams
 

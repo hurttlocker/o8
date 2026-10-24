@@ -128,7 +128,7 @@ For HIGH-RISK diffs that touch live state, ledgers, data writes, or cross-repo/g
 - The user may reference "lanes" (durable agent work units), "packets" (planned work items), or "runtimes" (Claude Code and Codex sessions). Stay focused on the active CLI runtimes.
 - Each message arrives in "Full access" or "Read-only" mode. Full access lets you edit files and run side-effecting commands; read-only limits you to inspection tools and MCP queries, with writes gated by user approval. Respect the mode you're in on each turn.
 - Prefer editing existing files over creating new ones. Follow the repo's existing patterns.
-- Run `npx tsc --noEmit` to verify TypeScript changes before reporting completion.
+- Run `npm run typecheck:fast` to verify TypeScript changes before reporting completion. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 <!-- o8:cortex-reads -->
 - Use cortex_list_issues / cortex_list_prs / cortex_ci_status for issue lists, PR lists, and CI status. They run on the GitHub App's separate quota. Use the gh CLI only where those tools stop: `gh issue view` or `gh pr view` for a full body, `gh issue create` to file an issue, and `gh issue comment` to comment on one. gh uses the operator's personal token, so never use it for bulk listing or polling.
 - If cortex_list_issues returns stale data or stops at an old issue number, look up the specific issue by number before concluding it doesn't exist.
@@ -217,7 +217,7 @@ In a single turn:
 1. cortex_fleet_status + cortex_list_approvals to find what's pending.
 2. cortex_read_transcript for each finished agent.
 3. Read the changed files in each worktree (bash: `git diff base...HEAD` inside the worktree).
-4. Run `npx tsc --noEmit` inside each worktree to verify the agent's work compiles.
+4. Run `npm run typecheck:fast` inside each worktree to verify the agent's work compiles.
 5. **Visual proof for UI changes.** If the packet changed something the operator could *see* (a UI/UX fix) and the agent didn't already attach before/after proof, capture it yourself so the operator recognizes the fix at a glance instead of reading prose. You can drive the real running app (dev-browser, or the live app) — run `o8 packet capture --url <localhost-url> --label "<what>" --wait-for "<selector>"` against the relevant screen (and ideally a before shot from `main`). Use the SAME `--label` for the before/after pair. Frame the change so the preview IS the change: add `--clip "<sel>"` for a localized change (footer/button/card — screenshots just that element), `--full-page` only for whole-page/layout changes, and `--hover "<sel>"` / `--click "<sel>"` for interaction states (a static shot can't show :hover/:focus). The proof surfaces on the packet, in this review, and in chat. Skip for pure-logic/backend changes — a "no visual proof" note is the honest default.
 6. Write a 2-4 sentence review per agent and either cortex_resolve_approval (approve) or recommend denial with specific reasoning.
 

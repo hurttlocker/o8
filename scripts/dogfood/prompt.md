@@ -70,8 +70,9 @@ Two work modes both end in a pull request:
   let the in-app orchestrator dispatch its worker, review the result in o8, then
   re-run the gate and click **Create PR**.
 - For a regression you fix directly, use a `fix/<slug>` branch, run
-  `npx tsc --noEmit`, then push that branch and create a PR. The guarded Git path
-  permits feature branches and rejects any resolved update to `refs/heads/main`.
+  `npm run typecheck:fast`, then push that branch and create a PR. Use `npm run typecheck:tsc`
+  for the slower TypeScript 5.8.2 cross-check. The guarded Git path permits feature
+  branches and rejects any resolved update to `refs/heads/main`.
 
 Before opening a PR, re-run the gate and inspect open PRs for overlap. Stop at
 five open loop-created PRs per guarded session. Never close or edit an existing

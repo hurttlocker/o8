@@ -100,7 +100,7 @@ export async function sendPushToSubscription(
         'TTL': String(ttl),
         'Authorization': `vapid t=${jwt}, k=${publicKey}`,
       },
-      body,
+      body: new Uint8Array(body),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);

@@ -39,7 +39,9 @@ Pull requests from forks wait for maintainer approval before CI reports appear. 
 Before submitting code changes, run:
 
 ```bash
-npx tsc --noEmit          # must be clean
+npm run typecheck:fast          # must be clean
+# Falls back to tsc 5.8 on Intel Macs and Windows.
+# Slower TypeScript 5.8.2 cross-check: npm run typecheck:tsc
 npm test                  # judge by the final summary, not by stderr
 npx eslint <files you changed>
 ```

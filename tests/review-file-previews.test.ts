@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const scope = vi.hoisted(() => ({ root: '' }));
 vi.mock('@/lib/llm/repo-scope', () => ({ getDefaultLlmRepoRoot: () => scope.root, resolveRegisteredRepoScope: async (path: string) => ({ repoRoot: path === scope.root ? scope.root : null, repo: null }) }));
 import { GET as diff } from '@/app/api/panel/file-diff/route';
+import { GET as serveImage } from '@/app/api/panel/serve-image/route';
 import { GET as asset } from '@/app/api/panel/file-asset/route';
 import { GET as content } from '@/app/api/v2/files/route';
 const request = (endpoint: string, path: string, extra: Record<string, string> = {}, headers?: HeadersInit) => new NextRequest(`http://localhost/api/${endpoint}?${new URLSearchParams({ path, workspace: scope.root, ...extra })}`, { headers });
@@ -16,7 +17,7 @@ beforeEach(async () => {
   execFileSync('git', ['add', '.'], { cwd: scope.root });
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'Fixture'], { cwd: scope.root });
 });
-afterEach(async () => { await rm(scope.root, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); await rm(scope.root, { recursive: true, force: true }); });
 describe('bounded review and file previews', () => {
   it('distinguishes media, nested directories, full text, and oversized diffs', async () => {
     await writeFile(join(scope.root, 'clip.mp4'), Buffer.from([0, 1, 2])); await mkdir(join(scope.root, 'nested'));
@@ -35,6 +36,25 @@ describe('bounded review and file previews', () => {
     const invalid = await asset(request('panel/file-asset', 'clip.mp4', {}, { Range: 'bytes=99-' })); expect(invalid.status).toBe(416); expect(invalid.headers.get('Content-Range')).toBe('bytes */10');
     await symlink('/etc/passwd', join(scope.root, 'escape.mp4')); expect((await asset(request('panel/file-asset', 'escape.mp4'))).status).toBe(404);
     expect((await diff(request('panel/file-diff', '../escape'))).status).toBe(403);
+  });
+  it('preserves every binary byte and exact content length in full and ranged media responses', async () => {
+    const bytes = Buffer.from([99, 0, 255, 128, 13, 10, 42]).subarray(1, 6);
+    await writeFile(join(scope.root, 'image.png'), bytes);
+    const full = await asset(request('panel/file-asset', 'image.png'));
+    const image = await serveImage(new Request(`http://localhost/api/panel/serve-image?${new URLSearchParams({ path: join(scope.root, 'image.png') })}`));
+    vi.stubEnv('CORTEX_IDE_MEDIA_ROOT', scope.root);
+    const { GET: mobileMedia } = await import('@/app/api/mobile/media/route');
+    const mobile = await mobileMedia(request('mobile/media', join(scope.root, 'image.png')));
+    for (const response of [full, image, mobile]) {
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('image/png');
+      expect(response.headers.get('Content-Length')).toBe(String(bytes.length));
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(bytes));
+    }
+    const range = await asset(request('panel/file-asset', 'image.png', {}, { Range: 'bytes=1-3' }));
+    expect(range.status).toBe(206);
+    expect(range.headers.get('Content-Length')).toBe('3');
+    expect(new Uint8Array(await range.arrayBuffer())).toEqual(new Uint8Array([255, 128, 13]));
   });
   it('bounds a read-only file preview without truncating the normal file API or changing disk contents', async () => {
     const original = 'readable line\n'.repeat(100_000); await writeFile(join(scope.root, 'large.txt'), original);

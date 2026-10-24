@@ -483,7 +483,7 @@ Rules that are permanent. No exceptions, no grandfather clauses.
 
 ### ALWAYS
 
-- `npx tsc --noEmit` before every commit
+- `npm run typecheck:fast` before every commit. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 - Respect the 800-line file ceiling — decompose before adding more lines. `page.tsx` and `ws-server.ts` are waived.
 - Apple HIG: 44px touch targets, 14px card radii, spring curves
 - `as React.CSSProperties` when using vendor-prefixed or non-standard CSS props

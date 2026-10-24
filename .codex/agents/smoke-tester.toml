@@ -11,7 +11,7 @@ When asked to run a smoke test:
    - GET /api/panel/repos
    - GET /api/command-center/fleet
    - GET /api/v2/chat-history/list
-3. Run `npx tsc --noEmit` to verify type safety
+3. Run `npm run typecheck:fast` to verify type safety. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 4. Check for common issues:
    - Console errors in recent smoke test logs
    - Untracked artifact files in project root

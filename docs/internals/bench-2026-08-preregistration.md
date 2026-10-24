@@ -47,7 +47,7 @@ Sub-scores, equally weighted:
 4. **Fit** — matches surrounding conventions; would pass review in this codebase.
 
 Mechanical gates recorded separately, never folded into the judge score:
-`npx tsc --noEmit` and `npx eslint` on changed files, pass/fail.
+`npm run typecheck:fast` and `npx eslint` on changed files, pass/fail. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 
 **Blinding procedure.** Diffs are written to files named only `A`, `B`, `C` per
 task, with a shuffled mapping stored outside the judging context. Author-revealing
