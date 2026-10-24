@@ -138,4 +138,16 @@ describe('shared GitHub list cache', () => {
     await expect(refreshGithubList(client, 'owner/repo', 'prs')).rejects.toThrow('403');
     expect(client.getQueryData(githubListQueryKey('owner/repo', 'prs'))).toMatchObject({ repo: 'o/r' });
   });
+
+  it.each(['prs', 'issues'] as const)('retains the last %s list after a malformed manual refresh and recovers', async kind => {
+    const options = kind === 'prs' ? pullRequestListQuery('owner/repo') : issueListQuery('owner/repo');
+    await (kind === 'prs' ? client.fetchQuery(pullRequestListQuery('owner/repo')) : client.fetchQuery(issueListQuery('owner/repo')));
+    const previous = client.getQueryData(options.queryKey);
+    fetchMock.mockImplementationOnce(async () => listResponse({ [kind]: {} }));
+    await expect(refreshGithubList(client, 'owner/repo', kind)).rejects.toThrow();
+    expect(client.getQueryData(options.queryKey)).toBe(previous);
+    expect(client.getQueryState(options.queryKey)?.status).toBe('error');
+    fetchMock.mockImplementationOnce(async () => listResponse({ repo: 'owner/repo', [kind]: [] }));
+    await expect(refreshGithubList(client, 'owner/repo', kind)).resolves.toEqual({ repo: 'owner/repo', [kind]: [] });
+  });
 });

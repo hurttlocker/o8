@@ -88,10 +88,16 @@ export function githubRefreshInterval(isHidden: () => boolean = windowHidden): (
   return () => (isHidden() ? GITHUB_HIDDEN_REFRESH_MS : GITHUB_VISIBLE_REFRESH_MS);
 }
 
-async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+async function getJson<T>(url: string, kind: GithubListKind, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
-  return response.json() as Promise<T>;
+  const data = await response.json();
+  // A successful HTTP status alone must not replace a usable cached list.
+  // Stale broker snapshots (including their error metadata) remain usable.
+  if (data === null || typeof data !== 'object' || !Array.isArray(data[kind])) {
+    throw new Error(`${url} returned an invalid ${kind} list`);
+  }
+  return data as T;
 }
 
 function listUrl(repo: string, kind: GithubListKind, fresh: boolean, repoPath?: string | null): string {
@@ -107,7 +113,7 @@ interface ListQueryOptions {
 function listQuery<T>(repo: string, kind: GithubListKind, { isHidden, repoPath }: ListQueryOptions = {}) {
   return {
     queryKey: githubListQueryKey(repo, kind, repoPath),
-    queryFn: ({ signal }: { signal?: AbortSignal }) => getJson<T>(listUrl(repo, kind, false, repoPath), signal),
+    queryFn: ({ signal }: { signal?: AbortSignal }) => getJson<T>(listUrl(repo, kind, false, repoPath), kind, signal),
     staleTime: GITHUB_LIST_FRESH_MS,
     gcTime: GITHUB_LIST_GC_MS,
     refetchInterval: githubRefreshInterval(isHidden),
@@ -140,7 +146,7 @@ export async function refreshGithubList(
   await queryClient.cancelQueries({ queryKey, exact: true });
   return queryClient.fetchQuery({
     queryKey,
-    queryFn: ({ signal }) => getJson<GithubPullRequestList | GithubIssueList>(listUrl(repo, kind, true, repoPath), signal),
+    queryFn: ({ signal }) => getJson<GithubPullRequestList | GithubIssueList>(listUrl(repo, kind, true, repoPath), kind, signal),
     staleTime: 0,
   });
 }
