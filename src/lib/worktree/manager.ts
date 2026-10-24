@@ -268,7 +268,7 @@ function sanitizeTaskName(name: string): string {
 /**
  * Derive the worktree directory id from create options.
  *
- * When a `packetId` is provided we always use `packet-<sanitized>` so two
+ * When a `packetId` is provided we use the `packet-<sanitized>` prefix so two
  * packets dispatched in parallel never collide on the same dir slot — the
  * old behaviour collapsed every codex packet whose prompt summarised to
  * "context" into `.cortex-worktrees/context`. The `packet-` prefix also
@@ -276,17 +276,14 @@ function sanitizeTaskName(name: string): string {
  * so orchestrator session detection picks them up uniformly across runtimes.
  *
  * Without a packetId (scratch launches, diff-apply, etc.) we fall back to
- * the taskName-derived slug.
+ * the taskName-derived slug. Manager-created leaves append the index-exclusion
+ * suffix before checkout population; externally managed Claude names stay intact.
  */
 function deriveWorktreeId(opts: CreateWorktreeOptions): string {
   const packetWorktreeId = opts.packetId ? managedPacketWorktreeId(opts.packetId) : null;
-  if (packetWorktreeId) {
-    // Keep the metadata namespace stable; only new manager-created packet leaves
-    // carry Spotlight's directory suffix, before any checkout/dependency writes.
-    return opts.agentType === 'claude-code' && !opts.managed
-      ? packetWorktreeId : `${packetWorktreeId}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
-  }
-  return sanitizeTaskName(opts.taskName);
+  const worktreeId = packetWorktreeId ?? sanitizeTaskName(opts.taskName);
+  return opts.agentType === 'claude-code' && !opts.managed
+    ? worktreeId : `${worktreeId}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
 }
 
 function sanitizeBranchName(name: string) {
