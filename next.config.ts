@@ -50,6 +50,9 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
+    // Next otherwise requires every route at boot, retaining unused feature
+    // chunks and their module-level state for the entire sidecar lifetime.
+    preloadEntriesOnStart: false,
     // Runtime response caches must not mutate the signed standalone app.
     // Compiled responses remain readable and the in-memory cache stays enabled.
     isrFlushToDisk: false,
