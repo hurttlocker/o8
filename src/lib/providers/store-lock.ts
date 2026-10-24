@@ -10,7 +10,8 @@ export function withProviderStoreLock<T>(operation: () => T): T {
   const directory = getDataDir();
   if (heldDirectory === directory) return operation();
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const lock = new Database(join(directory, '.provider-keys.lock'), { timeout: 0 });
+  // Concurrent launchers may finish their short validation-and-spawn transaction.
+  const lock = new Database(join(directory, '.provider-keys.lock'), { timeout: 1000 });
   try { lock.exec('BEGIN EXCLUSIVE'); heldDirectory = directory; return operation(); }
   finally { heldDirectory = null; lock.close(); }
 }
