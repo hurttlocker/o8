@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties, ReactNode } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { HeaderIconPill } from '@/components/desktop/shell/HeaderIconPill';
 import { RamsButton } from '@/components/desktop/settings/RamsButton';
 import { SendPill } from '@/components/desktop/thoughts/ComposerSendControl';
@@ -34,7 +34,24 @@ export function VisualInstructionEntry({ value }: { value: VisualComposerBinding
 
 export function VisualInstructionAttachments({ value }: { value: VisualComposerBinding }) {
   const frames = value.draft?.request.frames ?? [];
-  return <section aria-label="Visual instruction frames" style={{ paddingTop: 8, paddingRight: 14, paddingBottom: 0, paddingLeft: 14 }}>
+  const section = useRef<HTMLElement | null>(null);
+  const removeTrigger = useRef<HTMLButtonElement | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<{ principal: string; requestId: string; frameId: string } | null>(null);
+  const removalIndex = pendingRemoval && pendingRemoval.principal === value.draft?.principal
+    && pendingRemoval.requestId === value.draft?.request.id && !value.confirmClear
+    ? frames.findIndex(frame => frame.id === pendingRemoval.frameId) : -1;
+  const focusButton = (label: string) => section.current?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`) ?? null;
+  const cancelRemoval = () => { setPendingRemoval(null); removeTrigger.current?.focus(); };
+  const confirmRemoval = () => {
+    if (value.locked || removalIndex < 0 || !pendingRemoval) return;
+    const nextIndex = removalIndex + 1 < frames.length ? removalIndex + 1 : removalIndex - 1;
+    const next = focusButton(nextIndex >= 0 ? `Annotate frame ${nextIndex + 1}` : 'Discard visual draft');
+    value.removeFrame(pendingRemoval.frameId);
+    setPendingRemoval(null); next?.focus();
+  };
+  return <section ref={section} aria-label="Visual instruction frames" onKeyDown={event => {
+    if (event.key === 'Escape' && removalIndex >= 0) { event.preventDefault(); event.stopPropagation(); cancelRemoval(); }
+  }} style={{ paddingTop: 8, paddingRight: 14, paddingBottom: 0, paddingLeft: 14 }}>
     <div style={{ ...row, justifyContent: 'space-between', minHeight: 26 }}>
       <div style={row}><VisualGlyph kind="capture" /><span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px' }}>Visual instruction</span><span style={meta}>{frames.length} / {MAX_VISUAL_FRAMES}</span></div>
       <div style={{ ...row, gap: 0 }}>
@@ -49,10 +66,20 @@ export function VisualInstructionAttachments({ value }: { value: VisualComposerB
           <img src={frame.image.dataUri} alt={`Marked frame ${index + 1}`} style={{ display: 'block', width: 110, height: 70, objectFit: 'contain' }} />
           <span style={{ ...meta, display: 'flex', justifyContent: 'space-between', paddingTop: 5, paddingRight: 7, paddingBottom: 5, paddingLeft: 7, fontVariantNumeric: 'tabular-nums' }}><span>{String(index + 1).padStart(2, '0')}</span><span>{timestamp(frame.atMs)}</span></span>
         </button>
-        <div style={{ position: 'absolute', top: 2, right: 2, borderRadius: 7, background: 'var(--t-chat-surface-input-bg, var(--t-input-bg))' }}><HeaderIconPill label={`Remove frame ${index + 1}`} icon={<VisualGlyph kind="close" />} disabled={value.locked} yNudge={0} onClick={() => value.removeFrame(frame.id)} /></div>
+        <div style={{ position: 'absolute', top: 2, right: 2, borderRadius: 7, background: 'var(--t-chat-surface-input-bg, var(--t-input-bg))' }}><HeaderIconPill label={`Remove frame ${index + 1}`} expanded={removalIndex === index} icon={<VisualGlyph kind="close" />} disabled={value.locked} yNudge={0} onClick={() => {
+          if (!value.draft || value.locked) return;
+          removeTrigger.current = focusButton(`Remove frame ${index + 1}`);
+          if (value.confirmClear) value.toggleClear();
+          setPendingRemoval({ principal: value.draft.principal, requestId: value.draft.request.id, frameId: frame.id });
+        }} /></div>
       </div>)}
       {frames.length < MAX_VISUAL_FRAMES ? <button type="button" aria-label="Add another image" disabled={value.locked} onClick={value.pickImages} style={{ ...meta, width: 60, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1px dashed var(--t-divider-subtle)', borderRadius: 8, background: 'transparent', cursor: value.locked ? 'default' : 'pointer' }}><span aria-hidden style={{ fontSize: 20, fontWeight: 260, lineHeight: 1 }}>+</span><span>Add</span></button> : null}
     </div> : <p style={{ ...meta, marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>Add an image, then mark the detail you want your agent to see.</p>}
+    {removalIndex >= 0 ? <div role="group" aria-label="Confirm frame removal" style={{ ...row, paddingTop: 8, paddingBottom: 8, flexWrap: 'wrap' }}>
+      <span style={{ ...meta, flex: 1 }} aria-live="polite">Remove frame {removalIndex + 1}?</span>
+      <RamsButton variant="danger" aria-label={`Confirm remove frame ${removalIndex + 1}`} disabled={value.locked} onClick={confirmRemoval}>Remove</RamsButton>
+      <RamsButton variant="ghost" aria-label="Keep frame" disabled={value.locked} onClick={cancelRemoval}>Keep frame</RamsButton>
+    </div> : null}
     {value.confirmClear ? <div role="group" aria-label="Confirm discard" style={{ ...row, paddingTop: 8, paddingBottom: 8, flexWrap: 'wrap' }}><span style={{ ...meta, flex: 1 }}>Discard this draft?</span><RamsButton variant="danger" disabled={value.busy || value.capturing} onClick={value.clear}>Discard</RamsButton><RamsButton variant="ghost" disabled={value.busy || value.capturing} onClick={value.toggleClear}>Keep draft</RamsButton></div> : null}
   </section>;
 }

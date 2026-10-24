@@ -173,3 +173,70 @@ it.each(['close visual', 'switch chat'])('rejects late dictation when its visibl
   expect(test.cancel).toHaveBeenCalled(); expect(test.rows.get('a')?.request.utterance).toBe('Keep this button.');
   expect(ordinaryChange).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
 });
+
+const labelledButton = (label: string) => node.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+const removalPrompt = () => node.querySelector<HTMLElement>('[aria-label="Confirm frame removal"]');
+async function markedFrames() {
+  const draft = sample();
+  draft.request.frames = ['a', 'b', 'c'].map((id, index) => ({ ...draft.request.frames[0], id: `frame-${id}`, atMs: index * 1_000,
+    transcript: `Annotation ${id}`, pins: [{ n: 1, x: 0.5, y: 0.5, text: `Keep mark ${id}` }] }));
+  await act(async () => { test.rows.set('a', draft); test.listeners.forEach(listener => listener()); });
+  return draft.request.frames;
+}
+it('keeps marked frames until confirmation and cancels from the same inline controls', async () => {
+  const frames = await markedFrames();
+  await act(async () => labelledButton('Remove frame 2').click());
+  expect(test.rows.get('a')?.request.frames).toEqual(frames);
+  expect(removalPrompt()?.textContent).toContain('Remove frame 2?');
+  await act(async () => labelledButton('Keep frame').click());
+  expect(test.rows.get('a')?.request.frames).toEqual(frames);
+  expect(removalPrompt()).toBeNull();
+  expect(document.activeElement).toBe(labelledButton('Remove frame 2'));
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('confirms the selected frame only, preserves annotated order, and restores nearby focus', async () => {
+  const frames = await markedFrames();
+  await act(async () => labelledButton('Remove frame 2').click());
+  await act(async () => labelledButton('Confirm remove frame 2').click());
+  expect(test.rows.get('a')?.request.frames).toEqual([frames[0], frames[2]]);
+  expect(removalPrompt()).toBeNull();
+  expect(document.activeElement).toBe(labelledButton('Annotate frame 2'));
+});
+it('cancels a keyboard-opened removal with Escape without dropping annotations', async () => {
+  const frames = await markedFrames();
+  await act(async () => { labelledButton('Remove frame 1').focus(); labelledButton('Remove frame 1').click(); });
+  await act(async () => labelledButton('Keep frame').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(removalPrompt()).toBeNull();
+  expect(test.rows.get('a')?.request.frames).toEqual(frames);
+  expect(document.activeElement).toBe(labelledButton('Remove frame 1'));
+});
+it.each(['capture', 'send'] as const)('keeps frame confirmation locked during %s', async mode => {
+  const frames = await markedFrames();
+  let release: (() => void) | undefined;
+  await act(async () => labelledButton('Remove frame 2').click());
+  if (mode === 'capture') await act(async () => claimVisualCapture('capture', 'a', target, 'request-a'));
+  else {
+    test.hold = new Promise<void>(done => { release = done; });
+    fetcher.mockResolvedValueOnce(Response.json({ error: 'Not sent.' }, { status: 400 }));
+    await act(async () => send().click());
+  }
+  expect(labelledButton('Confirm remove frame 2').disabled).toBe(true);
+  await act(async () => labelledButton('Confirm remove frame 2').click());
+  expect(test.rows.get('a')?.request.frames).toEqual(frames);
+  expect(fetcher).not.toHaveBeenCalled();
+  if (release) await act(async () => release!());
+});
+it('does not carry a removal confirmation into a replacement draft', async () => {
+  await markedFrames();
+  await act(async () => labelledButton('Remove frame 2').click());
+  await act(async () => { test.rows.set('a', { ...sample(), request: { ...sample().request, id: 'replacement' } }); test.listeners.forEach(listener => listener()); });
+  expect(removalPrompt()).toBeNull();
+  expect(test.rows.get('a')?.request.frames).toHaveLength(1);
+});
+it('returns focus to a surviving control after confirming the final frame removal', async () => {
+  await act(async () => labelledButton('Remove frame 1').click());
+  await act(async () => labelledButton('Confirm remove frame 1').click());
+  expect(test.rows.get('a')?.request.frames).toHaveLength(0);
+  expect(document.activeElement).toBe(labelledButton('Discard visual draft'));
+  expect(send().disabled).toBe(true);
+});
