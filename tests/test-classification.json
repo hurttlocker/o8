@@ -2932,6 +2932,16 @@
       ]
     },
     {
+      "path": "tests/governance-base-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/governed-terminal-write-real-path.test.ts",
       "reasons": [
         "child-process",

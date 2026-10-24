@@ -13,6 +13,8 @@ import { resolvePacketDispatcher } from '@/lib/orchestrator/dispatcher-attributi
 import { assessDurableApprovedReview } from './durable-review-approval';
 import { preserveAndRecordLaneRecovery } from './merge-recovery';
 import { riskForChangedPaths } from './changed-path-risk';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
+import { readHeadSha } from '@/lib/lane/head-sha-lock';
 
 const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
   'merge-gate-violation',
@@ -20,22 +22,37 @@ const RECOVERABLE_MERGE_FAILURE_POLICIES = new Set([
   'fast_forward_failure_escalation',
 ]);
 
-export async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
+type DiffLane = Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'> & Partial<Pick<Lane, 'id'>>;
+
+async function readDiffForLane(lane: DiffLane) {
   const cwd = lane.worktreePath || lane.repoPath;
+
+  if (lane.id) {
+    const headSha = await readHeadSha(cwd, lane.repoPath);
+    const diffBase = await resolveLaneAttributionBase({ id: lane.id, baseBranch: lane.baseBranch }, cwd, headSha,
+      args => laneGit(cwd, lane.repoPath, args));
+    const base = diffBase.mergeBase ?? diffBase.comparisonRef;
+    const result = await laneGit(cwd, lane.repoPath, ['diff', `${base}...${headSha}`, '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
+    return { rawDiff: result.stdout.trim(), diffBase };
+  }
 
   try {
     const result = await laneGit(cwd, lane.repoPath, ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
-    return result.stdout.trim();
+    return { rawDiff: result.stdout.trim(), diffBase: null };
   } catch (error) {
     if (error instanceof LaneGitMetadataError) throw error;
     try {
       const fallback = await laneGit(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
-      return fallback.stdout.trim();
+      return { rawDiff: fallback.stdout.trim(), diffBase: null };
     } catch (error) {
       if (error instanceof LaneGitMetadataError) throw error;
-      return '';
+      return { rawDiff: '', diffBase: null };
     }
   }
+}
+
+export async function getDiffForLane(lane: DiffLane) {
+  return (await readDiffForLane(lane)).rawDiff;
 }
 
 async function recordReviewLessonsForApproval(
@@ -142,7 +159,7 @@ export async function createLaneActionApproval(
       }
     }
   }
-  const rawDiff = await getDiffForLane(lane);
+  const { rawDiff, diffBase } = await readDiffForLane(lane);
   const files = parseGitDiff(rawDiff);
   const surfaceRoute = resolveRequireApprovalSync() === 'surface' && lane.packetId
     ? resolvePacketDispatcher(lane.packetId) ?? {
@@ -198,6 +215,10 @@ export async function createLaneActionApproval(
         ...(surfaceRoute.missionId ? { 'Dispatcher Mission': surfaceRoute.missionId } : {}),
       } : {}),
       ...input.metadata,
+      ...(diffBase ? {
+        'Base SHA': diffBase.mergeBase ?? diffBase.comparisonRef,
+        'Changed file count': String(files.length),
+      } : {}),
     },
     continuation: {
       kind: 'lane',
