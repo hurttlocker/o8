@@ -6458,6 +6458,15 @@
       ]
     },
     {
+      "path": "tests/ws-o8d-cutover-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-parity-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,0 +1,111 @@
+import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createConnection } from 'node:net';
+import { promisify } from 'node:util';
+import { beforeAll, expect, it } from 'vitest';
+import { runRecordedSession, type RecordedSession } from '../scripts/lib/ws-parity-session';
+import { startParityReference } from './fixtures/ws-parity-server';
+import { cutoverClient, cutoverHealth, publishCutoverMutation, waitForTransport } from './fixtures/ws-cutover-client';
+
+const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug/o8d');
+beforeAll(async () => {
+  if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked',
+    '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+}, 120_000);
+
+it('keeps the TypeScript transport and protocol with the flag off', async () => {
+  const server = await startParityReference({ o8d: false, binary });
+  try {
+    expect((await cutoverHealth(server)).delivery).toBeUndefined();
+    const recording = JSON.parse(readFileSync('tests/fixtures/ws-parity/control.json', 'utf8')) as RecordedSession;
+    await runRecordedSession(recording, { ...server, fixtureUrl: server.apiUrl });
+  } finally { await server.stop(); }
+});
+
+it.each(['control', 'replay', 'gap', 'incompatible'])('serves the live %s recording through o8d', async (name) => {
+  const server = await startParityReference({ o8d: true, binary });
+  try {
+    const health = await fetch(server.url.replace('ws:', 'http:').replace('/ws', '/health')).then((r) => r.json());
+    expect(health.delivery?.transport).toBe('o8d');
+    const recording = JSON.parse(readFileSync(`tests/fixtures/ws-parity/${name}.json`, 'utf8')) as RecordedSession;
+    expect(await runRecordedSession(recording, { ...server, fixtureUrl: server.apiUrl })).toMatchObject({ closes: expect.any(Number) });
+  } finally {
+    await server.stop();
+  }
+});
+
+it('rejects unmarked private upgrades after HTTP keepalive, even with spoofed peer headers', async () => {
+  const server = await startParityReference({ o8d: true, binary });
+  const endpoint = new URL(server.url);
+  const socket = createConnection({ host: endpoint.hostname, port: Number(endpoint.port) });
+  try {
+    await once(socket, 'connect');
+    let response = '';
+    socket.on('data', (data) => { response += data.toString(); });
+    const closed = once(socket, 'close');
+    socket.write('GET /health HTTP/1.1\r\nHost: fixture\r\nConnection: keep-alive\r\n\r\n'
+      + `GET /ws?token=${server.token} HTTP/1.1\r\nHost: fixture\r\nConnection: Upgrade\r\n`
+      + 'Upgrade:websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+      + 'x-o8d-bridge: forged\r\nx-o8d-peer: 127.0.0.1\r\n\r\n');
+    await closed;
+    expect(response.includes('401 Unauthorized')).toBe(true);
+    expect(response.includes('101 Switching Protocols')).toBe(false);
+  } finally { socket.destroy(); await server.stop(); }
+});
+
+it('falls back when the binary is missing, through the unchanged app URL', async () => {
+  const server = await startParityReference({ o8d: true, binary: join(process.cwd(), 'missing-o8d-fixture') });
+  try {
+    await waitForTransport(server, 'typescript');
+    const client = await cutoverClient(server.url, server.token);
+    try {
+      await publishCutoverMutation(server, 'missing-binary');
+      await client.delivered('missing-binary');
+    } finally { await client.close(); }
+  } finally { await server.stop(); }
+});
+
+it('bounds the producer pipe and replays an oversized publication after falling back', async () => {
+  const server = await startParityReference({ o8d: true, binary });
+  try {
+    const first = await cutoverClient(server.url, server.token);
+    await publishCutoverMutation(server, 'pipe-overflow', 1024 * 1024 + 1);
+    await waitForTransport(server, 'typescript');
+    const fallback = await cutoverClient(server.url, server.token, { since: first.since, epoch: first.epoch });
+    try {
+      await fallback.delivered('pipe-overflow');
+      expect(fallback.events().filter((event) => event.data?.mutation?.mutationId === 'pipe-overflow')).toHaveLength(1);
+    } finally { await fallback.close(); await first.close(); }
+  } finally { await server.stop(); }
+});
+
+it('replays every event across exit, TS fallback publication and a Rust restart', async () => {
+  const server = await startParityReference({ o8d: true, binary, logLimit: 400 });
+  try {
+    const first = await cutoverClient(server.url, server.token);
+    const resume = { since: first.since, epoch: first.epoch };
+    const rust = await waitForTransport(server, 'o8d');
+    for (let index = 0; index < 10; index += 1) await publishCutoverMutation(server, `before-${index}`);
+    await first.delivered('before-9');
+    process.kill(rust.pid!, 'SIGKILL');
+    await waitForTransport(server, 'typescript');
+    const fallback = await cutoverClient(server.url, server.token, resume);
+    for (let index = 0; index < 10; index += 1) await publishCutoverMutation(server, `outage-${index}`);
+    await fallback.delivered('outage-9');
+    await waitForTransport(server, 'o8d', 2);
+    const restarted = await cutoverClient(server.url, server.token, resume);
+    try {
+      for (let index = 0; index < 10; index += 1) await publishCutoverMutation(server, `after-${index}`);
+      await restarted.delivered('after-9');
+      const ids = restarted.events().flatMap((event) => event.data?.mutation ? [event.data.mutation.mutationId] : []);
+      expect(ids).toEqual(['before', 'outage', 'after'].flatMap((phase) => Array.from({ length: 10 }, (_, index) => `${phase}-${index}`)));
+      expect(restarted.epoch).toBe(resume.epoch);
+    } finally {
+      await restarted.close();
+      await fallback.close();
+      await first.close();
+    }
+  } finally { await server.stop(); }
+});

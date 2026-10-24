@@ -1,77 +1,89 @@
-# o8d delivery prototype (issue #4395, partial slice)
+# o8d opt-in WebSocket delivery
 
-This standalone Tokio crate contains opt-in experiments. Default app launches
-and ports are unchanged. Default Cargo features enable no transport. Websocket
-mode requires both the `experimental-ws` Cargo feature and `--experimental-ws`
-runtime flag, and refuses non-loopback listeners. That mode never executes
-terminal, orchestrator, or Symon commands.
-
-The separate Linux process supervisor uses `experimental-supervisor` and
-`--experimental-supervisor`. Its protocol, native Codex launch opt-in and fixture
-verification are documented in [SUPERVISOR.md](SUPERVISOR.md).
+The app can opt into Rust delivery with `O8_WS_O8D=1`. Build the binary first:
 
 ```sh
-cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
 cargo build --locked --release --manifest-path crates/o8d/Cargo.toml --features experimental-ws
 ```
 
-For an isolated fixture, provide `WS_TOKEN` and `O8D_SERVER_VERSION` through the
-environment, then run the binary with `--experimental-ws --listen 127.0.0.1:0`.
-The chosen ephemeral address is the first stdout JSON line. Optional
-`--initial-state <file>` supplies a JSON array of TypeScript-produced legacy
-initial envelopes. The inherited stdin pipe accepts one JSON array of already
-stamped realtime envelopes per line. The crate validates the full batch before
-changing its retained state; invalid producer input exits the prototype.
-Closing stdin stops it. There is no public HTTP producer route or WS publish
-message. Unknown envelope fields survive delivery. Never put credentials in
-recordings or initial-state files.
+`O8D_BINARY` can select a build explicitly; otherwise the bridge looks in this
+crate's release target directory. Missing binaries fall back to TypeScript.
+Without the flag, the existing TypeScript listener and delivery path are unchanged.
+No release, packaging, or launcher installation is added here.
 
-Implemented: shared-token upgrade rejection, connected/welcome
-envelopes, version-1 negotiation, known capability audiences, application and
-control ping/pong, replacement subscriptions, bounded global retention,
-epoch-bound replay, reconnect, and empty-list unsubscription. Private bootstrap
-envelopes advance the counter without leaking to replay or live subscribers.
-The real-socket Rust test exercises authentication, live publication, reconnect,
-replay, and unsubscribe. The URL-based TypeScript parity test runs the identical
-control recording against both binaries, including every initial envelope and
-the normal close response.
+The TypeScript entry point starts a private ephemeral loopback listener and
+supervises o8d on the resolved public WS port. Clients keep the same app URL.
+Rust authenticates each upgrade through the existing TypeScript gate before
+accepting it. An inherited random bridge credential authenticates peer metadata;
+unmarked upgrades on the private listener are rejected, including upgrades after
+HTTP keepalive. Device authentication, revocation, E2EE, commands, bootstrap and
+checkpoint generation remain in TypeScript. Encrypted device traffic is relayed;
+Rust does not decrypt it or fan it out from the plaintext event bus.
 
-This is **not a replacement for the TypeScript WS server yet**. Remaining work:
+Local operator realtime subscriptions receive TS-stamped live events through one
+inherited producer pipe. Rust handles fan-out, application/control heartbeats and
+close forwarding. Private subscription barriers reconcile events crossing the
+producer and backhaul streams. Evicted crossovers and lagged receivers close with
+1013 so clients reconnect for authoritative replay. Socket writes have a 50 ms
+budget. A slow socket cannot hold another client's task.
 
-* Connect TypeScript's live producers and per-client initial state to this
-  inherited-pipe seam; supervise startup, restart, and shutdown behind an app
-  opt-in selection flag. No production bridge exists in this slice.
-* Bridge fresh bootstrap and replay-gap checkpoint requests to TypeScript. The
-  prototype currently behaves like an unavailable checkpoint builder: fresh
-  bootstrap yields no events, and a gap yields an empty descriptor. Consequently
-  the full `replay.json` and `gap.json` recordings do not pass against Rust.
-* Add device credential lookup/revocation and encrypted device handshakes before
-  considering remote listeners. Only shared-token loopback fixtures are enabled.
-* Implement legacy session/history, packet-tail, terminal, thread, and command
-  routing to their existing TypeScript owners. Only empty packet-tail validation
-  is included in the control recording.
-* Match TypeScript's 64 KiB/32-message/50 ms backpressure policy. The prototype
-  uses a bounded Tokio broadcast ring; lag disconnects rather than silently
-  claiming equivalent durable delivery.
-* Match compression, process-wide heartbeat scheduling, payload limits, RFC
-  edge-case close behavior, and graceful `1001` shutdown. Current heartbeats
-  start per connection. Shutdown currently drops transports.
+The producer pipe is capped at 1 MiB including queued bytes. Oversized publication
+or pipe pressure closes producer input and returns clients to the TS listener;
+Rust is retried after two seconds. Rust retains at most 400 events and uses a
+count-bounded Tokio broadcast ring; each batch is bounded by the pipe limit. TypeScript
+keeps its existing count/byte-bounded replay log and epoch across Rust lifetimes.
+Tests recover every retained event through missing-binary fallback, process exit,
+publication during fallback, restart, and oversized-publication fallback.
 
-The current protocol is documented in
-[ws-protocol.md](../../docs/internals/ws-protocol.md). Run the recorded-session
-tests with `npx vitest run tests/ws-parity-real-path.test.ts`; they build the
-opt-in binary unless `O8D_TEST_BINARY` points to an existing build. They use
-isolated data, Git, Next HTTP fixtures, and real WS sockets.
+These are **bounded replay guarantees**, not a durable journal: history evicted
+from the TS log uses the existing checkpoint/gap protocol. Exact redelivery of
+all transitions beyond that retention window is still outstanding for #4533.
+HTTP forwarding drains for a fixed 100 ms during orderly Rust shutdown; this is
+best effort, and a slow request or abrupt process exit can lose its acknowledgment
+after TS accepts it. Completion-aware draining or idempotent ingress remains to
+be implemented. The Rust frontend does not negotiate permessage-deflate; device
+traffic and legacy channel fan-out still use their TS owners.
 
-On Linux, run `node --import=tsx scripts/bench/ws-event-bus.ts` with
-`O8D_TEST_BINARY` pointing to the release binary. It measures process idle RSS
-with zero, one, and twenty connected clients, and time from producer submission
-to the last subscriber receipt, with 20
-warmups and 200 samples for 1 and 20 clients. Each mutation has a 1 KiB note.
-Subscriptions start at the connection's current cursor, excluding retained history.
-The TS entry uses its authenticated HTTP producer route; Rust consumes the same
-envelope shape through stdin. These are different producer hops, and Rust still
-needs TypeScript producers. RSS is per process, not a replacement-system memory
-estimate. No real account, desktop app, or model provider is used.
+## Verification and measurements
 
-The separate opt-in HTTP transport is documented in [Experimental MCP transport](MCP.md).
+```sh
+cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+O8D_TEST_BINARY=crates/o8d/target/release/o8d O8_WS_PARITY_O8D=1 \
+  npx vitest run tests/ws-parity-real-path.test.ts tests/ws-o8d-cutover-real-path.test.ts
+O8_WS_O8D=1 O8D_BINARY=crates/o8d/target/release/o8d \
+  npx vitest run tests/mobile-e2ee-required-real-path.test.ts
+O8D_TEST_BINARY=crates/o8d/target/release/o8d \
+  node --import=tsx scripts/bench/ws-cutover.ts
+```
+
+The Linux benchmark uses the real TS HTTP producer and app WS entry point in
+both modes: 20 warmups and 200 last-subscriber fan-out samples, 1 KiB mutations,
+1 and 20 clients. Ten fixture-only large-state JSON bursts block the TS loop for
+at least 300 ms each, modeling the synchronous state work implicated in #4367.
+A separate process measures application ping RTT every 10 ms, with one pending
+ping per client. Memory includes both TS and Rust RSS, at idle and after load;
+the reported peak is sampled after each burst, not an allocator high-water mark.
+No desktop, operator machine, model provider, or real account is used.
+
+The separate Linux process supervisor uses `experimental-supervisor` and
+`--experimental-supervisor`. Its protocol and native launch opt-in are documented
+in [SUPERVISOR.md](SUPERVISOR.md). It remains separate from WebSocket mode.
+
+## Standalone slice 1 prototype
+
+Default Cargo features build only the delivery library. The standalone binary
+requires both the `experimental-ws` feature and `--experimental-ws`, and refuses
+non-loopback listeners unless the app's authenticated backhaul mode is selected.
+For isolated recordings, provide `WS_TOKEN` and `O8D_SERVER_VERSION`, then run
+`--experimental-ws --listen 127.0.0.1:0`. The first stdout line reports the chosen
+address. `--initial-state <file>` supplies TS-produced legacy initial envelopes.
+Inherited stdin accepts one JSON array of stamped envelopes per line; invalid
+input stops the standalone prototype. It never executes client commands.
+
+The app-backed path passes all four existing recordings. The standalone prototype
+still lacks fresh TS checkpoint generation and full legacy command routing.
+The protocol is documented in [ws-protocol.md](../../docs/internals/ws-protocol.md).
+The older standalone comparison remains in `scripts/bench/ws-event-bus.ts`;
+`scripts/bench/ws-cutover.ts` measures the combined app path.
+
+The separate HTTP transport is documented in [Experimental MCP transport](MCP.md).
