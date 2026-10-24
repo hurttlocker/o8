@@ -14,13 +14,29 @@ use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 pub struct RowState {
     pub row: Row,
     pub layouts: usize,
+    expanded: Option<bool>,
     cache: Option<Layout>,
 }
 impl RowState {
+    #[cfg(test)]
+    pub fn rendered(&self) -> (Pixels, Vec<String>) {
+        let cache = self.cache.as_ref().expect("row reached layout");
+        (
+            cache.size.height,
+            cache
+                .lines
+                .iter()
+                .map(|line| line.line.text.to_string())
+                .collect(),
+        )
+    }
     pub fn new(row: Row) -> Self {
+        let expanded = matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event))
+            .then_some(false);
         Self {
             row,
             layouts: 0,
+            expanded,
             cache: None,
         }
     }
@@ -47,7 +63,7 @@ struct Builder {
     backgrounds: Vec<Backdrop>,
 }
 impl Builder {
-    fn rich_node(&mut self, kind: &str, data: &serde_json::Value, window: &Window) {
+    fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
         let label = |value: &serde_json::Value| value.as_str().unwrap_or("").to_owned();
         if kind == "table" {
             let headers = data["headers"].as_array().cloned().unwrap_or_default();
@@ -98,77 +114,48 @@ impl Builder {
             }
             return;
         }
-        let lines = match kind {
-            "handoff" => {
-                let source = data["from"]["model"]
-                    .as_str()
-                    .or(data["from"]["backend"].as_str())
-                    .unwrap_or("Unknown source");
-                let destination = data["to"]["model"]
-                    .as_str()
-                    .or(data["to"]["backend"].as_str())
-                    .unwrap_or("Unknown destination");
-                let mut lines = vec![
-                    format!("{source} → {destination}"),
-                    if data["lossless"] == true {
-                        "Lossless same-session handoff"
-                    } else {
-                        "Cold handoff"
-                    }
-                    .into(),
-                ];
-                for layer in [
-                    "narrative",
-                    "intent",
-                    "workspace",
-                    "governance",
-                    "provenance",
-                ] {
-                    lines.push(format!("{layer}: {}", label(&data["carries"][layer])));
-                }
-                let packet = &data["packet"];
-                if packet["workspace"].is_object() {
-                    lines.push(format!(
-                        "Workspace: {} · {}",
-                        label(&packet["workspace"]["branch"]),
-                        if packet["workspace"]["dirty"] == true {
-                            "uncommitted changes present"
-                        } else {
-                            "clean"
-                        }
-                    ));
-                }
-                if packet["governance"].is_object() {
-                    lines.push(format!(
-                        "Governance: {} packets · {} approvals",
-                        packet["governance"]["packets"]
-                            .as_array()
-                            .map_or(0, Vec::len),
-                        packet["governance"]["approvals"]
-                            .as_array()
-                            .map_or(0, Vec::len)
-                    ));
-                }
-                if let Some(model) = packet["narrative"]["compactedBy"]["model"].as_str() {
-                    lines.push(format!("Compacted by {model}"));
-                }
-                lines
+        if matches!(kind, "handoff" | "compaction") {
+            let summary = crate::rich::event_summary(kind, data);
+            let summary = crate::text::sanitize(&summary)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
+            let mut runs = vec![text_run(&Run {
+                style: "text".into(),
+                text: text.clone(),
+            })];
+            let text = window
+                .text_system()
+                .line_wrapper(runs[0].font.clone(), px(12.))
+                .truncate_line(
+                    text.into(),
+                    (self.width - px(48.)).max(px(1.)),
+                    "…",
+                    &mut runs,
+                );
+            for line in window
+                .text_system()
+                .shape_text(text, px(12.), &runs, None, None)
+                .expect("event summary")
+            {
+                self.lines.push(Line {
+                    line,
+                    origin: point(px(24.), self.y),
+                    height: px(18.),
+                    align: TextAlign::Left,
+                });
+                self.y += px(18.);
             }
-            "compaction" => vec![
-                "Context compacted".into(),
-                format!(
-                    "{} → {} tokens · {} compaction",
-                    data["tokensBefore"],
-                    data["tokensAfter"],
-                    label(&data["trigger"])
-                ),
-                label(&data["summary"]),
-                format!(
-                    "Archive: {} · {}",
-                    label(&data["archiveRef"]),
-                    label(&data["compactedBy"]["model"])
-                ),
-            ],
+            if expanded {
+                self.y += px(8.);
+                for field in crate::rich::event_fields(data) {
+                    self.plain(crate::text::sanitize(&field), 12., 18., window);
+                }
+            }
+            return;
+        }
+        let lines = match kind {
             "media" => vec![
                 format!(
                     "[{} placeholder] {}",
@@ -234,9 +221,9 @@ impl Builder {
             window,
         );
     }
-    fn node(&mut self, node: &Node, window: &Window) {
+    fn node(&mut self, node: &Node, expanded: bool, window: &Window) {
         if let Some(data) = &node.data {
-            self.rich_node(&node.kind, data, window);
+            self.rich_node(&node.kind, data, expanded, window);
             return;
         }
         if node.kind == "break" {
@@ -331,7 +318,7 @@ impl Builder {
         }
     }
 }
-fn layout(row: &Row, width: Pixels, window: &Window) -> Layout {
+fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
     let mut b = Builder {
         width,
         y: px(8.),
@@ -374,24 +361,26 @@ fn layout(row: &Row, width: Pixels, window: &Window) -> Layout {
                 }
             }
             for node in crate::text::markdown(prompt) {
-                b.node(&node, window);
+                b.node(&node, expanded, window);
             }
         }
         Row::Message { role, nodes, .. } => {
-            b.plain(
-                match role.as_str() {
-                    "user" => "Operator",
-                    "assistant" => "Agent",
-                    other => other,
-                }
-                .into(),
-                9.5,
-                14.,
-                window,
-            );
-            b.y += px(4.);
+            if !(nodes.len() == 1 && crate::rich::system_event(&nodes[0])) {
+                b.plain(
+                    match role.as_str() {
+                        "user" => "Operator",
+                        "assistant" => "Agent",
+                        other => other,
+                    }
+                    .into(),
+                    9.5,
+                    14.,
+                    window,
+                );
+                b.y += px(4.);
+            }
             for node in nodes {
-                b.node(node, window);
+                b.node(node, expanded, window);
             }
         }
         Row::Activity { steps, .. } => {
@@ -429,6 +418,45 @@ pub struct RetainedRow {
     pub index: usize,
     pub painted: Rc<RefCell<BTreeSet<usize>>>,
 }
+impl RetainedRow {
+    pub fn interactive(self, list: &gpui::ListState) -> gpui::AnyElement {
+        use gpui::prelude::*;
+        if self.state.borrow().expanded.is_none() {
+            return self.into_any_element();
+        }
+        let state = self.state.clone();
+        let list = list.clone();
+        let index = self.index;
+        let toggle = move |window: &mut Window| {
+            let mut state = state.borrow_mut();
+            let expanded = state.expanded.as_mut().expect("system event");
+            *expanded = !*expanded;
+            state.cache = None;
+            list.splice(index..index + 1, 1);
+            window.refresh();
+        };
+        let click = toggle.clone();
+        gpui::div()
+            .id(("system-event", index))
+            .focusable()
+            .cursor_pointer()
+            .focus(|style| style.bg(rgb(0x242a33)))
+            .on_click(move |_, window, cx| {
+                click(window);
+                cx.stop_propagation();
+            })
+            .on_key_down(move |event, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    && !event.keystroke.modifiers.modified()
+                {
+                    toggle(window);
+                    cx.stop_propagation();
+                }
+            })
+            .child(self)
+            .into_any_element()
+    }
+}
 impl IntoElement for RetainedRow {
     type Element = Self;
     fn into_element(self) -> Self {
@@ -465,7 +493,12 @@ impl Element for RetainedRow {
                 .as_ref()
                 .is_none_or(|cache| cache.size.width != width)
             {
-                state.cache = Some(layout(&state.row, width, window));
+                state.cache = Some(layout(
+                    &state.row,
+                    width,
+                    state.expanded.unwrap_or(false),
+                    window,
+                ));
                 state.layouts += 1;
             }
             state.cache.as_ref().unwrap().size

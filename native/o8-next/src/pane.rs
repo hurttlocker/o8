@@ -215,13 +215,13 @@ impl Pane {
                             .child(notice),
                     )
                     .child(
-                        list(list_state, move |index, _, _| {
+                        list(list_state.clone(), move |index, _, _| {
                             RetainedRow {
                                 state: rows[index].clone(),
                                 index,
                                 painted: painted_rows.clone(),
                             }
-                            .into_any_element()
+                            .interactive(&list_state)
                         })
                         .flex_1()
                         .min_h_0(),

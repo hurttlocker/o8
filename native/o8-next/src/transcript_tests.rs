@@ -47,6 +47,103 @@ fn fixture() -> (Host, Client) {
 }
 
 #[gpui::test]
+fn system_events_are_compact_and_expand_on_click(cx: &mut TestAppContext) {
+    let (_host, client) = fixture();
+    let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    view.update(cx, |s, cx| s.load_sessions(cx));
+    cx.run_until_parked();
+    view.update(cx, |s, cx| s.select("thoughts-rich".into(), cx));
+    cx.run_until_parked();
+    for (index, summary, detail) in [
+        (1, "Handed off to destination-model", "intent: full"),
+        (
+            2,
+            "Context compacted · context 100k → 12k tokens",
+            "Retained decisions and next steps.",
+        ),
+    ] {
+        view.update(cx, |s, cx| {
+            s.list.scroll_to(ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let row = view.read_with(cx, |s, _| s.rows[index].clone());
+        let (height, lines) = row.borrow().rendered();
+        println!(
+            "system event {index}: height={}px lines={lines:?}",
+            f32::from(height)
+        );
+        assert_eq!(
+            lines.len(),
+            1,
+            "default event must be one summary row without raw fields"
+        );
+        assert!(lines[0].contains(summary), "summary: {:?}", lines[0]);
+        let bounds = view.read_with(cx, |s, _| s.list.bounds_for_item(index).unwrap());
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let (expanded, lines) = row.borrow().rendered();
+        assert!(expanded > height, "expansion must remeasure the list row");
+        assert!(
+            lines.iter().any(|line| line.contains(detail)),
+            "expanded fields: {lines:?}"
+        );
+        // Collapse through the same summary control after the list has remeasured.
+        let bounds = view.read_with(cx, |s, _| s.list.bounds_for_item(index).unwrap());
+        cx.simulate_click(
+            gpui::point(bounds.left() + px(30.), bounds.top() + px(16.)),
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        assert_eq!(row.borrow().rendered().0, height);
+        cx.simulate_keystrokes("enter");
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        assert!(
+            row.borrow().rendered().0 > height,
+            "focused summary must expand with Enter"
+        );
+        cx.simulate_keystrokes("space");
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        assert_eq!(
+            row.borrow().rendered().0,
+            height,
+            "Space collapses the focused summary"
+        );
+        let viewport = cx.update(|window, _| window.viewport_size());
+        cx.simulate_resize(gpui::size(px(440.), px(500.)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let (narrow_height, narrow_lines) = row.borrow().rendered();
+        assert_eq!(
+            narrow_height, height,
+            "narrow summaries must truncate rather than wrap"
+        );
+        assert_eq!(narrow_lines.len(), 1);
+        cx.simulate_resize(viewport);
+    }
+}
+
+#[gpui::test]
 fn persisted_workers_rich_events_and_older_history(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
     let saved = client.clone();

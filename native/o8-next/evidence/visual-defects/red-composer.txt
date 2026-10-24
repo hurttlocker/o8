@@ -1,0 +1,13 @@
+composer empty height: 118px
+
+thread 'composer::tests::composer_height_bounds_follow_content' (12502) panicked at src/input_tests.rs:23:5:
+empty composer must fit one to two 20px lines plus 18px padding/border; got 118
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test composer::tests::composer_height_bounds_follow_content ... FAILED
+
+failures:
+
+failures:
+    composer::tests::composer_height_bounds_follow_content
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s

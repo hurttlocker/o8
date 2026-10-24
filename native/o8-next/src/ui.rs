@@ -509,13 +509,16 @@ impl Render for Surface {
                             )
                             .child(self.history_control(cx))
                             .child(
-                                list(self.list.clone(), move |index, _, _| {
-                                    RetainedRow {
-                                        state: rows[index].clone(),
-                                        index,
-                                        painted: painted_rows.clone(),
+                                list(self.list.clone(), {
+                                    let list_state = self.list.clone();
+                                    move |index, _, _| {
+                                        RetainedRow {
+                                            state: rows[index].clone(),
+                                            index,
+                                            painted: painted_rows.clone(),
+                                        }
+                                        .interactive(&list_state)
                                     }
-                                    .into_any_element()
                                 })
                                 .flex_1()
                                 .min_h_0(),

@@ -42,7 +42,7 @@ impl Composer {
             selecting: false,
             revision: 0,
             painted: 0,
-            height: px(100.),
+            height: px(20.),
             scroll: ScrollHandle::new(),
             reveal_cursor: true,
         }
@@ -386,6 +386,7 @@ impl Render for Composer {
         let height = self.height;
         div()
             .id("composer-input")
+            .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
             .cursor(CursorStyle::IBeam)
             .max_h(px(176.))
@@ -515,7 +516,7 @@ impl Render for Composer {
                             offset += part.len() + 1;
                         }
                         input.update(cx, |input, cx| {
-                            let height = (y - bounds.top()).max(px(100.));
+                            let height = (y - bounds.top()).max(px(20.));
                             if input.height != height {
                                 input.height = height;
                                 cx.notify();
@@ -534,11 +535,13 @@ impl Render for Composer {
                                     let scroll = input.scroll.offset();
                                     let cursor_y = position.y - bounds.top();
                                     let top = -scroll.y;
-                                    let bottom = top + px(140.);
+                                    // The viewport excludes the input's padding and border.
+                                    let visible = height.min(px(158.));
+                                    let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y
                                     } else if cursor_y + px(20.) > bottom {
-                                        px(120.) - cursor_y
+                                        visible - px(20.) - cursor_y
                                     } else {
                                         scroll.y
                                     };

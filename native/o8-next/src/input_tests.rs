@@ -2,6 +2,55 @@ use crate::composer::{Composer, Submit};
 use gpui::{ClipboardItem, EntityInputHandler, TestAppContext};
 use std::{cell::Cell, rc::Rc};
 
+#[gpui::test]
+fn composer_height_bounds_follow_content(cx: &mut TestAppContext) {
+    let (_input, cx) = cx.add_window_view(|window, cx| {
+        let input = Composer::new(cx);
+        input.focus.focus(window);
+        input
+    });
+    let height = |cx: &mut gpui::VisualTestContext| {
+        for _ in 0..3 {
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear();
+            });
+        }
+        f32::from(
+            cx.debug_bounds("composer-input")
+                .expect("painted composer")
+                .size
+                .height,
+        )
+    };
+    let empty = height(cx);
+    println!("composer empty height: {empty}px");
+    assert!(
+        (38.0..=58.0).contains(&empty),
+        "empty composer must fit one to two 20px lines plus 18px padding/border; got {empty}"
+    );
+    cx.simulate_input("first\nsecond\nthird");
+    let three = height(cx);
+    assert_eq!(three, 78.0, "three lines must grow the composer");
+    cx.simulate_input(&"\nmore".repeat(40));
+    let capped = height(cx);
+    assert_eq!(
+        capped, 176.0,
+        "long drafts must stay within the existing cap"
+    );
+    cx.simulate_keystrokes("ctrl-a backspace");
+    assert_eq!(height(cx), empty, "clearing must shrink the composer");
+    cx.simulate_input(&"wrapped text ".repeat(500));
+    assert_eq!(
+        height(cx),
+        capped,
+        "soft-wrapped text must obey the same cap"
+    );
+    cx.simulate_keystrokes("ctrl-a backspace");
+    assert_eq!(height(cx), empty);
+    println!("composer heights: empty={empty}px three={three}px cap={capped}px");
+}
+
 #[cfg(target_os = "macos")]
 #[gpui::test]
 fn macos_ime_emoji_paste_and_command_shortcuts(cx: &mut TestAppContext) {
