@@ -22,7 +22,9 @@ async function freePort(): Promise<number> {
 }
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
-export async function startParityReference(options: { logLimit?: number } = {}) {
+export async function startParityReference(options: {
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean;
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'o8-ws-parity-'));
   const token = 'ws-parity-fixture-credential';
   writeFileSync(join(directory, 'ws-token'), token, { mode: 0o600 });
@@ -66,12 +68,16 @@ export async function startParityReference(options: { logLimit?: number } = {}) 
   if (!address || typeof address === 'string') throw new Error('missing fixture API port');
   const apiUrl = `http://127.0.0.1:${address.port}`;
   const port = await freePort();
-  const child = execFile(process.execPath, ['--import=./scripts/register-server-only-stub.mjs',
+  const child = execFile(process.execPath, [
+    ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
+    '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx', 'src/ws-server.ts'], {
     cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
+      O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
+      O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
   const stop = async () => {

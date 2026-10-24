@@ -67,6 +67,7 @@ import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
 import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/ws-server/terminal-resync-barrier';
 import { formatTmuxResyncSnapshot, parseTmuxSnapshotCursor } from '@/lib/ws-server/terminal-resync-snapshot';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
+import { O8dBridge } from '@/lib/ws-server/o8d-bridge';
 
 migrateDataDirOnce();
 
@@ -904,6 +905,8 @@ interface ClientState {
   deviceId?: string | null;
   /** Credential class proven during the WS upgrade; Symon scope grants bind to it. */
   authKind: 'operator' | 'device';
+  /** Authenticated local operator backhaul; device/E2EE frames stay TS-owned. */
+  o8d?: boolean;
   /** Mobile E2EE channel state (#5) — undefined for loopback/legacy (plaintext). */
   e2ee?: E2eeConnectionState;
 }
@@ -2790,6 +2793,7 @@ function buildRealtimeEnvelope(
 
 function broadcastRealtimeEvents(events: RealtimeEventEnvelope[]) {
   if (!events.length) return;
+  o8dBridge?.publish(events);
   const eventsByStream = new Map<RealtimeStreamKey, RealtimeEventEnvelope[]>();
 
   for (const event of events) {
@@ -2802,6 +2806,7 @@ function broadcastRealtimeEvents(events: RealtimeEventEnvelope[]) {
   }
 
   for (const client of clients.values()) {
+    if (client.o8d) continue;
     for (const subscription of client.realtimeSubscriptions) {
       const matching = eventsByStream.get(subscription.stream);
       if (!matching?.length) continue;
@@ -3630,6 +3635,7 @@ async function handleClientMessage(client: ClientState, raw: string) {
     }
     case 'realtime-negotiate': {
       negotiateRealtimeProtocol(client, msg);
+      if (client.o8d) client.ws.send(JSON.stringify({ __o8d: { capabilities: [...client.realtimeCapabilities] } }));
       break;
     }
     case 'review-visibility': {
@@ -3681,6 +3687,10 @@ async function handleClientMessage(client: ClientState, raw: string) {
       }
 
       replayRealtimeSubscriptions(client, subscriptions);
+      if (client.o8d) client.ws.send(JSON.stringify({ __o8d: {
+        capabilities: [...client.realtimeCapabilities],
+        subscriptions: subscriptions.map((subscription) => ({ stream: subscription.stream, since: realtimeSeq })),
+      } }));
       for (const subscription of subscriptions) {
         if (subscription.since != null) continue;
         void buildBootstrapEvents(subscription.stream).then((events) => {
@@ -8764,15 +8774,17 @@ const httpServer = createServer(async (req, res) => {
   // Health check endpoint
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(buildWsHealthPayload(INSTANCE_IDENTITY, {
+    res.end(JSON.stringify({ ...buildWsHealthPayload(INSTANCE_IDENTITY, {
       clients: clients.size,
       eventLoop: wsWatchdog.getStats(),
-    })));
+    }), ...(o8dBridge ? { delivery: o8dBridge.status } : {}) }));
     return;
   }
   res.writeHead(404);
   res.end();
 });
+
+const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
@@ -8785,6 +8797,10 @@ const wss = new WebSocketServer({
     threshold: 128, // only compress messages > 128 bytes
   },
   verifyClient: (info, done) => {
+    if (o8dBridge && !o8dBridge.allowsUpgrade(info.req)) {
+      done(false, 401, 'Unauthorized');
+      return;
+    }
     const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
     const token = url.searchParams.get('token') ?? '';
     const req = info.req as typeof info.req & {
@@ -8794,7 +8810,7 @@ const wss = new WebSocketServer({
       __o8RevokedClose?: boolean;
     };
     // Remote vs loopback (drives whether E2EE is offered) — socket peer truth.
-    req.__o8Remote = !isLoopbackAddress(req.socket?.remoteAddress ?? '127.0.0.1');
+    req.__o8Remote = !isLoopbackAddress(o8dBridge?.peer(req) ?? req.socket?.remoteAddress ?? '127.0.0.1');
     req.__o8Device = null;
     if (wsTokenMatches(token)) {
       req.__o8AuthKind = 'operator';
@@ -8872,9 +8888,11 @@ wss.on('connection', (ws, req) => {
     flushTimer: null,
     deviceId: device?.id ?? null,
     authKind,
+    o8d: authKind === 'operator' && !remote && Boolean(o8dBridge?.peer(req)),
   };
 
   clients.set(client.id, client);
+  if (client.o8d) client.ws.send(JSON.stringify({ __o8d: { capabilities: [], subscriptions: [] } }));
   console.log(`[ws-server] Client connected: ${client.id} (${clients.size} total)`);
 
   // Send welcome with connection info (plaintext — precedes any E2EE handshake)
@@ -9494,13 +9512,17 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
-  await new Promise<void>((done) => {
-    httpServer.once('listening', () => {
-      console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
-      done();
+  if (o8dBridge) {
+    await o8dBridge.start();
+  } else {
+    await new Promise<void>((done) => {
+      httpServer.once('listening', () => {
+        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        done();
+      });
+      httpServer.listen(WS_PORT, '0.0.0.0');
     });
-    httpServer.listen(WS_PORT, '0.0.0.0');
-  });
+  }
 
   await waitForNextReady();
   if (shuttingDown) return;
@@ -9962,6 +9984,7 @@ const wsStartupReady = bootstrapWsServer().catch(() => {
 
 function shutdown(signal: string, exitCode = 0) {
   shuttingDown = true;
+  o8dBridge?.stop();
   console.log(`[ws-server] ${signal} received — shutting down gracefully`);
 
   // Stop agent supervisor and stall detection

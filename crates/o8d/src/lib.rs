@@ -6,6 +6,9 @@ use tokio::sync::{broadcast, Mutex};
 #[cfg(feature = "experimental-ws")]
 pub mod websocket;
 
+#[cfg(feature = "experimental-ws")]
+pub mod app;
+
 #[cfg(feature = "experimental-mcp")]
 pub mod mcp;
 
@@ -14,6 +17,7 @@ pub mod supervisor;
 
 struct State {
     latest: u64,
+    evicted_through: u64,
     log: VecDeque<Value>,
 }
 
@@ -38,6 +42,7 @@ impl EventBus {
             limit: limit.max(4),
             state: Mutex::new(State {
                 latest: 0,
+                evicted_through: 0,
                 log: VecDeque::new(),
             }),
             live,
@@ -82,7 +87,9 @@ impl EventBus {
             }
         }
         while state.log.len() > self.limit {
-            state.log.pop_front();
+            if let Some(event) = state.log.pop_front() {
+                state.evicted_through = event["seq"].as_u64().unwrap_or(state.evicted_through);
+            }
         }
         // Send under the same lock so publication and replay cannot reorder the log.
         let public = events
@@ -93,6 +100,27 @@ impl EventBus {
             let _ = self.live.send(public);
         }
         Ok(())
+    }
+
+    /// Reconcile a TS subscription barrier against actual Rust eviction. Gaps
+    /// between sequence numbers can be private bootstrap or another stream;
+    /// they do not prove a dropped public event in this process.
+    pub async fn crossover(&self, stream: &str, since: u64) -> Option<(Vec<Value>, u64)> {
+        let state = self.state.lock().await;
+        if state.evicted_through > since {
+            return None;
+        }
+        Some((
+            state
+                .log
+                .iter()
+                .filter(|event| {
+                    event["stream"] == stream && event["seq"].as_u64().unwrap_or(0) > since
+                })
+                .cloned()
+                .collect(),
+            state.latest,
+        ))
     }
 
     pub async fn replay(&self, stream: &str, since: Option<f64>, epoch: Option<&str>) -> Replay {

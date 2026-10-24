@@ -59,9 +59,47 @@ async fn websocket_run() -> Result<(), Box<dyn std::error::Error>> {
     let address = option("--listen")
         .ok_or("listener required")?
         .parse::<std::net::SocketAddr>()?;
-    // Until device credentials and E2EE exist, the prototype cannot expose a remote listener.
-    if !address.ip().is_loopback() {
+    let upstream = option("--app-upstream");
+    // App backhauls use TS authentication and preserve the public socket peer.
+    if upstream.is_none() && !address.ip().is_loopback() {
         return Err("loopback listener required".into());
+    }
+    if let Some(upstream) = upstream {
+        let backend = upstream.parse::<std::net::SocketAddr>()?;
+        if !backend.ip().is_loopback() {
+            return Err("loopback upstream required".into());
+        }
+        let key = env::var("O8D_BRIDGE_KEY")?;
+        if key.is_empty() {
+            return Err("bridge credential required".into());
+        }
+        let bus = Arc::new(EventBus::new(env::var("O8D_EPOCH")?, 400));
+        let listener = TcpListener::bind(address).await?;
+        println!(
+            "{}",
+            json!({"listening":listener.local_addr()?.to_string()})
+        );
+        let producer = bus.clone();
+        let input = tokio::spawn(async move {
+            let mut lines = BufReader::new(tokio::io::stdin()).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                producer
+                    .publish(serde_json::from_str::<Vec<Value>>(&line).map_err(|_| ())?)
+                    .await
+                    .map_err(|_| ())?;
+            }
+            Ok::<(), ()>(())
+        });
+        let (shutdown, receiver) = tokio::sync::watch::channel(false);
+        tokio::select! {
+            result = o8d::app::serve(listener, upstream, key, bus, receiver) => { result?; }
+            _ = input => {}
+        }
+        let _ = shutdown.send(true);
+        // Stop accepting, close WS clients, and let already accepted HTTP
+        // ingress responses drain before the supervisor reclaims the listener.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        return Ok(());
     }
     let token = env::var("WS_TOKEN")?.trim().to_owned();
     if token.is_empty() {
