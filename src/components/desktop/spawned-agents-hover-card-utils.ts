@@ -1,3 +1,4 @@
+import { capacityWaitLabel } from '@/lib/lane/capacity-wait-label';
 import { laneStatusToStateKey, packetStateColorScheme, type PacketStateKey } from '@/lib/packet-state-colors';
 import { packetStatusFromLaneStatus, type CanonicalPacketStatus } from '@/lib/orchestrator/packet-state';
 import type { LaneOutcome, LaneStatus as CanonicalLaneStatus } from '@/lib/lane/types';
@@ -37,6 +38,8 @@ export function deriveSpawnedAgentState(
   if (!canonical && visualStatus === 'waiting') label = 'Review ready';
   if (!canonical && visualStatus === 'error') label = 'Failed';
   if (!canonical && visualStatus === 'running') label = 'Running';
+
+  label = capacityWaitLabel(laneStatus, lastEventLabel) ?? label;
 
   // Resolved outcomes remain authoritative after completion or archival.
   if (outcome === 'no_changes') label = 'Finished — no changes';

@@ -1,3 +1,4 @@
+import { capacityWaitMessage } from '@/lib/lane/capacity-wait-label';
 import { recoveryInterrupted } from './automatic-recovery';
 import type {
   AgentSummary,
@@ -84,7 +85,7 @@ export function deriveLifecycle(
     lastRunMode: latest?.mode,
     lastRunStartedAt: latest?.startedAt,
     lastRunFinishedAt: latest?.finishedAt,
-    summary: latest?.outcome === 'interrupted'
+    summary: session.capacityWait ? capacityWaitMessage(session.capacityWait.resetsAt) : latest?.outcome === 'interrupted'
       ? 'Previous run was interrupted. This owned session is ready for the next bounded input.'
       : latest?.outcome === 'failed'
         ? 'Previous run failed. This owned session is ready for a corrective follow-up.'
@@ -142,6 +143,7 @@ export function deriveOwnedStatus(
 ): AgentSummary['status'] {
   const lifecycle = deriveLifecycle(context, session);
   if (recoveryInterrupted(session)) return 'blocked';
+  if (session.capacityWait && !session.activeRun) return 'waiting';
   if (lifecycle.availability === 'running') return 'running';
   if (lifecycle.lastOutcome === 'failed') return 'failed';
   if (lifecycle.availability === 'awaiting-thread') return 'waiting';
@@ -163,6 +165,7 @@ export function buildCurrentTask(
   const { adapter } = context;
   const runtimeLabel = executionCarrierRuntimeLabel(adapter.squadShortName, session.runtimeConfig);
   const lifecycle = deriveLifecycle(context, session);
+  if (session.capacityWait && !running) return capacityWaitMessage(session.capacityWait.resetsAt);
   if (running) {
     return `IDE-launched ${runtimeLabel} run active. ${session.latestSummary}`;
   }

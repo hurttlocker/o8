@@ -111,6 +111,7 @@ export interface OwnedSessionRecord {
   createdAt: string;
   updatedAt: string;
   threadId?: string;
+  initialPrompt?: string;
   latestPrompt: string;
   latestSummary: string;
   model?: string;
@@ -138,6 +139,15 @@ export interface OwnedSessionRecord {
     totalRuns: number | null;
     complete: boolean;
   };
+  /** Durable, generation-bound subscription capacity wait. */
+  capacityWait?: {
+    runId: string; resetsAt: string; stopVersion: number; nextProbeAt?: number;
+    laneCheckpoint?: { updatedAt: string; status: string; lastEventLabel: string | null };
+  };
+  /** Consumed schedule; a restart holds an unproven spawn instead of replaying it. */
+  capacityResumeClaim?: { runId: string; resetsAt: string; stopVersion: number };
+  capacityResumeCount?: number;
+  workerFailureHandledRunId?: string;
   autoRetry?: boolean;
   retryCount?: number;
   orphanedAt?: string;
@@ -304,6 +314,8 @@ export interface OwnedArchiveResponse {
  * that must vary between Codex, Gemini, opencode, etc.
  */
 export interface OwnedRuntimeAdapter {
+  /** Fresh capacity for this exact session/account; never performs model inference. */
+  observeCapacity?: (session: OwnedSessionRecord) => Promise<import('@/lib/runtimes/types').RuntimeCapacitySnapshot>;
   /** Internal id: 'codex' | 'gemini' | 'opencode'. */
   runtimeId: string;
 

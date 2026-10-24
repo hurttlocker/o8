@@ -1,5 +1,7 @@
 'use client';
 
+import { capacityWaitLabel } from '@/lib/lane/capacity-wait-label';
+
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
@@ -124,6 +126,8 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (lane === 'completed') return 'Finished';
   if (lane === 'merged' || lane === 'released') return 'merged';
   if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
+  const capacityWait = capacityWaitLabel(lane, row.lastEventLabel);
+  if (capacityWait) return capacityWait;
   if (lane === 'paused' || lane === 'idle') return 'idle';
   if (row.status === 'running') return 'running';
   if (row.status === 'waiting') return 'review ready';
@@ -188,7 +192,7 @@ export function ExtraAgentRowView({
   const reviewReady = row.laneStatus === 'reviewing' && !row.outcome && Boolean(row.laneId);
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
-  const preview = row.outcomeNote || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
+  const preview = row.outcomeNote || capacityWaitLabel(row.laneStatus, row.lastEventLabel) || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
   const canFocus = Boolean((row.packetId || row.sessionKey || row.laneId) && (onFocusRow || onSelectSession));
   const resolved = row.outcome === 'merged' || row.outcome === 'no_changes'
     || row.outcome === 'discarded' || row.outcome === 'closed_unmerged';

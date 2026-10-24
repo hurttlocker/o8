@@ -241,6 +241,7 @@ export function createOwnedSessionStore(
       title: request.taskName?.trim().slice(0, 120) || repo.title,
       createdAt,
       updatedAt: createdAt,
+      initialPrompt: prompt,
       latestPrompt: prompt,
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
@@ -303,6 +304,12 @@ export function createOwnedSessionStore(
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
     if (automaticRunId) assertAutomaticRecoveryGeneration(session, automaticRunId);
+    if (session?.capacityWait || session?.capacityResumeClaim) {
+      if (automaticRunId) throw new Error('This worker is waiting for its usage window reset.');
+      delete session.capacityWait;
+      delete session.capacityResumeClaim;
+      await io.saveSession(session);
+    }
     let coldRestored = false;
 
     if (!session) {
@@ -395,9 +402,11 @@ export function createOwnedSessionStore(
     }
     if (!session.activeRun || (!session.activeRun.supervisor && !isPidAlive(session.activeRun.pid))) {
       const latest = session.recentRuns[0];
-      if (latest?.outcome === 'failed' && adapter.modelCompatibilityFallback) {
+      if (latest?.outcome === 'failed') {
         // A stop also cancels recovery that lifecycle polling has not started yet.
         latest.interruptRequestedAt = nowIso();
+        delete session.capacityWait;
+        delete session.capacityResumeClaim;
         await io.saveSession(session);
       }
       return { interrupted: false, note: `No active owned ${adapter.squadShortName} run was in flight.` };

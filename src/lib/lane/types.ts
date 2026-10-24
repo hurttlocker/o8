@@ -295,6 +295,7 @@ export type LaneEventVerb =
   // occur without a durable trace. Payload: { packetId, sessionId, byteCount,
   // reason, principal: 'worker', result: 'attempted' }.
   | 'terminal_action'
+  | 'worker_capacity_wait'
   | 'capacity_snapshot'
   | 'pr_merged_reconciled'
   | 'merged_by_ancestry_reconciled'

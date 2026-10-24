@@ -13,6 +13,7 @@
  * default — these stubs never get written back to mission state, they only
  * flow through audit + read paths.
  */
+import { capacityWaitLabel } from '@/lib/lane/capacity-wait-label';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
 import { packetStatusFromLaneStatus } from '@/lib/orchestrator/packet-state';
 import type {
@@ -34,13 +35,15 @@ function laneStatusToPacketStatus(status: LaneStatus): OrchestratorPacketStatus 
 }
 
 export function synthesizePacketFromLane(packetId: string, lane: Lane): OrchestratorPacket {
-  const status = laneStatusToPacketStatus(lane.status);
+  const waiting = capacityWaitLabel(lane.status, lane.lastEventLabel);
+  const status = waiting ? 'blocked' : laneStatusToPacketStatus(lane.status);
   const releaseState: OrchestratorReleaseState = status === 'released' ? 'released' : 'pending';
   return {
     id: packetId,
     referenceLabel: lane.label || packetId,
     title: lane.label || packetId,
     summary: '',
+    ...(waiting ? { blockedReason: waiting } : {}),
     workspaceTargetPath: lane.repoPath || null,
     branchTarget: lane.branch,
     runtime: lane.runtime,

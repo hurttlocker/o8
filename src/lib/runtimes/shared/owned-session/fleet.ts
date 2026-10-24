@@ -102,7 +102,7 @@ export function createFleetComputer({
 
     const now = Date.now();
     const sessions = allSessions.filter((session) => {
-      if (session.activeRun) return true;
+      if (session.activeRun || session.capacityWait) return true;
       const latest = latestRun(session);
       const lastActivityStr = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
       const ageMs = Math.max(0, now - new Date(lastActivityStr).getTime());

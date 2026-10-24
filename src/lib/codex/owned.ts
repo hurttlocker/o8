@@ -21,6 +21,7 @@
  *   - review packet assembly (wraps getRuntimeRepoReview + worktree join)
  */
 
+import { readLiveCodexRuntimeCapacity } from './live-capacity';
 import path from 'node:path';
 import os from 'node:os';
 import { codexParseRunLog } from './owned-log';
@@ -258,6 +259,10 @@ const CODEX_STDERR_NOISE_PATTERNS: RegExp[] = [
 
 export const codexOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'codex',
+  observeCapacity: session => readLiveCodexRuntimeCapacity({
+    configHome: session.identity?.configHomeRef ?? (process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex')),
+    identityId: session.identity?.id ?? null,
+  }),
   // IMPORTANT: Keep 'codex-owned:' prefix — load-bearing for session routing.
   surfaceIdPrefix: 'codex-owned:',
   rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT',

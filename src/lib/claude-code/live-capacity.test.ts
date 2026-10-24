@@ -29,6 +29,19 @@ describe('Claude account usage', () => {
     expect(rows.every(row => row.type !== 'user')).toBe(true);
   });
 
+  it('observes a worker through its pinned config directory and identity', async () => {
+    const { claudeCodeOwnedAdapter } = await import('./owned');
+    const audit = path.join(root, 'pinned-worker-audit.jsonl');
+    const configHomeRef = path.join(root, 'pinned-config');
+    vi.stubEnv('O8_CLAUDE_CODE_BIN', fixture);
+    vi.stubEnv('O8_CLAUDE_CAPACITY_TEST_AUDIT', audit);
+    const session = { identity: { id: 'pinned-worker', label: 'Fixture identity', configHomeRef } } as import('@/lib/runtimes/shared/owned-session/types').OwnedSessionRecord;
+    const observed = await claudeCodeOwnedAdapter.observeCapacity!(session);
+    expect(observed).toMatchObject({ identityId: 'pinned-worker', runtime: 'claude-code', confidence: 'exact' });
+    const first = JSON.parse(readFileSync(audit, 'utf8').split('\n')[0]);
+    expect(first.configDir).toBe(configHomeRef);
+  });
+
   it('bounds a stalled CLI and rejects malformed quota percentages', async () => {
     vi.stubEnv('O8_CLAUDE_CAPACITY_TEST_MODE', 'timeout');
     await expect(readLiveClaudeRuntimeCapacity({ binaryPath: fixture, cwd: root, timeoutMs: 100 })).rejects.toThrow('unavailable');

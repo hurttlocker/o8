@@ -4,7 +4,7 @@ import readline from 'node:readline';
 
 const mode = process.env.O8_CLAUDE_CAPACITY_TEST_MODE;
 const audit = process.env.O8_CLAUDE_CAPACITY_TEST_AUDIT;
-if (audit) appendFileSync(audit, `${JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() })}\n`);
+if (audit) appendFileSync(audit, `${JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), configDir: process.env.CLAUDE_CONFIG_DIR ?? null })}\n`);
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const row = JSON.parse(line);
   if (audit) appendFileSync(audit, `${JSON.stringify(row)}\n`);

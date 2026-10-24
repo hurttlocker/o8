@@ -1,3 +1,6 @@
+import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
+import { withOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
+import { workerFallbackGuard } from './worker-fallback-guard';
 import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
@@ -44,7 +47,7 @@ function workerChoice(
 
 export interface WorkerQuotaFallbackResult {
   handled: boolean;
-  action: 'ignored' | 'card' | 'redispatched';
+  action: 'ignored' | 'card' | 'redispatched' | 'waiting';
   toRuntime?: OrchestratorRuntime;
   inboxId?: string;
   sessionKey?: string;
@@ -104,8 +107,17 @@ export async function handleWorkerRuntimeFailure(input: {
   surfaceId: string;
   prompt: string;
   rawFailure: string;
+  waitForCapacity?: () => Promise<string | null>;
+  buildHandoffContext?: () => Promise<string>;
+  expectedStopVersion?: number;
 }): Promise<WorkerQuotaFallbackResult> {
-  if (!isRuntimeQuotaLimitError(input.rawFailure)) {
+  const terminalFailures = input.rawFailure.split(/\r?\n/).flatMap(line => {
+    try {
+      const frame = JSON.parse(line);
+      return frame?.type === 'turn.failed' || (frame?.type === 'result' && frame.is_error === true) ? [frame] : [];
+    } catch { return []; }
+  });
+  if (!terminalFailures.some(isRuntimeQuotaLimitError) && !isRuntimeQuotaLimitError(input.rawFailure)) {
     return { handled: false, action: 'ignored' };
   }
   return handleWorkerQuotaExhaustion({
@@ -115,6 +127,9 @@ export async function handleWorkerRuntimeFailure(input: {
     surfaceId: input.surfaceId,
     prompt: input.prompt,
     error: input.rawFailure,
+    waitForCapacity: input.waitForCapacity,
+    buildHandoffContext: input.buildHandoffContext,
+    expectedStopVersion: input.expectedStopVersion ?? correctionStopVersion(`worker:${input.surfaceId}`),
   });
 }
 
@@ -125,7 +140,11 @@ export async function handleWorkerQuotaExhaustion(input: {
   surfaceId: string;
   prompt: string;
   error: string;
+  waitForCapacity?: () => Promise<string | null>;
+  buildHandoffContext?: () => Promise<string>;
+  expectedStopVersion?: number;
 }): Promise<WorkerQuotaFallbackResult> {
+  const expectedStopVersion = input.expectedStopVersion ?? correctionStopVersion(`worker:${input.surfaceId}`);
   const source = await readOwnedRecoveryState(input.surfaceId);
   if (source.owned && !source.automaticRecoveryAllowed) return { handled: false, action: 'ignored' };
   const backend = backendForRuntime(input.runtime);
@@ -148,6 +167,8 @@ export async function handleWorkerQuotaExhaustion(input: {
   });
   if (!decision) return { handled: false, action: 'ignored' };
 
+  const checkHandoff = workerFallbackGuard(lane, input.surfaceId, source.owned, decision.toRuntime, expectedStopVersion);
+  try { checkHandoff(); } catch { return { handled: false, action: 'ignored' }; }
   const requestedRuntime = input.runtime as OrchestratorRuntime;
   const requestedRoute = workerChoice(requestedRuntime, decision.fromModel ?? input.model, defaults.values);
   const fallbackRoute = workerChoice(decision.toRuntime, decision.toModel, defaults.values);
@@ -208,6 +229,7 @@ export async function handleWorkerQuotaExhaustion(input: {
     };
   }
   if (activeFallbackAttempt?.kind === 'candidate_exhausted') {
+    if (await input.waitForCapacity?.()) return { handled: true, action: 'waiting' };
     const terminalPayload = {
       ...payload,
       attemptId: activeFallbackAttempt.attemptId,
@@ -245,6 +267,9 @@ export async function handleWorkerQuotaExhaustion(input: {
     && decision.action === 'handoff';
 
   if (!autoFallback) {
+    if (await input.waitForCapacity?.()) return { handled: true, action: 'waiting' };
+    try { checkHandoff(); } catch { return { handled: false, action: 'ignored' }; }
+    setLaneStatus(lane.id, 'paused', 'system', 'worker_quota_exhausted');
     const item = enqueueInboxItem({
       repoPath: lane.repoPath,
       packetId: lane.packetId,
@@ -265,12 +290,23 @@ export async function handleWorkerQuotaExhaustion(input: {
     return { handled: true, action: 'card', toRuntime: decision.toRuntime, inboxId: item.id };
   }
 
+  let handoffPrompt: string;
+  try {
+    checkHandoff();
+    handoffPrompt = await input.buildHandoffContext?.() ?? input.prompt;
+    const currentSource = source.owned ? await readOwnedRecoveryState(input.surfaceId) : null;
+    if (currentSource?.owned && (currentSource.runId !== (source.owned ? source.runId : undefined) || currentSource.interrupted || !currentSource.automaticRecoveryAllowed)) {
+      return { handled: false, action: 'ignored' };
+    }
+    checkHandoff();
+  } catch { return { handled: false, action: 'ignored' }; }
   const attemptId = `worker-fallback-${randomUUID()}`;
   recordLaneEvent(lane.id, 'worker_fallback', 'system', {
     ...payload,
     attemptId,
     toRuntime: decision.toRuntime,
     status: 'launching',
+    contextCarried: Boolean(input.buildHandoffContext),
   });
   rebindLaneRuntime(lane.id, decision.toRuntime, {
     reason: 'cross_house_worker_fallback',
@@ -279,22 +315,27 @@ export async function handleWorkerQuotaExhaustion(input: {
   });
   setLaneStatus(lane.id, 'launching', 'system', 'worker_quota_fallback_launching');
 
+  let launchedSurface: string | undefined;
   try {
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
-    const result = await launchRuntimeSurface({
+    const result = await withOwnedActionGuard(() => checkHandoff(true), () => launchRuntimeSurface({
       runtime: decision.toRuntime,
-      prompt: input.prompt,
+      prompt: handoffPrompt,
       repoPath: lane.worktreePath ?? lane.repoPath,
       projectRepoPath: lane.repoPath,
       branchName: lane.branch,
       baseBranch: lane.baseBranch,
       model: decision.toModel,
+      effort: workerEffort(decision.toRuntime, defaults.values) ?? undefined,
+      ...(decision.toRuntime === 'claude-code' ? { claudeCodeCarrier: 'native' as const } : {}),
       clientMutationId: attemptId,
       isolate: false,
       skipSetup: true,
       existingLaneId: lane.id,
       packetId: lane.packetId ?? undefined,
-    });
+    }));
+    launchedSurface = result.surfaceId;
+    checkHandoff(true);
     if (!result.ok || !result.surfaceId) {
       throw new Error(result.note || 'Equivalent runtime launch failed.');
     }
@@ -306,6 +347,7 @@ export async function handleWorkerQuotaExhaustion(input: {
       attemptId,
       toRuntime: decision.toRuntime,
       status: 'redispatched',
+      contextCarried: Boolean(input.buildHandoffContext),
       sessionKey: result.surfaceId,
     });
     if (lane.packetId) {
@@ -329,19 +371,30 @@ export async function handleWorkerQuotaExhaustion(input: {
       sessionKey: result.surfaceId,
     };
   } catch (error) {
+    let cancelled = false;
+    try { checkHandoff(true); } catch { cancelled = true; }
+    if (cancelled && launchedSurface) {
+      const { escalateInterruptOwnedSurface } = await import('@/lib/runtime/interrupt-escalation');
+      await escalateInterruptOwnedSurface(launchedSurface);
+    }
     const fallbackError = error instanceof Error ? error.message : String(error);
     recordLaneEvent(lane.id, 'worker_fallback_terminal', 'system', {
       ...payload,
       attemptId,
       toRuntime: decision.toRuntime,
-      status: 'launch_failed',
+      status: cancelled ? 'cancelled' : 'launch_failed',
       fallbackError,
     });
+    const failedLane = getLane(lane.id);
+    if (cancelled && (!failedLane || failedLane.status !== 'launching' || failedLane.sessionKey !== null
+      || failedLane.runtime !== decision.toRuntime)) return { handled: false, action: 'ignored' };
     rebindLaneRuntime(lane.id, lane.runtime, {
       reason: 'cross_house_worker_fallback_failed',
       attemptedRuntime: decision.toRuntime,
     });
-    setLaneStatus(lane.id, 'paused', 'system', 'worker_quota_fallback_failed');
+    if (source.owned) attachSession(lane.id, input.surfaceId, 'system');
+    setLaneStatus(lane.id, 'paused', 'system', cancelled ? 'operator_stopped' : 'worker_quota_fallback_failed');
+    if (cancelled) return { handled: false, action: 'ignored' };
     const item = enqueueInboxItem({
       repoPath: lane.repoPath,
       packetId: lane.packetId,
