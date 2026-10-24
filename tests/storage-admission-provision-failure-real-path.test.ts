@@ -334,7 +334,7 @@ describe('packet storage admission provision failure real path', () => {
     ]));
   });
 
-  it('retains storage when a packet-named checkout exists before lane binding', async () => {
+  it.each(['', '-index.noindex', '-abcd-index.noindex'])('retains storage when a packet-named checkout exists before lane binding (%s)', async (suffix) => {
     const [
       { getSqlite },
       laneRegistry,
@@ -350,7 +350,7 @@ describe('packet storage admission provision failure real path', () => {
       import('@/lib/runtime/packet-worktree-guard'),
       import('@/lib/worktree/root-layout'),
     ]);
-    const packetId = 'pkt-storage-provision-materialized';
+    const packetId = `pkt-storage-provision-materialized${suffix.replaceAll('.', '-')}`;
     const reservationId = `packet-storage:${packetId}:1`;
     const materializedRoot = join(root, 'materialized-worktrees');
     mkdirSync(materializedRoot, { recursive: true });
@@ -365,10 +365,10 @@ describe('packet storage admission provision failure real path', () => {
       now: Date.now,
       observeVolume: async (targetPath) => ({
         ...observed(targetPath),
-        volumeId: 'device:materialized-provision-test',
+        volumeId: `device:materialized-provision-test:${suffix || 'legacy'}`,
       }),
     });
-    await store.reserve({
+    const admitted = await store.reserve({
       mutationId: `reserve-${packetId}`,
       reservationId,
       targetPath: materializedRoot,
@@ -378,11 +378,12 @@ describe('packet storage admission provision failure real path', () => {
       leaseExpiresAt: Date.now() + 60_000,
       policy: { reserveRatio: 0.1, absoluteFloorBytes: 10 * gib },
     });
+    expect(admitted.decision).toBe('reserved');
     recordLaneEvent(lane.id, 'update', 'orchestrator', {
       storageAdmissionOwnerGeneration: 1,
       storageAdmissionReservationId: reservationId,
     });
-    mkdirSync(join(materializedRoot, managedPacketWorktreeId(packetId)!), { recursive: true });
+    mkdirSync(join(materializedRoot, `${managedPacketWorktreeId(packetId)}${suffix}`), { recursive: true });
 
     packetWorktreeProvisionError(
       { existingLaneId: lane.id, packetId, isolate: true },

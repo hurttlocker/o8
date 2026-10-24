@@ -174,11 +174,11 @@ describe('committed packet storage reconciliation real path', () => {
     `).pluck().get(reservation.reservationId)).toBe('committed');
   });
 
-  it('retains a terminal owner while a suffixed packet checkout still exists', async () => {
+  it.each(['-retry', '-index.noindex', '-abcd-index.noindex'])('retains a terminal owner while a suffixed packet checkout still exists (%s)', async (suffix) => {
     const { sqlite, targetPath } = fixture();
     const ownerId = 'terminal-present-owner';
     const reservation = await committedReservation({ sqlite, targetPath, ownerId, now: 30_000 });
-    mkdirSync(path.join(targetPath, `${managedPacketWorktreeId(ownerId)}-retry`));
+    mkdirSync(path.join(targetPath, `${managedPacketWorktreeId(ownerId)}${suffix}`));
 
     await expect(reconcileCommittedPacketStorageReservations({
       sqlite,
