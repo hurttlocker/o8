@@ -3897,6 +3897,13 @@
       ]
     },
     {
+      "path": "tests/native-helper-tracing-real-path.test.ts",
+      "reasons": [
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/native-input-timeout-real-path.test.ts",
       "reasons": [
         "child-process",

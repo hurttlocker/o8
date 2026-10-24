@@ -26,6 +26,10 @@ const nextConfig: NextConfig = {
       './.next/dev/**/*',
       './.next/trace',
       './.next/trace-build',
+      // The shell ships the staged Pi write helper separately and supplies
+      // O8_PI_WRITE_BIN. Its source-checkout Cargo target tree is not runtime
+      // input; transient objects can disappear while standalone copies traces.
+      './src-tauri/sidecars/pi-write/target{,/**/*}',
       '**/node_modules/sharp/**/*',
       '**/node_modules/@img/**/*',
     ],
