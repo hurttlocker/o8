@@ -3,7 +3,7 @@ import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 
-export async function runSetup(_mode: OutputMode, action: string | undefined, args: string[]) {
+export async function runSetup(_mode: OutputMode, action: string | undefined, args: string[]): Promise<number> {
   let body: Record<string, unknown> | undefined;
   if (action === 'status') {
     if (args.length) throw new CliError('invalid_args', 'setup status takes no arguments.', EXIT.INVALID_ARGS);
@@ -22,4 +22,5 @@ export async function runSetup(_mode: OutputMode, action: string | undefined, ar
   } else throw new CliError('invalid_args', 'Use: o8 setup status | configure | open <path> | cancel <request-id>', EXIT.INVALID_ARGS);
   const response = await apiFetch(resolveConfig(), '/api/setup/agent', body ? { method: 'POST', body } : {});
   printJson(response.data);
+  return EXIT.OK;
 }

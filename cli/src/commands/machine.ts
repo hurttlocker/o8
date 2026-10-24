@@ -179,7 +179,7 @@ async function sshRun(profile: MachineProfile, command: string[], stream = false
     child.on('error', () => finish(-1));
     child.on('close', (code) => finish(code ?? -1));
     child.stdin?.on('error', () => {}); // The remote process may close before local stdin reaches EOF.
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       error += chunk.toString();
       if (error.length > 4_096) error = error.slice(0, 4_096);
     });

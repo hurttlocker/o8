@@ -89,7 +89,7 @@ async function runCreate(mode: OutputMode, rest: string[]): Promise<number> {
   if (!res.data?.ok || !artifact) {
     throw new CliError('request_failed', res.data?.error?.message ?? 'The server did not accept the artifact.', EXIT.CONFLICT);
   }
-  if (mode === 'json') {
+  if (!mode.human) {
     printJson({ ok: true, artifact });
   } else {
     printHumanHeading('artifact create');
@@ -121,7 +121,7 @@ async function runRead(mode: OutputMode, rest: string[], kind: 'status' | 'recei
     const { html: _html, ...rest } = result.artifact as Record<string, unknown>;
     result.artifact = rest;
   }
-  if (mode === 'json') {
+  if (!mode.human) {
     printJson({ ok: true, ...result });
     return EXIT.OK;
   }
