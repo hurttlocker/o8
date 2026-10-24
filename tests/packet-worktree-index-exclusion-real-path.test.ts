@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
@@ -82,4 +82,50 @@ it('keeps the exclusion suffix through a real collision and still discovers a le
   const reopened = await new WorktreeManager(repo).list();
   expect(reopened.find(entry => entry.id === created.id)?.path).toBe(created.path);
   expect(reopened.find(entry => entry.id === legacyId)?.path).toBe(legacyPath);
+}, 60_000);
+
+it.each([
+  ['codex', undefined, 'scratch-codex-default'],
+  ['codex', false, 'scratch-codex-explicit'],
+  ['claude-code', true, 'scratch-claude-managed'],
+  ['opencode', true, 'scratch-opencode'],
+] as const)('marks an o8-created non-packet checkout for %s (%s)', async (agentType, managed, taskName) => {
+  const created = await new WorktreeManager(repo).create({ agentType, managed, taskName,
+    branchName: `fixture/${taskName}`, baseBranch: 'main', skipSetup: true,
+    isolationPreference: 'git-worktree' });
+  expect(created.id).toBe(`${taskName}-index.noindex`);
+  expect(path.dirname(created.path)).toBe(resolveWorktreeRootLayout(repo).primaryBase);
+  expect(await readFile(path.join(created.path, 'seed.txt'), 'utf8')).toBe('source remains unchanged\n');
+  expect((await new WorktreeManager(repo).list()).find(entry => entry.id === created.id)?.path).toBe(created.path);
+  expect((await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()).toBe(originalHead);
+}, 60_000);
+
+it('keeps non-packet collision names excluded and preserves an older scratch checkout', async () => {
+  const layout = resolveWorktreeRootLayout(repo);
+  const legacyId = 'scratch-collision';
+  const legacyPath = path.join(layout.primaryBase, legacyId);
+  await run('git', ['worktree', 'add', legacyPath, '-b', 'fixture/scratch-legacy'], { cwd: repo });
+  await withWorktreeMetaTransaction(repo, transaction => transaction.save(legacyId, {
+    id: legacyId, agentType: 'codex', baseBranch: 'main', createdAt: Date.now(),
+    claudeManaged: false, taskName: 'old scratch', status: 'ready',
+    branchName: 'fixture/scratch-legacy', isolationKind: 'git-worktree',
+  }));
+  const occupiedPath = path.join(layout.primaryBase, 'scratch-collision-index.noindex');
+  await run('git', ['worktree', 'add', occupiedPath, '-b', 'fixture/scratch-occupied'], { cwd: repo });
+  const created = await new WorktreeManager(repo).create({ agentType: 'codex', managed: true,
+    taskName: legacyId, branchName: 'fixture/scratch-collision', baseBranch: 'main',
+    skipSetup: true, isolationPreference: 'git-worktree' });
+  expect(created.id).toMatch(/^scratch-collision-[a-z0-9]{4}-index\.noindex$/);
+  const reopened = await new WorktreeManager(repo).list();
+  expect(reopened.find(entry => entry.id === created.id)?.path).toBe(created.path);
+  expect(reopened.find(entry => entry.id === legacyId)?.path).toBe(legacyPath);
+}, 60_000);
+
+it.each([undefined, 'pkt-external-claude'])('preserves the external Claude directory contract (%s)', async (id) => {
+  const created = await new WorktreeManager(repo).create({ agentType: 'claude-code',
+    taskName: 'external claude', packetId: id, baseBranch: 'main' });
+  expect(created.claudeManaged).toBe(true);
+  expect(created.id).toBe(id ? `packet-${id}` : 'external-claude');
+  expect(path.basename(created.path)).toBe(created.id);
+  await expect(lstat(created.path)).rejects.toMatchObject({ code: 'ENOENT' });
 }, 60_000);
