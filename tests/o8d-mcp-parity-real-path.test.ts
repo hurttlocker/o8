@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { compareMcpExchanges, replayMcp, sendRecordedMcp, type RecordedMcpRequest } from '../scripts/lib/mcp-parity';
+import { seedMcpScaleFixture, startMcpCpuLoad } from './fixtures/mcp-parity/scale-benchmark';
 
 // Replace external observations only. Middleware, MCP handlers, API routes and persisted state are real.
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
@@ -21,6 +22,7 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
 }));
 
 const directory = process.env.CORTEX_IDE_DATA_DIR!;
+process.env.CORTEX_IDE_DB_PATH = join(directory, 'cortex-ide.db');
 const token = 'o8d-fixture-operator-credential';
 writeFileSync(join(directory, 'ws-token'), token);
 const refusedCredentials = { worker: 'fixture-worker-credential', device: 'fixture-device-credential', spectator: 'fixture-spectator-credential' };
@@ -514,5 +516,75 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(report.results).toHaveLength(14);
     expect(report.samples).toBe(100);
   }, 180_000);
+
+  it.runIf(Boolean(process.env.O8_MCP_SCALE_BENCH_REPORT_DIR))('measures realistic state with idle and CPU-loaded TypeScript', async () => {
+    const fixture = await seedMcpScaleFixture({ directory, sqlite: getSqlite(),
+      initializeRepo: async (path) => { await promisify(execFile)('git', ['init', '--quiet', path]); },
+      acquireLease: async (index) => {
+        const response = await fetch(`${base}/api/leases`, { method: 'POST', headers: {
+          authorization: `Bearer ${token}`, 'content-type': 'application/json',
+        }, body: JSON.stringify({ action: 'acquire', resource: `fixture:scale-lease-${index}`,
+          owner: { id: `fixture-owner-${index}`, label: `Fixture owner ${index}`, pid: process.pid },
+          claimToken: `scale-fixture-claim-value-${String(index).padStart(12, '0')}`, ttlMs: 86_400_000 }) });
+        expect(response.status).toBe(200);
+      },
+    });
+    const registered = toolPayload(await call(base, 'o8_list_repos'));
+    expect(registered.count).toBe(50);
+    expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM missions').get()).toEqual({ count: 300 });
+    expect(fixture).toMatchObject({ missions: 300, packets: 2_000, lanes: 2_000, repos: 50, leases: 200, projects: 10 });
+    expect(toolPayload(await call(base, 'o8_lease_list')).count).toBe(200);
+    for (const name of ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list']) {
+      if (name === 'o8_status') await call(base, name, { fresh: true });
+      compareMcpExchanges(await call(base, name), await call(nativeRust, name), name === 'o8_status'
+        ? ['/body/result/content/0/text/json/data/snapshot/ageMs'] : []);
+    }
+    const outputDirectory = process.env.O8_MCP_SCALE_BENCH_REPORT_DIR!;
+    mkdirSync(outputDirectory, { recursive: true });
+    for (const busy of [false, true]) {
+      await call(base, 'o8_status', { fresh: true });
+      await call(nativeRust, 'o8_status');
+      seen.length = 0;
+      const stopLoad = startMcpCpuLoad(busy);
+      const output = join(outputDirectory, busy ? 'large-cpu-busy.json' : 'large-idle.json');
+      let cpuLoad;
+      try {
+        await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', `--reference=${base}`,
+          `--candidate=${nativeRust}`, `--output=${output}`], { env: { ...process.env, O8_MCP_PARITY_TOKEN: token } });
+      } finally { cpuLoad = stopLoad(); }
+      const report = JSON.parse(readFileSync(output, 'utf8'));
+      expect(report.results).toHaveLength(14);
+      expect(report.samples).toBe(100);
+      expect(cpuLoad.cycles > 0).toBe(busy);
+      const referenceRequests = report.samples + report.warmups;
+      const fallbackRequestsIncludingWarmups = Object.fromEntries(report.results.filter((row: { server: string; name: string }) =>
+        row.server === 'Rust' && row.name !== 'tools/list').map((row: { name: string }) => {
+        const calls = seen.filter((entry) => {
+          if (entry.path !== '/api/mcp') return false;
+          const request = JSON.parse(entry.body);
+          return request.method === 'tools/call' && request.params?.name === row.name;
+        }).length;
+        expect(calls).toBeGreaterThanOrEqual(referenceRequests);
+        expect(calls).toBeLessThanOrEqual(referenceRequests * 2);
+        return [row.name, calls - referenceRequests];
+      }));
+      writeFileSync(output, `${JSON.stringify({ schema: 'o8/mcp/scale-benchmark/v1',
+        scenario: busy ? 'large-cpu-busy' : 'large-idle', fixture, cpuLoad,
+        node: process.versions.node, transport: 'fixture HTTP adapter using production middleware, MCP handlers and read routes',
+        clientAndRustInSeparateProcesses: true, fallbackRequestsIncludingWarmups, ...report }, null, 2)}\n`);
+    }
+  }, 1_200_000);
+
+  it('refuses scale seeding outside the owned fixture database', async () => {
+    const ownedDirectory = join(directory, 'scale-seeder-owned');
+    mkdirSync(ownedDirectory, { recursive: true });
+    const sqlite = getSqlite();
+    const before = sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get();
+    await expect(seedMcpScaleFixture({ directory: ownedDirectory, sqlite,
+      initializeRepo: async () => { throw new Error('Unreachable repo mutation'); },
+      acquireLease: async () => { throw new Error('Unreachable lease mutation'); },
+    })).rejects.toThrow('Refusing scale seeding outside the owned fixture database');
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get()).toEqual(before);
+  });
 
 });

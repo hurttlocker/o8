@@ -112,7 +112,7 @@ pub(super) fn read(reader: &NativeReads, db: &Connection, args: &Value) -> ReadR
         };
         projected.push(json!({"id":packet["id"],"referenceLabel":packet["referenceLabel"],"title":packet["title"],"wave":wave,
             "status":packet["status"],"runtime":packet["runtime"],"model":packet["model"].as_str().or(packet["workerRouting"]["selectedModel"].as_str()).or(packet["assignedModel"].as_str()),
-            "queueState":packet["queueState"],"releaseState":packet["releaseState"],"blockedBy":blocked,"blockedReason":packet["blockedReason"],"dispatchQueue":null,
+            "queueState":packet["queueState"],"releaseState":packet["releaseState"],"blockedBy":blocked,"blockedReason":packet["blockedReason"],"dispatchQueue":null,"terminalReason":null,
             "summary":packet["completionSummary"].as_str().map(str::trim).filter(|s| !s.is_empty()),
             "storageAdmission":packet["storageAdmission"],"spendCap":packet["spendCap"],"spendTelemetry":packet["spendTelemetry"],"recovery":packet["recovery"],"lane":null,"review":review,"artifacts":[]}));
     }

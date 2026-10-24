@@ -111,3 +111,41 @@ generation binding. Fallback requests remain included. These numbers include
 HTTP client and transport costs, and the shared status snapshot behavior. They
 describe the fixture
 HTTP adapter, not a production Next.js process, and establish no speedup claim.
+
+## Scale and event-loop load
+
+For the larger persisted-state benchmark, use the same release binary and HTTP
+fixture entry points:
+
+```sh
+O8D_MCP_TEST_BINARY="$PWD/crates/o8d/target/release/o8d-mcp" \
+O8_MCP_SCALE_BENCH_REPORT_DIR="$PWD/work/mcp-scale" \
+npx vitest run tests/o8d-mcp-parity-real-path.test.ts -t 'realistic state'
+```
+
+The fixture contains 300 missions, 2,000 packets and lanes, 50 initialized Git
+repositories, 10 projects and 200 leases. There are 276 archived missions and
+144 active lanes; the current mission has six bound packets. Lease owners use
+one live fixture process identity. External runtime/account observations remain
+fixture replacements. Bulk seeding requires the canonical database path to be
+the owned fixture database before any mutation.
+
+The test checks parity on this state before running `scripts/mcp-benchmark.mjs`
+twice, with 10 warmups and 100 samples per operation and server. The idle run
+has no injected CPU work. The busy run schedules 100 ms synchronous CPU blocks
+every 125 ms on the TypeScript fixture's event loop. Timers can be delayed by
+the application's own synchronous work, so reports include actual busy time,
+cycle count, observed duty and event-loop delay. The benchmark client and Rust
+listener run in separate processes. Run other builds and tests separately from
+sampling.
+
+`large-idle.json` and `large-cpu-busy.json` include fixture cardinalities and
+TypeScript fallback counts, including warmups, for every read tool. The counts
+subtract the 110 reference requests from the observed TypeScript MCP calls;
+they describe this serial, interleaved paired client. Rust endpoint timings
+include its TypeScript fallbacks. Bound mission and task projections in this
+fixture retain those fallbacks, and status can fall back when its shared
+snapshot needs refresh. These measurements use the fixture HTTP adapter and
+synthetic CPU work; they do not measure a production Next.js deployment.
+The recorded cohorts and earlier small-fixture receipts are in
+[o8d-mcp-native-scale.json](../../docs/internals/o8d-mcp-native-scale.json).
