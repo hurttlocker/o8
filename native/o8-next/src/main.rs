@@ -128,8 +128,6 @@ fn run() -> Result<(), String> {
             );
         }
     };
-    let client =
-        Client::new(&server.ok_or("Pass --server with an explicit disposable server origin")?)?;
     if let Some(options) = grid {
         if benchmark.is_some()
             || composer_benchmark.is_some()
@@ -141,8 +139,15 @@ fn run() -> Result<(), String> {
                     .into(),
             );
         }
-        return pane_grid::launch(client, offscreen, options);
+        let grid_client = Client::new(
+            server
+                .as_deref()
+                .ok_or("Pass --server with an explicit disposable server origin")?,
+        )?;
+        return pane_grid::launch(grid_client, offscreen, options);
     }
+    let client =
+        Client::new(&server.ok_or("Pass --server with an explicit disposable server origin")?)?;
     // The real session list and history reads are also exercised without a window
     // by the parity/protocol runner. Interactive reads happen off the UI thread.
     ui::launch(

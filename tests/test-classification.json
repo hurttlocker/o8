@@ -3862,14 +3862,6 @@
       ]
     },
     {
-      "path": "tests/next-pane-grid-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/next-render-parity.test.ts",
       "reasons": [
         "native-build"
@@ -3900,6 +3892,14 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8-next-pane-grid-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },

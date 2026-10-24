@@ -9,8 +9,10 @@ transcript reader, history handlers and middleware are production code.
 
 ## Red before implementation
 
-`tests/next-pane-grid-real-path.test.ts` first ran against the existing fixture
-host. It failed before the fixture extension and native grid were implemented:
+`tests/o8-next-pane-grid-real-path.test.ts` first ran against the existing fixture
+host under its original name, `tests/next-pane-grid-real-path.test.ts`. It was
+renamed to keep its generated manifest entry separate from the transcript PR.
+It failed before the fixture extension and native grid were implemented:
 
 ```text
 AssertionError: six persisted workers must be reachable through the production session route: expected [] to have a length of 6 but got +0
@@ -47,7 +49,7 @@ npm test: Test Files  1219 passed | 3 skipped (1222)
               Tests  8651 passed | 4 skipped (8655)
 ```
 
-TypeScript suites: `tests/next-pane-grid-real-path.test.ts`,
+TypeScript suites: `tests/o8-next-pane-grid-real-path.test.ts`,
 `tests/next-render-parity.test.ts`, `tests/next-stream-parity.test.ts`.
 Native grid regressions: `src/pane_grid_tests.rs`, `tests/pane_grid_cli.rs`.
 `src/grid_sessions.rs` adds display-path matching checks. The full release Rust

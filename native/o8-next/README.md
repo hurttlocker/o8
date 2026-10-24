@@ -249,7 +249,7 @@ transcript layout until visible, before any text shaping or painting.
 
 ```sh
 cargo test --locked --manifest-path native/o8-next/Cargo.toml
-npx vitest run tests/next-pane-grid-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
+npx vitest run tests/o8-next-pane-grid-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
 cargo test --release --locked --manifest-path native/o8-next/Cargo.toml pane_grid_measurement -- --ignored --nocapture
 ```
 
