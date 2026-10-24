@@ -4232,6 +4232,13 @@
       ]
     },
     {
+      "path": "tests/outside-transcript-background-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
       "reasons": [
         "child-process",
