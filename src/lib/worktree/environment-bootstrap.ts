@@ -1,5 +1,7 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
+import { recordLaneEvent } from '@/lib/lane/events';
+import { PACKET_ENVIRONMENT_SKIP_NOTE } from '@/lib/repos/environment-policy';
 import {
   createPinnedWorkspaceBinding,
   inspectPinnedWorkspaceEntry,
@@ -16,10 +18,11 @@ export async function bootstrapEnvironmentFiles(
   identity: WorktreeMaterializationIdentity,
   opts: CreateWorktreeOptions,
 ): Promise<void> {
-  const envMode = opts.envMode === 'skip' ? 'skip' : opts.packetId ? 'symlink' : opts.envMode ?? 'copy';
-  if (envMode === 'skip') return;
+  const envMode = opts.envMode ?? 'copy';
+  if (!opts.packetId && envMode === 'skip') return;
 
   const envFiles = opts.envFiles?.filter(Boolean) ?? ['.env', '.env.local'];
+  const omitted: string[] = [];
   for (const configuredPath of envFiles) {
     const envFile = configuredPath.trim().replaceAll('\\', '/').replace(/^\.\//, '');
     if (!envFile || path.isAbsolute(envFile)
@@ -31,9 +34,10 @@ export async function bootstrapEnvironmentFiles(
     if (opts.packetId) {
       const destination = await inspectPinnedWorkspaceEntry(worktreePath, identity, envFile);
       if (destination?.kind === 'file') continue;
-      if (destination || await resolveEnvBootstrapSource(repoRoot, envFile)) {
-        throw new Error('Packet environment inheritance is unsafe: source environment files cannot be linked or copied into a worker checkout. Set repository envMode: skip and provide task-scoped configuration before retrying.');
+      if (destination) {
+        throw new Error('Packet environment destination must be a regular file or absent; refusing an existing symlink or non-file entry.');
       }
+      omitted.push(envFile);
       continue;
     }
     const sourcePath = await resolveEnvBootstrapSource(repoRoot, envFile);
@@ -59,6 +63,11 @@ export async function bootstrapEnvironmentFiles(
         await transaction.save(id, entry);
       });
     }
+  }
+  if (opts.packetId && opts.laneId && omitted.length > 0) {
+    recordLaneEvent(opts.laneId, 'environment_files_not_inherited', 'system', {
+      packetId: opts.packetId, files: omitted, note: PACKET_ENVIRONMENT_SKIP_NOTE,
+    });
   }
 }
 
