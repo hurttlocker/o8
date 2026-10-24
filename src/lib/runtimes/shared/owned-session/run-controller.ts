@@ -1,4 +1,5 @@
 import { createWorkerFailureHandler } from './worker-failure';
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
@@ -458,6 +459,7 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
 

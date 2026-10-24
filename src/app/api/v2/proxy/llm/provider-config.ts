@@ -103,11 +103,12 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
     }),
     buildBody: (model, messages, options) => {
       const isThinkingModel = THINKING_MODELS.has(model);
-      const maxTokens = isThinkingModel ? 16384 : 4096;
       const explicitBudget = options?.thinkingBudgetTokens;
       const budgetTokens = explicitBudget != null && Number.isFinite(explicitBudget) && explicitBudget > 0
         ? Math.floor(explicitBudget)
         : 10000;
+      // Enabled thinking requires budget_tokens < max_tokens. Leave room for the answer.
+      const maxTokens = isThinkingModel ? Math.max(16384, budgetTokens + 4000) : 4096;
 
       return {
         model,

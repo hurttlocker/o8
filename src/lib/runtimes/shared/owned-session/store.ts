@@ -1,4 +1,5 @@
 import { providerFromConfig } from './controlled-provider';
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 /**
  * createOwnedSessionStore — the generic primitive.
@@ -154,6 +155,7 @@ export function createOwnedSessionStore(
 
   async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
     const executionPolicy = createOwnedExecutionPolicy(request, runtimeId);
+    assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort);
     const prompt = request.prompt.trim();
     if (!prompt) {
       throw new Error('prompt is required');
@@ -300,6 +302,7 @@ export function createOwnedSessionStore(
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    if (session) assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
@@ -314,6 +317,7 @@ export function createOwnedSessionStore(
 
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
+      if (archived) assertRuntimeEffortPin(runtimeId, archived.model, archived.effort);
       refuseOwnedSingleAttemptResume(archived);
       if (archived?.threadId) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);

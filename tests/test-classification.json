@@ -3342,6 +3342,12 @@
       ]
     },
     {
+      "path": "tests/llm-effort-compatibility-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/local-egress-assertion-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5482,6 +5488,19 @@
       "path": "tests/runtime-carrier-conformance.integration.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/runtime-effort-compatibility-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-effort-matrix-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
