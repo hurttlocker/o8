@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { ComposerPopoverVisibilityContext } from '@/components/desktop/thoughts/chat-panel/ComposerPopover';
+import { useFloatingSurfaceMaterial } from '../FloatingSurface';
 
 import { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
 export { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
@@ -14,6 +15,7 @@ export function ChatListColumn({ visible, width, overlay, onClose, children }: {
   onClose: () => void;
   children?: ReactNode;
 }) {
+  const material = useFloatingSurfaceMaterial();
   return (
     <aside
       id="o8-chat-list"
@@ -42,6 +44,15 @@ export function ChatListColumn({ visible, width, overlay, onClose, children }: {
         position: overlay ? 'absolute' : 'relative',
         left: overlay ? NAVIGATION_RAIL_WIDTH : undefined,
         zIndex: overlay ? 180 : undefined,
+        // In-flow glass can share the window material. An overlay must frost
+        // the workspace beneath it, with the palette fallback in other modes.
+        ...(overlay ? {
+          ...material.textStyle,
+          ...(material.isAllGlass ? material.overlayStyle : {}),
+          // Backdrop blur can be unavailable in WebKit's native compositor.
+          // Stacked chrome needs its own readable backing in every appearance.
+          background: 'var(--t-popover-surface)',
+        } : {}),
       } as CSSProperties}
     >
       <ComposerPopoverVisibilityContext value={visible}>

@@ -10,6 +10,7 @@ import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DashboardFrame as SmoothCorners } from './DashboardFrame';
+import { ChatListCard } from './ChatListCard';
 import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
@@ -4693,21 +4694,9 @@ function DashboardInner() {
           }}
         >
           {leftHeader}
-          <SmoothCorners
-            data-chrome-surface="true"
-            corners={workspaceFrameCorners(joinedWorkspaceFrame, true, sidebarOverlay)}
-            autoEffects={false}
-            style={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-sidebar-bg, var(--t-panel-solid))',
-            }}
-          >
+          <ChatListCard glass={effectiveGlassSurface} joined={joinedWorkspaceFrame} overlay={sidebarOverlay}>
             {leftContent}
-          </SmoothCorners>
+          </ChatListCard>
         </motion.div>
         </ChatListColumn>
       );

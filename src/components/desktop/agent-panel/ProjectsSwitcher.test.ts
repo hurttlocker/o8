@@ -8,7 +8,10 @@ import { ProjectsSwitcher } from './ProjectsSwitcher';
 import { ChatListColumn } from '@/components/desktop/shell/ChatListColumn';
 
 vi.mock('framer-motion', () => ({ useReducedMotion: () => true, motion: { div: 'div' } }));
-vi.mock('../FloatingSurface', () => ({ FloatingSurface: ({ children }: HTMLAttributes<HTMLDivElement>) => createElement('div', null, children) }));
+vi.mock('../FloatingSurface', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../FloatingSurface')>(),
+  FloatingSurface: ({ children }: HTMLAttributes<HTMLDivElement>) => createElement('div', null, children),
+}));
 vi.mock('./ProjectGroupDialog', () => ({ ProjectGroupDialog: () => createElement('div', { role: 'dialog' }, 'Project form') }));
 vi.mock('./ConnectRepositoryDialog', () => ({ ConnectRepositoryDialog: () => null }));
 
