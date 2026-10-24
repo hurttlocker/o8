@@ -7,18 +7,10 @@
 // This test renders the REAL production component (src/components/desktop/
 // workspace-terminal/AgentTilePane.tsx) inside headless Chromium and asserts
 // on actual browser layout metrics — bounding boxes and painted text ranges —
-// not on source text or jsdom stubs. Only content-bearing leaves are stubbed
-// (the transcript body renderer and a browser-PiP event constant); the
-// session-transform control renders for real against a stubbed window.fetch,
-// so its 32px button and the 44px close control are accounted for exactly as
-// production lays them out.
-//
-// Expected classification on unchanged main: both cases FAIL.
-// Narrow (~200px): the runtime/model label neither clips nor yields — its
-// glyphs paint over the status label and the header controls, the short
-// worker identity does not stay fully visible, and the full model string is
-// reachable through no hoverable tooltip. Roomy: layout is clean but the
-// full model string is still reachable through no tooltip at any width.
+// not on source text or jsdom stubs. Transcript content, the browser-PiP
+// event constant, and authentication are stubbed outside the header geometry.
+// The session-transform control renders for real against a stubbed fetch,
+// so its button and the close control use production layout dimensions.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -89,6 +81,7 @@ interface HeaderMetrics {
   name: ElementMetrics;
   model: ElementMetrics;
   status: ElementMetrics;
+  statusCells: Box[];
   transform: ElementMetrics;
   close: ElementMetrics;
   collisions: string[];
@@ -108,14 +101,14 @@ function measureHeaderInPage(probe: { expectedName: string; expectedModel: strin
   const allButtons = Array.from(document.querySelectorAll('button'));
   const closeButton = allButtons.find((button) => (button.getAttribute('aria-label') ?? '').startsWith('Hide ')) ?? null;
   const transformButton = allButtons.find((button) => (button.getAttribute('aria-label') ?? '') === 'Session history controls') ?? null;
-  const nameElement = Array.from(document.querySelectorAll('div')).find((el) => (
+  const nameElement = Array.from(document.querySelectorAll<HTMLElement>('[data-worker-pane-header] [data-worker-title]')).find((el) => (
     el.getAttribute('title') === probe.expectedName
     && (el.textContent ?? '').trim() === probe.expectedName
   )) ?? null;
   const modelElement = Array.from(document.querySelectorAll('span'))
     .filter((el) => (el.textContent ?? '').includes(probe.expectedModel))
     .sort((a, b) => (a.textContent ?? '').length - (b.textContent ?? '').length)[0] ?? null;
-  const statusElement = document.querySelector<HTMLElement>('[data-worker-pane-header] span[aria-label="Running"]')?.parentElement ?? null;
+  const statusElement = document.querySelector<HTMLElement>('[data-worker-pane-header] span[aria-label="Running"]');
 
   // The tile root is the first ancestor of the close button that clips
   // overflow (border-radius 14 card with overflow: hidden) — painted glyphs
@@ -198,22 +191,17 @@ function measureHeaderInPage(probe: { expectedName: string; expectedModel: strin
 
   const name = metricsFor('name', nameElement, true);
   const model = metricsFor('model', modelElement, true);
-  const status = metricsFor('status', statusElement, true);
+  // The status is a labeled grid, so measure its painted geometry, not text ink.
+  const status = metricsFor('status', statusElement, false);
+  const statusCells = Array.from(statusElement?.querySelectorAll('i') ?? [])
+    .map((cell) => boxOf(cell.getBoundingClientRect()));
   // SVG-only buttons: full clickable element boxes, never text-ink bounds.
   const transform = metricsFor('transform', transformButton, false);
   const close = metricsFor('close', closeButton, false);
   const byKey: Record<HeaderElementKey, ElementMetrics> = { name, model, status, transform, close };
 
-  const headerRowBox = (() => {
-    const anchors = [name, status].filter((entry) => entry.found && entry.box);
-    if (anchors.length === 0) return null;
-    return withSize({
-      left: Math.min(...anchors.map((entry) => entry.box!.left)),
-      top: Math.min(...anchors.map((entry) => entry.box!.top)),
-      right: Math.max(...anchors.map((entry) => entry.box!.right)),
-      bottom: Math.max(...anchors.map((entry) => entry.box!.bottom)),
-    });
-  })();
+  const headerRow = document.querySelector<HTMLElement>('[data-worker-pane-header]');
+  const headerRowBox = headerRow ? boxOf(headerRow.getBoundingClientRect()) : null;
 
   // The full model value counts as reachable only when some element carrying
   // it as a native `title` tooltip is itself hoverable: a nonzero box that
@@ -265,6 +253,7 @@ function measureHeaderInPage(probe: { expectedName: string; expectedModel: strin
     name,
     model,
     status,
+    statusCells,
     transform,
     close,
     collisions,
@@ -338,6 +327,7 @@ body {
   color: var(--t-text);
   background: #F4F2ED;
 }
+* { box-sizing: border-box; }
 `;
 
 describe.skipIf(!executablePath)('AgentTilePane header layout (real browser path, #2357)', () => {
@@ -498,7 +488,8 @@ window.__o8TileHarness = (() => {
       host.id = 'o8-tile-header-host';
       host.style.display = 'flex';
       host.style.flexDirection = 'column';
-      host.style.minHeight = '120px';
+      // Give the roomy specimen enough height to exercise the noncompact header.
+      host.style.height = '480px';
       host.style.width = `${setup.tileWidthPx}px`;
       document.body.appendChild(host);
       harness.mount(host, {
@@ -547,6 +538,27 @@ window.__o8TileHarness = (() => {
     return element;
   }
 
+  function expectStatusIndicator(metrics: HeaderMetrics): ElementMetrics {
+    const status = expectRenderedBox(metrics, 'status');
+    expect(status.ariaLabel, 'status indicator must expose the running state').toBe('Running');
+    expect(status.box!.width, 'status grid must retain its full width').toBe(11);
+    expect(status.box!.height, 'status grid must retain its full height').toBe(11);
+    expect(status.paintedWidth, 'status grid must not be clipped').toBe(11);
+    expect(status.paintedHeight, 'status grid must not be clipped vertically').toBe(11);
+    expect(metrics.statusCells, 'status grid must render all nine cells').toHaveLength(9);
+    expect(new Set(metrics.statusCells.map((cell) => `${cell.left},${cell.top}`)).size,
+      'status cells must occupy nine distinct grid positions').toBe(9);
+    for (const cell of metrics.statusCells) {
+      expect(cell.width).toBe(3);
+      expect(cell.height).toBe(3);
+      expect(cell.left).toBeGreaterThanOrEqual(status.box!.left);
+      expect(cell.right).toBeLessThanOrEqual(status.box!.right);
+      expect(cell.top).toBeGreaterThanOrEqual(status.box!.top);
+      expect(cell.bottom).toBeLessThanOrEqual(status.box!.bottom);
+    }
+    return status;
+  }
+
   function assertRealTileLayout(metrics: HeaderMetrics, expectedWidthPx: number) {
     expect(metrics.tileWidth, 'tile did not lay out at the requested width').toBeGreaterThanOrEqual(expectedWidthPx - 2);
     expect(metrics.tileWidth, 'tile width diverged from the requested width').toBeLessThanOrEqual(expectedWidthPx + 2);
@@ -587,7 +599,7 @@ window.__o8TileHarness = (() => {
       ).toBeGreaterThanOrEqual(metrics.tileLeft - 1);
       expect(
         element.box.right,
-        `${key} element paints past the tile horizontally (vertical overshoot of the 44px close hit target is intentional)`,
+        `${key} element paints past the tile horizontally`,
       ).toBeLessThanOrEqual(metrics.tileRight + 1);
     }
   }
@@ -609,10 +621,10 @@ window.__o8TileHarness = (() => {
       'short worker identity is not fully visible at ~200px (subpixel truncation renders ellipsis)',
     ).toBeGreaterThanOrEqual(name.textWidth - 0.1);
 
-    const status = expectTextLabel(metrics, 'status');
+    const status = expectStatusIndicator(metrics);
     expect(
       status.paintedWidth,
-      'status label has no visible painted width at ~200px (model must yield before status)',
+      'status indicator has no visible painted width at ~200px (model must yield before status)',
     ).toBeGreaterThan(2);
 
     // The model label may be clipped or fully dropped at this width, but its
@@ -621,7 +633,7 @@ window.__o8TileHarness = (() => {
     assertNoPaintedCollisions(metrics);
   });
 
-  it('yields the model before the status at ~320px: full status dot/caption, clipped model, full identity', async () => {
+  it('yields the model before the status at ~320px: full status grid, clipped model, full identity', async () => {
     const metrics = await mountAndMeasure(MID_TILE_WIDTH_PX, AGENT_NAME);
     assertRealTileLayout(metrics, MID_TILE_WIDTH_PX);
     assertHeaderControls(metrics);
@@ -634,13 +646,13 @@ window.__o8TileHarness = (() => {
       'short worker identity is not fully visible at ~320px',
     ).toBeGreaterThanOrEqual(name.textWidth - 0.1);
 
-    // Priority contract: the status renders FULL (dot + caption, zero
+    // Priority contract: the status renders FULL (the labeled grid, zero
     // truncation) while the model label is the metadata that yields.
-    const status = expectTextLabel(metrics, 'status');
+    const status = expectStatusIndicator(metrics);
     expect(
       status.paintedWidth,
       'status label is truncated at ~320px while the model label still occupies width — model must yield first',
-    ).toBeGreaterThanOrEqual(status.textWidth - 0.1);
+    ).toBeGreaterThanOrEqual(status.box!.width - 0.1);
 
     // A clipped or fully hidden model label is permitted; its full value must
     // stay reachable through a hoverable tooltip.
@@ -666,10 +678,10 @@ window.__o8TileHarness = (() => {
       'truncated long identity must stay inside its own clip box (no painted overflow)',
     ).toBeGreaterThan(2);
 
-    const status = expectTextLabel(metrics, 'status');
+    const status = expectStatusIndicator(metrics);
     expect(
       status.paintedWidth,
-      'status indicator (dot at minimum) must stay visible beside a long identity',
+      'status grid must stay visible beside a long identity',
     ).toBeGreaterThan(2);
 
     assertModelAccessible(metrics);
@@ -696,8 +708,8 @@ window.__o8TileHarness = (() => {
       'runtime/model label should render in full at roomy width',
     ).toBeGreaterThanOrEqual(model.textWidth - 0.1);
 
-    const status = expectTextLabel(metrics, 'status');
-    expect(status.paintedWidth, 'status label has no visible painted width at roomy width').toBeGreaterThan(2);
+    const status = expectStatusIndicator(metrics);
+    expect(status.paintedWidth, 'status grid has no visible painted width at roomy width').toBeGreaterThan(2);
 
     assertModelAccessible(metrics);
     assertNoPaintedCollisions(metrics);

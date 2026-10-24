@@ -5641,6 +5641,7 @@
       "path": "tests/symon-text-say-loop.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "network-listener",
         "process-signal"
       ]
