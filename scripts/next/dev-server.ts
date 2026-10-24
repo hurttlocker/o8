@@ -65,6 +65,12 @@ async function main() {
   const { GET: state } = await import('../../src/app/api/orchestrator/state/route');
   await isolateTranscriptDiscovery(transcriptFixtures);
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
+  const review = process.argv.includes('--review');
+  if (review) await (await import('./review-fixture')).seedReviewFixture(repo);
+  const packetDiff = await import('../../src/app/api/lanes/[id]/diff/route');
+  const worktreeDiff = await import('../../src/app/api/worktrees/diff/route');
+  const reviewState = await import('../../src/app/api/orchestrator/review-state/route');
+  const reviewDecision = await import('../../src/app/api/orchestrator/review/route');
   const queue = await import('../../src/app/api/orchestrator/composer-queue/route');
   const { panelGateMiddleware } = await import('../../src/middleware');
   // Fixture admission is the same injectable native boundary as the existing
@@ -81,16 +87,25 @@ async function main() {
     '/api/v2/chat-history': context, '/api/orchestrator/state': state,
     '/api/orchestrator/composer-queue': queue.GET, '/api/panel/ws-info': wsInfo,
     '/api/runtime/inventory': inventory,
+    ...(review ? {
+      '/api/worktrees/diff': worktreeDiff.GET,
+      '/api/orchestrator/review-state': reviewState.GET,
+      ...Object.fromEntries(['next-review-approve', 'next-review-reject'].map(id => [
+        `/api/lanes/${id}/diff`, (request: NextRequest) => packetDiff.GET(request, { params: Promise.resolve({ id }) }),
+      ])),
+    } : {}),
   };
   const requests: string[] = [];
   let responseLost = false;
+  let reviewResponseLost = false;
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       requests.push(`${req.method} ${url.pathname}`);
       const route = req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
-          ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : null : null;
+          ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : null
+          : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -99,8 +114,11 @@ async function main() {
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
       if (body) {
-        const target = JSON.parse(body) as { threadId?: string; repoPath?: string };
-        if (!target.threadId?.startsWith('thoughts-composer-') || target.repoPath !== repo) { res.writeHead(400).end(); return; }
+        const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string };
+        const owned = route === reviewDecision.POST
+          ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
+          : target.threadId?.startsWith('thoughts-composer-') && target.repoPath === repo;
+        if (!owned) { res.writeHead(400).end(); return; }
       }
       const request = new NextRequest(url, { method: req.method,
         headers: { host: url.host, 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1',
@@ -117,6 +135,10 @@ async function main() {
       if (composer && route === queue.POST && response.ok && !responseLost
         && JSON.parse(body).payload?.text === 'Fixture lose response') {
         responseLost = true; res.destroy(); return;
+      }
+      if (review && process.argv.includes('--review-drop-first') && route === reviewDecision.POST
+        && response.ok && !reviewResponseLost && JSON.parse(body).approved === false) {
+        reviewResponseLost = true; res.destroy(); return;
       }
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(Buffer.from(await response.arrayBuffer()));

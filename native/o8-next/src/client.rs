@@ -303,6 +303,25 @@ impl Client {
         }
         Ok(history)
     }
+    pub fn review_state(&self, packet: &str) -> Result<Value, String> {
+        self.get("/api/orchestrator/review-state", &[("packetId", packet)])
+    }
+    pub fn review(&self, body: &Value) -> Result<Value, String> {
+        let url = self.origin.join("/api/orchestrator/review").unwrap();
+        let mut request = self.agent.post(url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = request
+            .send_json(body.clone())
+            .map_err(|error| match error {
+                ureq::Error::Status(code, _) => {
+                    format!("Review rejected (HTTP {code}). Refresh to inspect current state.")
+                }
+                _ => "Review unconfirmed. Retry reuses the same decision identity.".into(),
+            })?;
+        Self::read(response)
+    }
     /// Same credential/port response used by web reconnect recovery. The native
     /// process never reads a token file or resolves installed-app configuration.
     pub fn websocket(&self) -> Result<(Url, SocketAddr), String> {

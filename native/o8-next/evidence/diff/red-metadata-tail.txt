@@ -1,0 +1,21 @@
+   Compiling o8-next v0.0.0 (/workspace/o8/native/o8-next)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.14s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-62664842f4866092)
+
+running 1 test
+
+thread 'diff_tests::diff_parser_highlights_languages_preserves_bytes_and_pairs_changes' (24465) panicked at src/diff_tests.rs:219:5:
+assertion failed: metadata.files[0].lines.iter().any(|line| line.text == "old mode 100644")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test diff_tests::diff_parser_highlights_languages_preserves_bytes_and_pairs_changes ... FAILED
+
+failures:
+
+failures:
+    diff_tests::diff_parser_highlights_languages_preserves_bytes_and_pairs_changes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--bin o8-next`

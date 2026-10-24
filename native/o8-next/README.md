@@ -273,3 +273,67 @@ The grid currently contains read-only transcript panes. Per-slot terminals
 remain to be integrated with the separately reviewed terminal surface; this
 change does not import that branch. Measurement endpoints, raw samples and
 remaining acceptance are in [pane grid evidence](evidence/pane-grid/README.md).
+
+## Opt-in diff and packet review (#4531)
+
+The separate read-only diff mode builds on main and does not require the open
+transcript or terminal PRs. It leaves the ordinary transcript/composer launch
+path and the shipped Tauri app unchanged. After building the native binary, use
+the existing CLI launcher with one explicit target:
+
+```sh
+node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --server ORIGIN --review-packet PACKET_ID
+node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --server ORIGIN --diff-worktree WORKTREE --diff-base main
+```
+
+`--diff-file RELATIVE_PATH` optionally limits a worktree read to one file. The
+file list shows added, removed, renamed and modified states, counts, and the
+original rename path. Permission changes retain their actual mode metadata.
+Unified and split views share parsed rows, syntax spans and fixed 20 px heights;
+GPUI's uniform lists materialize only visible file and diff rows. Long lines
+scroll horizontally within the diff. U/S switch views, Home/End navigate rows,
+Alt+Up/Down select files, and R refreshes. Binary changes are labeled without a
+content preview. Tree-sitter highlights TypeScript/TSX, Rust, Markdown and JSON
+from each side's displayed snippets; absent hunk context is not fetched.
+
+Packet mode reads `/api/lanes/[id]/diff` and
+`/api/orchestrator/review-state`, then posts decisions to the existing
+`/api/orchestrator/review` endpoint with the displayed full HEAD and a retained
+client mutation identity. It rereads the diff before posting and refreshes
+persisted review state afterward. An unconfirmed response offers Retry decision
+with the original body; Refresh discards that local attempt and reloads state.
+Existing server governance refusals remain refusals. Worktree mode uses
+`/api/worktrees/diff` and has no decision controls. Server byte limits apply;
+truncated, incomplete, unsupported or empty patches cannot authorize a decision.
+Colored/custom patch output is reported as unsupported rather than silently
+omitting changes. No server routes or authentication policies are added.
+
+Run the disposable production-handler host with `--review` to author fixture
+Git and packet state. Its origin line is the same as the existing dev-server
+pattern; the packet ids are `next-review-approve` and `next-review-reject`.
+`O8_NEXT_API_TOKEN` must be supplied explicitly to both host and client.
+`--review-drop-first` adds a fixture-only lost response after the first persisted
+rejection, used by the GPUI retry regression. Neither mode starts providers or
+uses accounts.
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/dev-server.ts --review
+```
+
+The tests start and reap their own fixture host:
+
+```sh
+mkdir -p work
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml
+npx vitest run tests/next-diff-review-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
+O8_NEXT_DIFF_EVIDENCE="$PWD/work/diff-run.json" cargo test --release --locked --manifest-path native/o8-next/Cargo.toml diff_real_server -- --nocapture --test-threads=1
+```
+
+The headless GPUI test drives file/mode/decision controls, a real lost HTTP
+response and retry, source drift, production colored output, truncation and wheel
+events. It measures selected-file HTTP load through the first scene paint,
+50 wheel frames, 50 alternating first/last viewport jumps, and native-process RSS
+for 1,000 and 20,000 added lines in both modes. The test text system supplies no
+native font shaping or GPU/compositor presentation; this does not establish
+on-screen frame cadence. See [diff verification](evidence/diff/verification.md)
+for raw samples, audit results and remaining acceptance.

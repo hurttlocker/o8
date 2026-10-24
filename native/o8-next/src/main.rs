@@ -2,6 +2,10 @@
 mod activity;
 mod client;
 mod composer;
+mod diff;
+#[cfg(test)]
+mod diff_tests;
+mod diff_ui;
 mod grid_sessions;
 mod merge;
 mod model;
@@ -32,6 +36,10 @@ fn run() -> Result<(), String> {
         println!(
             "Pane grid: --pane-grid 1|2|4|6 --workspace REPOSITORY_PATH --pane-layout ABSOLUTE_FILE"
         );
+        println!("{}", diff_ui::HELP);
+        return Ok(());
+    }
+    if diff_ui::try_launch(&args)? {
         return Ok(());
     }
     if args.first().is_some_and(|s| s == "--replay-tree") && args.len() == 2 {

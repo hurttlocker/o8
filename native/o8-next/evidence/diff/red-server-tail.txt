@@ -1,0 +1,25 @@
+
+ FAIL  tests/next-diff-review-real-path.test.ts > o8 next diff/review through disposable production HTTP routes > serves file states and pins review decisions, then refreshes persisted state
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ tests/next-diff-review-real-path.test.ts:29:33
+     27|   it('serves file states and pins review decisions, then refreshes per…
+     28|     const diffResponse = await fetch(`${origin}/api/lanes/next-review-…
+     29|     expect(diffResponse.status).toBe(200);
+       |                                 ^
+     30|     const diff = await diffResponse.json();
+     31|     expect(diff).toMatchObject({ ok: true, truncated: false });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  09:14:31
+   Duration  9.18s (transform 94ms, setup 129ms, import 22ms, tests 8.74s, environment 0ms)

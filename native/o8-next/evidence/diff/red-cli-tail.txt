@@ -1,0 +1,24 @@
+   Compiling o8-next v0.0.0 (/workspace/o8/native/o8-next)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.57s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/diff_cli.rs (native/o8-next/target/debug/deps/diff_cli-1252273d3d2eabe5)
+
+running 1 test
+test diff_cli_is_explicit_and_documents_both_targets ... FAILED
+
+failures:
+
+---- diff_cli_is_explicit_and_documents_both_targets stdout ----
+
+thread 'diff_cli_is_explicit_and_documents_both_targets' (26376) panicked at tests/diff_cli.rs:9:5:
+assertion failed: help.contains("--review-packet ID")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    diff_cli_is_explicit_and_documents_both_targets
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test diff_cli`
