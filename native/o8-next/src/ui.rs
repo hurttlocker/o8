@@ -766,3 +766,6 @@ mod tests;
 #[cfg(test)]
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
+#[cfg(test)]
+#[path = "o8d_read_tests.rs"]
+mod o8d_read_tests;

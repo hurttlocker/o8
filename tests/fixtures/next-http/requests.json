@@ -1,0 +1,23 @@
+[
+  { "name": "sidebar", "path": "/api/mobile/orchestrator/threads?limit=500" },
+  { "name": "mission", "path": "/api/orchestrator/state" },
+  { "name": "review transcript", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-review&limit=100" },
+  { "name": "tool transcript", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-tools&limit=100" },
+  { "name": "long transcript", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-long&limit=100" },
+  { "name": "native transcript page", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-long&limit=100&page=1" },
+  { "name": "context", "path": "/api/v2/chat-history?tabId=thoughts-review&limit=100" },
+  { "name": "paged context", "path": "/api/v2/chat-history?tabId=thoughts-long&limit=100" },
+  { "name": "queue", "path": "/api/orchestrator/composer-queue?repoPath=$REPO&threadId=thoughts-review&backend=claude" },
+  { "name": "websocket information", "path": "/api/panel/ws-info" },
+  { "name": "missing session", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-missing&limit=100" },
+  { "name": "missing history key", "path": "/api/mobile/history" },
+  { "name": "duplicate history key uses first value", "path": "/api/mobile/history?sessionKey=llm-chat%3Athoughts-review&sessionKey=llm-chat%3Athoughts-tools&limit=100" },
+  { "name": "missing tab", "path": "/api/v2/chat-history" },
+  { "name": "archived", "path": "/api/mobile/orchestrator/threads?archived=1" },
+  { "name": "backend filter", "path": "/api/mobile/orchestrator/threads?limit=500&backend=codex" },
+  { "name": "invalid backend", "path": "/api/mobile/orchestrator/threads?backend=invalid" },
+  { "name": "queue target refusal", "path": "/api/orchestrator/composer-queue?repoPath=relative&threadId=thoughts-review" },
+  { "name": "absent operator", "path": "/api/mobile/orchestrator/threads?limit=500", "credential": "absent" },
+  { "name": "invalid operator", "path": "/api/mobile/orchestrator/threads?limit=500", "credential": "invalid" },
+  { "name": "read-only worker", "path": "/api/mobile/orchestrator/threads?limit=500", "credential": "read-only" }
+]

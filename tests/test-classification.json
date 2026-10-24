@@ -4054,6 +4054,16 @@
       ]
     },
     {
+      "path": "tests/o8d-next-http-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-supervisor-real-path.test.ts",
       "reasons": [
         "child-process",

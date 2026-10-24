@@ -28,6 +28,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if arguments
         .iter()
+        .any(|argument| argument == "--experimental-http")
+    {
+        #[cfg(feature = "experimental-http")]
+        return o8d::http::run(&arguments).await;
+        #[cfg(not(feature = "experimental-http"))]
+        return Err("HTTP reads unavailable".into());
+    }
+    if arguments
+        .iter()
         .any(|argument| argument == "--experimental-supervisor")
     {
         #[cfg(all(feature = "experimental-supervisor", target_os = "linux"))]

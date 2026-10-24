@@ -87,3 +87,7 @@ The older standalone comparison remains in `scripts/bench/ws-event-bus.ts`;
 `scripts/bench/ws-cutover.ts` measures the combined app path.
 
 The separate HTTP transport is documented in [Experimental MCP transport](MCP.md).
+
+The partial native-client saved HTTP reads experiment uses its own feature and
+runtime flag. See [saved HTTP reads](HTTP.md) for the route inventory, replay
+harness and remaining startup requirements.
