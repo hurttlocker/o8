@@ -1155,11 +1155,11 @@ export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime { retur
 export function resolveDefaultWorkerEffortSync(
   runtime: OrchestratorRuntime,
   explicitEffort?: ThinkingEffort | null,
+  model?: string | null,
 ): ThinkingEffort | undefined {
   const values = getOperatorDefaultsSync().values;
   return resolveWorkerEffortDefault({
-    runtime,
-    explicitEffort,
+    runtime, explicitEffort, model,
     codexWorkerEffort: values.codexWorkerEffort,
     claudeWorkerEffort: values.claudeWorkerEffort,
   });
