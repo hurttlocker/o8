@@ -209,6 +209,11 @@ describe('managed lane creation base', () => {
       baseCommitPinned: true,
     });
 
+    expect(setLaneStatus(opened.laneId!, 'launching', 'system', 'fixture_launch')).toMatchObject({
+      status: 'launching',
+      sessionKey: null,
+      worktreePath: null,
+    });
     const launch = await prepareLaunchWorktree({
       repoRoot: repo,
       agentType: 'codex',
@@ -415,6 +420,11 @@ describe('managed lane creation base', () => {
     });
     expect(opened.ok).toBe(true);
 
+    expect(setLaneStatus(opened.laneId!, 'launching', 'system', 'fixture_launch')).toMatchObject({
+      status: 'launching',
+      sessionKey: null,
+      worktreePath: null,
+    });
     const prepared = await prepareLaunchWorktree({
       repoRoot: repo,
       agentType: 'codex',
