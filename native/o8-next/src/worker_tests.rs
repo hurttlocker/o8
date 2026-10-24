@@ -158,7 +158,9 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         contains(s, "Promoted instruction")
     });
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    draw(cx);
     cx.simulate_input("Removed instruction");
+    draw(cx);
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     draw(cx);
@@ -194,8 +196,10 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         "Draft kept"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    draw(cx);
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Queued instruction");
+    draw(cx);
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     assert!(
