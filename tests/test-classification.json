@@ -3946,6 +3946,12 @@
       ]
     },
     {
+      "path": "tests/navigation-density-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-diff-review-real-path.test.ts",
       "reasons": [
         "child-process",
