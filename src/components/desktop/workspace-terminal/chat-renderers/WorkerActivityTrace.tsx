@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { WorkerEventTime } from './WorkerEventTime';
 import type { ActivityBlock } from '../worker-activity';
 import { groupActivitySteps, type ActivityGroup } from '../worker-activity-groups';
 
@@ -54,10 +55,11 @@ function TraceStep({ step, live }: { step: ActivityGroup; live: boolean }) {
       <summary data-activity-label title={step.command} style={{ display: 'block', listStyle: 'none', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, lineHeight: '18px',
         color: running ? 'var(--t-text)' : step.status === 'failed' || step.status === 'stopped' ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
         animation: running && !reduced ? 'o8-text-shimmer 1.9s ease-in-out infinite' : 'none' }}>
-        {running ? step.liveLabel : step.label}
+        {running ? step.liveLabel : step.label}{step.startedAt != null || step.finishedAt != null
+          ? <>{' '}<WorkerEventTime timestamp={step.startedAt ?? step.finishedAt} /></> : null}
       </summary>
       {step.steps.map(command => <div key={command.id} style={{ marginTop: 4 }}>
-        {step.steps.length > 1 ? <span style={{ color: 'var(--t-text-faint)', fontSize: 11 }}>{command.status === 'ok' ? 'Completed' : command.status === 'running' ? 'Running' : command.status === 'stopped' ? 'Stopped' : 'Failed'}</span> : null}
+        {step.steps.length > 1 ? <span style={{ color: 'var(--t-text-faint)', fontSize: 11 }}>{command.startedAt != null || command.finishedAt != null ? <><WorkerEventTime timestamp={command.startedAt ?? command.finishedAt} />{' '}</> : null}{command.status === 'ok' ? 'Completed' : command.status === 'running' ? 'Running' : command.status === 'stopped' ? 'Stopped' : 'Failed'}</span> : null}
         <code data-activity-command title={command.command} style={{ display: 'block', color: 'var(--t-text-faint)', fontFamily: mono, fontSize: 11, lineHeight: '18px', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{command.command}</code>
         {step.steps.length > 1 && command.reason ? <div style={{ color: 'var(--t-text-faint)', fontSize: 11, overflowWrap: 'anywhere' }}>{command.reason}</div> : null}
       </div>)}

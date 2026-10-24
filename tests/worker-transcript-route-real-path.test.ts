@@ -1,5 +1,11 @@
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { mapPacketTranscriptEntries } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
+import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
+import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -7,6 +13,10 @@ const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
 const ownedRoot = path.join(dataDir, 'worker-pane-owned-opencode');
 const laneWorktree = path.join(dataDir, 'worker-pane-lane-worktree');
 process.env.O8_OWNED_OPENCODE_ROOT = ownedRoot;
+const codexRoot = path.join(dataDir, 'worker-pane-owned-codex');
+const providerRoot = path.join(dataDir, 'worker-pane-provider');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = codexRoot;
+process.env.CODEX_HOME = providerRoot;
 
 const { GET: getPacketTranscript } = await import('@/app/api/orchestrator/packet-transcript/route');
 const { createLane, deleteLane } = await import('@/lib/lane/registry');
@@ -91,6 +101,8 @@ describe('worker transcript persisted packet route', () => {
   });
 
   afterAll(() => {
+    rmSync(codexRoot, { recursive: true, force: true });
+    rmSync(providerRoot, { recursive: true, force: true });
     rmSync(ownedRoot, { recursive: true, force: true });
     rmSync(laneWorktree, { recursive: true, force: true });
     deleteLane(laneId);
@@ -169,5 +181,58 @@ describe('worker transcript persisted packet route', () => {
 
     expect(matchingCalls).toHaveLength(1);
     expect(matchingResults).toHaveLength(1);
+  });
+});
+
+
+describe('owned Codex worker pane event identity and time', () => {
+  it('reads original rollout times over an hour and keeps one tool per call on reopen', async () => {
+    const sessionKey = 'codex-owned:event-times';
+    const threadId = 'worker-event-times';
+    const sessionDir = path.join(codexRoot, 'event-times');
+    const stdoutPath = path.join(sessionDir, 'run.jsonl');
+    const rolloutPath = path.join(providerRoot, 'sessions', 'rollout.jsonl');
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(path.dirname(rolloutPath), { recursive: true });
+    const times = ['2026-10-21T12:00:00.000Z', '2026-10-21T12:01:00.000Z',
+      '2026-10-21T13:02:00.000Z', '2026-10-21T13:03:00.000Z'];
+    const lines = times.map((timestamp, index) => ({ timestamp, type: 'response_item', payload: index % 2 === 0
+      ? { type: 'function_call', call_id: `call-${index}`, name: 'exec_command', arguments: 'git status --short' }
+      : { type: 'function_call_output', call_id: `call-${index - 1}`, output: 'clean', exit_code: 0 } }));
+    const assistantAt = '2026-10-21T13:04:00.000Z';
+    const rollout = [...lines.flatMap((line, index) => index % 2 === 0 ? [line, { timestamp: line.timestamp, type: 'event_msg', payload: { type: 'exec_command_begin', call_id: `alias-${index}`, command: 'git status --short' } }] : [line]), { timestamp: assistantAt, type: 'event_msg', payload: { type: 'agent_message', message: 'Finished checking.' } }];
+    writeFileSync(rolloutPath, rollout.map(line => JSON.stringify(line)).join('\n') + '\n');
+    // Exec stdout lacks event times; the durable rollout carries the originals.
+    writeFileSync(stdoutPath, rollout.map(({ timestamp: _timestamp, ...line }) => JSON.stringify(line)).join('\n') + '\n');
+    writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify({
+      surfaceId: sessionKey, sessionDir, threadId, cwd: dataDir, repoPath: dataDir,
+      title: 'Worker event times', createdAt: times[0], updatedAt: assistantAt,
+      latestPrompt: 'Check status', latestSummary: 'Finished checking.', activeRun: null,
+      recentRuns: [{ id: 'run', mode: 'launch', prompt: 'Check status', startedAt: times[0],
+        finishedAt: assistantAt, stdoutPath, stderrPath: path.join(sessionDir, 'stderr.log'), outcome: 'completed' }],
+    }));
+    const db = new Database(path.join(providerRoot, 'state_5.sqlite'));
+    db.exec(`CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT, updated_at INTEGER,
+      rollout_path TEXT, git_branch TEXT, git_sha TEXT, git_origin_url TEXT,
+      first_user_message TEXT, model TEXT, archived INTEGER)`);
+    db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      threadId, 'Worker event times', dataDir, 1, rolloutPath, 'fixture', '', '', 'Check status', 'fixture', 0);
+    db.close();
+
+    const read = async () => {
+      const response = await getPacketTranscript(new NextRequest(
+        `http://localhost/api/orchestrator/packet-transcript?sessionKey=${sessionKey}&tail=1&limit=200`, { headers: { host: 'localhost' } }));
+      expect(response.status).toBe(200);
+      return (await response.json() as { events: TranscriptEvent[] }).events;
+    };
+    const events = await read();
+    expect(events.filter(event => event.type === 'tool_call')).toHaveLength(2);
+    expect(events.map(event => event.ts)).toEqual([...times, assistantAt]);
+    const entries = mapPacketTranscriptEntries(events);
+    const html = renderToStaticMarkup(createElement(WorkspaceTranscript, { entries: entries.map(entry => ({ ...entry, text: '' })), isStreaming: true }))
+      + renderToStaticMarkup(createElement(WorkspaceTranscript, { entries }));
+    expect(html.match(/data-activity-command/g)).toHaveLength(2);
+    for (const timestamp of [times[0], times[2], assistantAt]) expect(html).toContain(`dateTime="${timestamp}"`);
+    expect(await read()).toEqual(events);
   });
 });
