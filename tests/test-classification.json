@@ -2893,6 +2893,14 @@
       ]
     },
     {
+      "path": "tests/generated-output-postship-large-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/generated-output-retirement-real-path.test.ts",
       "reasons": [
         "child-process",

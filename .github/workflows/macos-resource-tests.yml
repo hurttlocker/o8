@@ -1,0 +1,36 @@
+name: macOS Resource Tests
+
+on:
+  schedule:
+    - cron: '37 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-resource-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resource-tests:
+    name: macOS workspace and purge regressions
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --prefer-offline
+      - run: npm run test:classification:check
+      - name: Run native resource tests without a red baseline
+        run: >-
+          npm run test:integration --
+          src/lib/orchestrator/mission-registry-headless.test.ts
+          src/lib/workspace/worktree-exact.test.ts
+          src/lib/workspace/exact-directory-purge.test.ts
+          tests/workspace-git-bundle-real-path.test.ts
+          tests/generated-output-postship-large-real-path.test.ts

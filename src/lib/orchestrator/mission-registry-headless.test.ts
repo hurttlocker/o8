@@ -981,12 +981,29 @@ describe('headless mission registry dispatch', () => {
   it('returns a clean unknown-packet error through the retry MCP handler', async () => {
     stubMissionApiFetch();
     const { handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
-    const result = parseJsonResult<{ error?: string }>(await handleRetryPacket({
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { findLaneByPacket } = await import('@/lib/lane/registry');
+    // Reads refresh routing timestamps; compare the durable lifecycle fields.
+    const persisted = () => {
+      const state = readOrchestratorControlPlaneState();
+      return { missionId: state.missionId, packets: state.packets.map(packet => ({
+        id: packet.id, status: packet.status, queueState: packet.queueState,
+        releaseState: packet.releaseState, lane: packet.lane, review: packet.review,
+      })) };
+    };
+    const before = persisted();
+    const launches = launchMock.calls.length;
+    const result = parseJsonResult<Record<string, unknown>>(await handleRetryPacket({
       packetId: 'pkt-missing-from-registry',
       reason: 'negative case',
     }));
-    // An unknown packet is a 404, so the handler does not retry it; the route's nested message stays in the host log (#3434).
-    expect(result.error).toBe('o8 API error (404)');
+    // Lifecycle 4xx failures retain the route's bounded caller-safe message.
+    const message = 'Packet pkt-missing-from-registry not found — no mission packet and no lane.';
+    expect(result).toMatchObject({ ok: false, code: 'packet_not_found', message,
+      error: `Failed to reset packet: ${message}`, packetId: 'pkt-missing-from-registry', state: 'not_found' });
+    expect(persisted()).toEqual(before);
+    expect(findLaneByPacket('pkt-missing-from-registry')).toBeNull();
+    expect(launchMock.calls).toHaveLength(launches);
   });
 
   it('serializes registry-row mutations per mission', async () => {
