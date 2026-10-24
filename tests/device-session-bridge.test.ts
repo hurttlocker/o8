@@ -71,6 +71,7 @@ async function mount(nativeMode = true, label: string | null = 'main') {
     return null;
   };
   await act(async () => { root.render(createElement(O8AuthProvider, null, createElement(Probe))); });
+  await act(async () => { await vi.dynamicImportSettled(); });
 }
 
 beforeEach(() => {

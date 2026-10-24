@@ -98,7 +98,7 @@ describe('cold-start instrumentation', () => {
     const { register } = await import('@/instrumentation');
 
     await register();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
 
     expect(mocks.warmupOpenRouter).not.toHaveBeenCalled();
@@ -112,7 +112,7 @@ describe('cold-start instrumentation', () => {
     process.env.O8_PACKAGED_APP = '1';
     const { register } = await import('@/instrumentation');
     await register();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).toHaveBeenCalledTimes(1);
     expect(mocks.fetch.mock.calls.every(([url]) => new URL(String(url)).hostname === '127.0.0.1')).toBe(true);
@@ -123,13 +123,13 @@ describe('cold-start instrumentation', () => {
     process.env.NEXT_PHASE = 'phase-production-build';
     const { register } = await import('@/instrumentation');
     await register();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
     delete process.env.NEXT_PHASE;
     process.env.NEXT_RUNTIME = 'edge';
     await register();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
   });

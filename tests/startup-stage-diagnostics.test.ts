@@ -96,7 +96,7 @@ async function registerAndSettle(deferred = true): Promise<void> {
   await expect(register()).resolves.toBeUndefined();
   await vi.dynamicImportSettled();
   if (deferred) {
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
   }
 }
@@ -132,6 +132,17 @@ const repairInitializers = [
 ] as const;
 
 describe('startup stage diagnostics through register', () => {
+  it('reserves the first two seconds for the dashboard before optional bootstrap requests', async () => {
+    await registerAndSettle(false);
+    await vi.advanceTimersByTimeAsync(1_999);
+    await vi.dynamicImportSettled();
+    expect(fetch, 'optional bootstrap must leave the document and hydration a startup grace period').not.toHaveBeenCalled();
+    expect(calls).toEqual(['installProcessCrashCapture']);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.dynamicImportSettled();
+    expect(calls).toEqual([...telemetryInitializers, ...repairInitializers]);
+  });
+
   it('retries only after health and starts each subsystem once across duplicate registration and POSTs', async () => {
     healthReady = false;
     bootstrapFailures = 1;
@@ -175,7 +186,7 @@ describe('startup stage diagnostics through register', () => {
     await registerAndSettle(false);
     expect(calls).toEqual(['installProcessCrashCapture']);
     expect(importedModules).toEqual(['crash-capture']);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(calls).toEqual([...telemetryInitializers, ...repairInitializers]);
     await expectDeferredBackfill();

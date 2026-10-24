@@ -8,6 +8,8 @@
  * and /voice-settings (64KB, larger) tunnelled fine — only the token-bearing page died.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   O8_RELAY_FORWARD_HEADER,
@@ -58,4 +60,13 @@ describe('dashboard layout — ws-token exposure', () => {
     const metadata = await metadataFor({ host: '192.168.1.50:47100' });
     expect(metadata.other?.['ws-token']).toBeUndefined();
   });
+});
+
+it('serves the boot cover without rendering the browser-restored dashboard on the server', async () => {
+  const { default: DashboardLayout } = await import('./layout');
+  const renderDashboard = vi.fn(() => createElement('div', { 'data-fixture-dashboard': true }));
+  const html = renderToStaticMarkup(createElement(DashboardLayout, null, createElement(renderDashboard)));
+  expect(renderDashboard, 'the document request must not execute dashboard hooks and panel rendering').not.toHaveBeenCalled();
+  expect(html).toContain('aria-label="Loading workspace"');
+  expect(html).not.toContain('data-fixture-dashboard');
 });

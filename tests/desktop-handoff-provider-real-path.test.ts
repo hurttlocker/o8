@@ -85,6 +85,7 @@ async function mount(withAccount = false) {
     createElement(Probe), Account && createElement(Account),
   )));
   await act(async () => { render(); });
+  await act(async () => { await vi.dynamicImportSettled(); });
 }
 
 function callbackForLastHandoff() {

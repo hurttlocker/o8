@@ -21,13 +21,14 @@ export function AccountTab() {
   const [accountReadTimedOut, setAccountReadTimedOut] = useState(false);
 
   useEffect(() => {
+    // Native engine recovery hands off to a separate SDK session read.
+    setAccountReadTimedOut(false);
     if (auth.isLoaded) {
-      setAccountReadTimedOut(false);
       return;
     }
     const timer = window.setTimeout(() => setAccountReadTimedOut(true), 8000);
     return () => window.clearTimeout(timer);
-  }, [auth.isLoaded]);
+  }, [auth.isLoaded, auth.accountConnection]);
 
   useEffect(() => subscribeDesktopAuthError(() => setAuthError(getDesktopAuthError())), []);
   useEffect(() => {

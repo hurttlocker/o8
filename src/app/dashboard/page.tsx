@@ -9,7 +9,7 @@ import { isNonMacShell } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
+import { DashboardFrame as SmoothCorners } from './DashboardFrame';
 import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
@@ -26,7 +26,6 @@ import { SHELL_EDGE_INSET, SHELL_HEADER_HEIGHT, workspaceFrameCorners } from '@/
 import { RightPanelResizeEdge } from '@/components/desktop/shell/RightPanelResizeEdge';
 import { useColumnResize, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '@/components/desktop/hooks/useColumnResize';
 import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
-import { ProjectsPage } from '@/components/desktop/ProjectsPage';
 import { WorkspaceUtilityProvider } from '@/components/desktop/canvas/WorkspaceUtilityContext';
 import { isWorkspaceUtilityKind, workspaceUtilityTab, type WorkspaceUtilityKind } from '@/components/desktop/canvas/workspace-utility-navigation';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
@@ -208,6 +207,7 @@ markDashboardScriptStart();
    load. Keeping these out of the main dashboard chunk shaves real ms off
    first-render on cold launch. */
 const LazySettingsPage = retryingLazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })), { label: 'Settings' });
+const LazyProjectsPage = retryingLazy(() => import('@/components/desktop/ProjectsPage').then(m => ({ default: m.ProjectsPage })), { label: 'Projects' });
 // LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
 // the live entry point. AnalyticsPage is still consumed via that tab.
 const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
@@ -4787,7 +4787,7 @@ function DashboardInner() {
           ] : []}
         />
 
-        {activeNavSection === 'projects' ? <ProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /> : null}
+        {activeNavSection === 'projects' ? <Suspense fallback={null}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}

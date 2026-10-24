@@ -1,0 +1,1617 @@
+{
+  "schema": "o8/dashboard-startup/v1",
+  "issue": 4464,
+  "baseline_commit": "d62ab4d1e3764153e2fe51d4a880ebf576278ca2",
+  "platform": {
+    "os": "linux",
+    "node": "22.23.4",
+    "chromium": "154.0.8037.57"
+  },
+  "method": {
+    "phase_reference": "native-composer-startup.md",
+    "order": [
+      "before-1",
+      "after-1",
+      "before-2",
+      "after-2",
+      "before-3",
+      "after-3"
+    ],
+    "budget_statistic": "median of three launches; all samples and worst values retained",
+    "document_budget_ms": 300,
+    "hydration_budget_ms": 500,
+    "shared_browser_process": true,
+    "fresh_context_server_data_repository_each_sample": true,
+    "blank_renderer_frames_before_navigation": 2,
+    "application_route_warmed": false,
+    "browser_flags": [
+      "--no-sandbox",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding"
+    ],
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "fixture_sessions": 4,
+    "transport_fixture": "scripts/speed/ui.mjs inventory/history fixtures; real tab/repository persistence endpoints",
+    "build": "npm run build (production webpack standalone)",
+    "builds_or_other_tests_during_measurement": false,
+    "cpu_profiling_during_final_measurement": false,
+    "host_activity_and_os_cache_controlled": false,
+    "provider_turns": 0,
+    "native_runtime_or_real_accounts_used": false
+  },
+  "phase_definitions": {
+    "server_ms": "HTTP request event to response finish, including cold route load",
+    "render_ms": "Next renderToResponseWithComponents entry to returned render result",
+    "document_ms": "navigation start to HTML response end",
+    "hydration_commit_ms": "HTML response end to first React commit whose committed fiber tree contains the workspace",
+    "hydration_marker_ms": "HTML response end to the unchanged painted-workspace hydration marker",
+    "critical_js": "JS resources requested before the hydration marker; decoded and encoded body bytes per chunk in every sample",
+    "long_tasks": "Chromium Long Tasks entries starting before the hydration marker"
+  },
+  "summary": {
+    "before": {
+      "server_ms": 351.44,
+      "render_ms": 245.9,
+      "document_ms": 625.8,
+      "document_worst_ms": 637.9,
+      "html_bytes": 70292,
+      "critical_js_bytes": 3208636,
+      "critical_js_encoded_bytes": 954512,
+      "critical_chunk_counts": [
+        40,
+        40,
+        40
+      ],
+      "hydration_commit_ms": 429.9,
+      "hydration_marker_ms": 531.7,
+      "hydration_worst_ms": 566.3,
+      "long_task_counts": [
+        3,
+        3,
+        3
+      ],
+      "long_task_total_ms": 323,
+      "long_task_max_ms": 132
+    },
+    "after": {
+      "server_ms": 284.79,
+      "render_ms": 176.74,
+      "document_ms": 290.1,
+      "document_worst_ms": 316.8,
+      "html_bytes": 32658,
+      "critical_js_bytes": 2732952,
+      "critical_js_encoded_bytes": 828982,
+      "critical_chunk_counts": [
+        40,
+        40,
+        41
+      ],
+      "hydration_commit_ms": 405.7,
+      "hydration_marker_ms": 489.6,
+      "hydration_worst_ms": 546.2,
+      "long_task_counts": [
+        3,
+        3,
+        3
+      ],
+      "long_task_total_ms": 361,
+      "long_task_max_ms": 205
+    }
+  },
+  "regressions": [
+    {
+      "mechanic": "desktop SSR",
+      "test": "src/app/dashboard/layout.test.ts",
+      "before": 1,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 3 passed (4)"
+      ]
+    },
+    {
+      "mechanic": "closed utility imports",
+      "test": "src/components/desktop/contextual-panel/surfaces.test.ts",
+      "before": 3,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    },
+    {
+      "mechanic": "closed navigation imports",
+      "test": "src/app/dashboard/deferred-panels.test.ts",
+      "before": 2,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    },
+    {
+      "mechanic": "automatic bootstrap requests before 2 s",
+      "test": "tests/startup-stage-diagnostics.test.ts",
+      "before": 2,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 18 skipped (19)"
+      ]
+    },
+    {
+      "mechanic": "account SDK imports in account-less startup",
+      "test": "src/components/auth/O8AuthProvider.loading.test.ts",
+      "before": 1,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    },
+    {
+      "mechanic": "frame commit-time style reads",
+      "test": "src/app/dashboard/DashboardFrame.test.ts",
+      "before": 1,
+      "after": 0,
+      "red_tail": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    }
+  ],
+  "initial_budget_red_tail": [
+    "AssertionError: document median < 300 ms: expected 590.7 to be less than 300",
+    "AssertionError: hydration median < 500 ms: expected 579.4 to be less than 500",
+    "Test Files  1 failed (1)",
+    "Tests  1 failed (1)"
+  ],
+  "final_budget_green_tail": [
+    "Test Files  1 passed (1)",
+    "Tests  1 passed (1)"
+  ],
+  "arms": {
+    "before": {
+      "node": "22.23.4",
+      "platform": "linux",
+      "chromium": "154.0.8037.57",
+      "samples": [
+        {
+          "sample": 1,
+          "serverMs": 353.63,
+          "renderMs": 245.9,
+          "htmlBytes": 70292,
+          "documentMs": 625.8,
+          "ttfbMs": 605.5,
+          "hydrationMs": 566.3,
+          "commitMs": 450.8,
+          "longTasks": [
+            {
+              "startTime": 651.7999999998137,
+              "duration": 132
+            },
+            {
+              "startTime": 875.2000000001863,
+              "duration": 96
+            },
+            {
+              "startTime": 1059,
+              "duration": 127
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-917a5a6c843c340a.js",
+              "bytes": 17584,
+              "encodedBytes": 9225
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "47237-5d21241333db827e.js",
+              "bytes": 28925,
+              "encodedBytes": 9434
+            },
+            {
+              "chunk": "5772-a4a26a2c40186b6c.js",
+              "bytes": 15717,
+              "encodedBytes": 5795
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "67824-04e889316610c36e.js",
+              "bytes": 220594,
+              "encodedBytes": 62764
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "45424-d8962e5677da8656.js",
+              "bytes": 148262,
+              "encodedBytes": 40210
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-e89dc0d5bc488cef.js",
+              "bytes": 9766,
+              "encodedBytes": 3123
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "65527-4de73b155008acd1.js",
+              "bytes": 15827,
+              "encodedBytes": 4957
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "96274-aaedbf8a0f8882d9.js",
+              "bytes": 22487,
+              "encodedBytes": 8084
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "98394-5d1dcb87d21f14a1.js",
+              "bytes": 9663,
+              "encodedBytes": 3604
+            },
+            {
+              "chunk": "67763-c9f5ccbbce1da2a7.js",
+              "bytes": 31491,
+              "encodedBytes": 12673
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "58071-a0be34aa38e866d2.js",
+              "bytes": 160390,
+              "encodedBytes": 43973
+            },
+            {
+              "chunk": "18295-b7ca7a1d091c095a.js",
+              "bytes": 57698,
+              "encodedBytes": 19942
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "page-3ff28d133ba1581e.js",
+              "bytes": 1118586,
+              "encodedBytes": 312008
+            },
+            {
+              "chunk": "layout-b335801550da1111.js",
+              "bytes": 874,
+              "encodedBytes": 874
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        },
+        {
+          "sample": 2,
+          "serverMs": 315.61,
+          "renderMs": 226.45,
+          "htmlBytes": 70292,
+          "documentMs": 586,
+          "ttfbMs": 562.9,
+          "hydrationMs": 531.7,
+          "commitMs": 429.9,
+          "longTasks": [
+            {
+              "startTime": 620.7000000001863,
+              "duration": 117
+            },
+            {
+              "startTime": 852.2000000001863,
+              "duration": 87
+            },
+            {
+              "startTime": 1002.2000000001863,
+              "duration": 109
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-917a5a6c843c340a.js",
+              "bytes": 17584,
+              "encodedBytes": 9225
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "47237-5d21241333db827e.js",
+              "bytes": 28925,
+              "encodedBytes": 9434
+            },
+            {
+              "chunk": "5772-a4a26a2c40186b6c.js",
+              "bytes": 15717,
+              "encodedBytes": 5795
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "67824-04e889316610c36e.js",
+              "bytes": 220594,
+              "encodedBytes": 62764
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "45424-d8962e5677da8656.js",
+              "bytes": 148262,
+              "encodedBytes": 40210
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-e89dc0d5bc488cef.js",
+              "bytes": 9766,
+              "encodedBytes": 3123
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "65527-4de73b155008acd1.js",
+              "bytes": 15827,
+              "encodedBytes": 4957
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "96274-aaedbf8a0f8882d9.js",
+              "bytes": 22487,
+              "encodedBytes": 8084
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "98394-5d1dcb87d21f14a1.js",
+              "bytes": 9663,
+              "encodedBytes": 3604
+            },
+            {
+              "chunk": "67763-c9f5ccbbce1da2a7.js",
+              "bytes": 31491,
+              "encodedBytes": 12673
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "58071-a0be34aa38e866d2.js",
+              "bytes": 160390,
+              "encodedBytes": 43973
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "18295-b7ca7a1d091c095a.js",
+              "bytes": 57698,
+              "encodedBytes": 19942
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "page-3ff28d133ba1581e.js",
+              "bytes": 1118586,
+              "encodedBytes": 312008
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "layout-b335801550da1111.js",
+              "bytes": 874,
+              "encodedBytes": 874
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        },
+        {
+          "sample": 3,
+          "serverMs": 351.44,
+          "renderMs": 256.45,
+          "htmlBytes": 70292,
+          "documentMs": 637.9,
+          "ttfbMs": 619.9,
+          "hydrationMs": 514.6,
+          "commitMs": 425.8,
+          "longTasks": [
+            {
+              "startTime": 671,
+              "duration": 130
+            },
+            {
+              "startTime": 901,
+              "duration": 94
+            },
+            {
+              "startTime": 1048.7999999998137,
+              "duration": 99
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-917a5a6c843c340a.js",
+              "bytes": 17584,
+              "encodedBytes": 9225
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "47237-5d21241333db827e.js",
+              "bytes": 28925,
+              "encodedBytes": 9434
+            },
+            {
+              "chunk": "5772-a4a26a2c40186b6c.js",
+              "bytes": 15717,
+              "encodedBytes": 5795
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "67824-04e889316610c36e.js",
+              "bytes": 220594,
+              "encodedBytes": 62764
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "45424-d8962e5677da8656.js",
+              "bytes": 148262,
+              "encodedBytes": 40210
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-e89dc0d5bc488cef.js",
+              "bytes": 9766,
+              "encodedBytes": 3123
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "65527-4de73b155008acd1.js",
+              "bytes": 15827,
+              "encodedBytes": 4957
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "96274-aaedbf8a0f8882d9.js",
+              "bytes": 22487,
+              "encodedBytes": 8084
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "98394-5d1dcb87d21f14a1.js",
+              "bytes": 9663,
+              "encodedBytes": 3604
+            },
+            {
+              "chunk": "67763-c9f5ccbbce1da2a7.js",
+              "bytes": 31491,
+              "encodedBytes": 12673
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "58071-a0be34aa38e866d2.js",
+              "bytes": 160390,
+              "encodedBytes": 43973
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "18295-b7ca7a1d091c095a.js",
+              "bytes": 57698,
+              "encodedBytes": 19942
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "page-3ff28d133ba1581e.js",
+              "bytes": 1118586,
+              "encodedBytes": 312008
+            },
+            {
+              "chunk": "layout-b335801550da1111.js",
+              "bytes": 874,
+              "encodedBytes": 874
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        }
+      ]
+    },
+    "after": {
+      "node": "22.23.4",
+      "platform": "linux",
+      "chromium": "154.0.8037.57",
+      "samples": [
+        {
+          "sample": 1,
+          "serverMs": 310.57,
+          "renderMs": 220.76,
+          "htmlBytes": 32658,
+          "documentMs": 316.8,
+          "ttfbMs": 296.9,
+          "hydrationMs": 489.6,
+          "commitMs": 404.3,
+          "longTasks": [
+            {
+              "startTime": 390.79999999981374,
+              "duration": 55
+            },
+            {
+              "startTime": 480.6000000005588,
+              "duration": 108
+            },
+            {
+              "startTime": 597.2999999998137,
+              "duration": 205
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-07e755d96ab40303.js",
+              "bytes": 17988,
+              "encodedBytes": 9423
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "layout-9cc3e816fdaba0bc.js",
+              "bytes": 3632,
+              "encodedBytes": 1864
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "5772-fa9b9cccdc812bf9.js",
+              "bytes": 15717,
+              "encodedBytes": 5789
+            },
+            {
+              "chunk": "27811-426388b845294d79.js",
+              "bytes": 29209,
+              "encodedBytes": 9549
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "94781-583c1ab22e1ee5bc.js",
+              "bytes": 147786,
+              "encodedBytes": 40135
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-00720c69ff7bd7d4.js",
+              "bytes": 9748,
+              "encodedBytes": 3116
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "65527-242caf8e20e0241f.js",
+              "bytes": 15827,
+              "encodedBytes": 4956
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "72131-bfbf11b5f39c284c.js",
+              "bytes": 34628,
+              "encodedBytes": 13866
+            },
+            {
+              "chunk": "12240-e60b9a64285bbcb8.js",
+              "bytes": 9681,
+              "encodedBytes": 3613
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "93086-9f3f742305a45698.js",
+              "bytes": 13767,
+              "encodedBytes": 4227
+            },
+            {
+              "chunk": "58071-eede27adee0d70be.js",
+              "bytes": 146704,
+              "encodedBytes": 40828
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "12767-dd3b16f33338df32.js",
+              "bytes": 50841,
+              "encodedBytes": 17722
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            },
+            {
+              "chunk": "layout-0163d8cf2087be64.js",
+              "bytes": 4204,
+              "encodedBytes": 1812
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "page-aef1ad8ff508d190.js",
+              "bytes": 882448,
+              "encodedBytes": 254236
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        },
+        {
+          "sample": 2,
+          "serverMs": 232.48,
+          "renderMs": 148.55,
+          "htmlBytes": 32658,
+          "documentMs": 236.8,
+          "ttfbMs": 230.9,
+          "hydrationMs": 482.1,
+          "commitMs": 405.7,
+          "longTasks": [
+            {
+              "startTime": 318.59999999962747,
+              "duration": 63
+            },
+            {
+              "startTime": 395,
+              "duration": 105
+            },
+            {
+              "startTime": 520.8999999994412,
+              "duration": 193
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-07e755d96ab40303.js",
+              "bytes": 17988,
+              "encodedBytes": 9423
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "layout-9cc3e816fdaba0bc.js",
+              "bytes": 3632,
+              "encodedBytes": 1864
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "5772-fa9b9cccdc812bf9.js",
+              "bytes": 15717,
+              "encodedBytes": 5789
+            },
+            {
+              "chunk": "27811-426388b845294d79.js",
+              "bytes": 29209,
+              "encodedBytes": 9549
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "94781-583c1ab22e1ee5bc.js",
+              "bytes": 147786,
+              "encodedBytes": 40135
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-00720c69ff7bd7d4.js",
+              "bytes": 9748,
+              "encodedBytes": 3116
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "65527-242caf8e20e0241f.js",
+              "bytes": 15827,
+              "encodedBytes": 4956
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "12240-e60b9a64285bbcb8.js",
+              "bytes": 9681,
+              "encodedBytes": 3613
+            },
+            {
+              "chunk": "72131-bfbf11b5f39c284c.js",
+              "bytes": 34628,
+              "encodedBytes": 13866
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "93086-9f3f742305a45698.js",
+              "bytes": 13767,
+              "encodedBytes": 4227
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "58071-eede27adee0d70be.js",
+              "bytes": 146704,
+              "encodedBytes": 40828
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "12767-dd3b16f33338df32.js",
+              "bytes": 50841,
+              "encodedBytes": 17722
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "page-aef1ad8ff508d190.js",
+              "bytes": 882448,
+              "encodedBytes": 254236
+            },
+            {
+              "chunk": "layout-0163d8cf2087be64.js",
+              "bytes": 4204,
+              "encodedBytes": 1812
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        },
+        {
+          "sample": 3,
+          "serverMs": 284.79,
+          "renderMs": 176.74,
+          "htmlBytes": 32658,
+          "documentMs": 290.1,
+          "ttfbMs": 282.5,
+          "hydrationMs": 546.2,
+          "commitMs": 481.4,
+          "longTasks": [
+            {
+              "startTime": 370.5,
+              "duration": 52
+            },
+            {
+              "startTime": 485.6000000005588,
+              "duration": 118
+            },
+            {
+              "startTime": 716.1000000005588,
+              "duration": 117
+            }
+          ],
+          "chunks": [
+            {
+              "chunk": "webpack-07e755d96ab40303.js",
+              "bytes": 17988,
+              "encodedBytes": 9423
+            },
+            {
+              "chunk": "4bd1b696-f998cba21de05210.js",
+              "bytes": 201061,
+              "encodedBytes": 63304
+            },
+            {
+              "chunk": "93794-68fa1c0e1cbb2350.js",
+              "bytes": 241678,
+              "encodedBytes": 65866
+            },
+            {
+              "chunk": "main-app-089a20db15f0c3ad.js",
+              "bytes": 487,
+              "encodedBytes": 487
+            },
+            {
+              "chunk": "layout-9cc3e816fdaba0bc.js",
+              "bytes": 3632,
+              "encodedBytes": 1864
+            },
+            {
+              "chunk": "error-a423e1e4da2ad66d.js",
+              "bytes": 1813,
+              "encodedBytes": 924
+            },
+            {
+              "chunk": "vendor-framer-644af29e83dca743.js",
+              "bytes": 37572,
+              "encodedBytes": 13478
+            },
+            {
+              "chunk": "43680-d2dea17a25ac7599.js",
+              "bytes": 101244,
+              "encodedBytes": 34200
+            },
+            {
+              "chunk": "27811-426388b845294d79.js",
+              "bytes": 29209,
+              "encodedBytes": 9549
+            },
+            {
+              "chunk": "23864-38943e0496d5684c.js",
+              "bytes": 25989,
+              "encodedBytes": 7094
+            },
+            {
+              "chunk": "5772-fa9b9cccdc812bf9.js",
+              "bytes": 15717,
+              "encodedBytes": 5789
+            },
+            {
+              "chunk": "91992-7cf2c539f39746e1.js",
+              "bytes": 29088,
+              "encodedBytes": 11004
+            },
+            {
+              "chunk": "68537-e9d043aa0186c88c.js",
+              "bytes": 42235,
+              "encodedBytes": 14404
+            },
+            {
+              "chunk": "94781-583c1ab22e1ee5bc.js",
+              "bytes": 147786,
+              "encodedBytes": 40135
+            },
+            {
+              "chunk": "16951-64e22838d8e9c9f9.js",
+              "bytes": 56658,
+              "encodedBytes": 15417
+            },
+            {
+              "chunk": "32610-020b20e1b5a78a99.js",
+              "bytes": 5685,
+              "encodedBytes": 2109
+            },
+            {
+              "chunk": "49994-9204e357b7c54e8d.js",
+              "bytes": 15582,
+              "encodedBytes": 3295
+            },
+            {
+              "chunk": "61938-00720c69ff7bd7d4.js",
+              "bytes": 9748,
+              "encodedBytes": 3116
+            },
+            {
+              "chunk": "45498-845ed5b2ddb89d91.js",
+              "bytes": 13248,
+              "encodedBytes": 5643
+            },
+            {
+              "chunk": "77045-68dd59fa27abdba4.js",
+              "bytes": 15785,
+              "encodedBytes": 4527
+            },
+            {
+              "chunk": "65527-242caf8e20e0241f.js",
+              "bytes": 15827,
+              "encodedBytes": 4956
+            },
+            {
+              "chunk": "64712-fb45e512cb3babed.js",
+              "bytes": 39849,
+              "encodedBytes": 12602
+            },
+            {
+              "chunk": "51826-1bdcefd5026c5b3c.js",
+              "bytes": 13739,
+              "encodedBytes": 4901
+            },
+            {
+              "chunk": "42398-985364e5f1341c85.js",
+              "bytes": 20301,
+              "encodedBytes": 8153
+            },
+            {
+              "chunk": "12240-e60b9a64285bbcb8.js",
+              "bytes": 9681,
+              "encodedBytes": 3613
+            },
+            {
+              "chunk": "72131-bfbf11b5f39c284c.js",
+              "bytes": 34628,
+              "encodedBytes": 13866
+            },
+            {
+              "chunk": "55614-a5f44fcd9fbee610.js",
+              "bytes": 293749,
+              "encodedBytes": 85948
+            },
+            {
+              "chunk": "36072-e660e33bd54ba223.js",
+              "bytes": 22198,
+              "encodedBytes": 7392
+            },
+            {
+              "chunk": "93086-9f3f742305a45698.js",
+              "bytes": 13767,
+              "encodedBytes": 4227
+            },
+            {
+              "chunk": "58071-eede27adee0d70be.js",
+              "bytes": 146704,
+              "encodedBytes": 40828
+            },
+            {
+              "chunk": "73412-867a23be00287860.js",
+              "bytes": 15894,
+              "encodedBytes": 6070
+            },
+            {
+              "chunk": "38653-663cbe0c2a7290e3.js",
+              "bytes": 25132,
+              "encodedBytes": 9266
+            },
+            {
+              "chunk": "40512-be44d53b2d1bc181.js",
+              "bytes": 66756,
+              "encodedBytes": 20221
+            },
+            {
+              "chunk": "36108-fbd17fe0a444edbb.js",
+              "bytes": 33677,
+              "encodedBytes": 11640
+            },
+            {
+              "chunk": "12767-dd3b16f33338df32.js",
+              "bytes": 50841,
+              "encodedBytes": 17722
+            },
+            {
+              "chunk": "55-5cd97a88179ad536.js",
+              "bytes": 26181,
+              "encodedBytes": 7698
+            },
+            {
+              "chunk": "layout-0163d8cf2087be64.js",
+              "bytes": 4204,
+              "encodedBytes": 1812
+            },
+            {
+              "chunk": "global-error-195f17b6c08bfce0.js",
+              "bytes": 1943,
+              "encodedBytes": 939
+            },
+            {
+              "chunk": "page-aef1ad8ff508d190.js",
+              "bytes": 882448,
+              "encodedBytes": 254236
+            },
+            {
+              "chunk": "not-found-a30ae95b55e19051.js",
+              "bytes": 3228,
+              "encodedBytes": 1264
+            },
+            {
+              "chunk": "19891-a0ac0d2d738086a5.js",
+              "bytes": 16210,
+              "encodedBytes": 5139
+            }
+          ],
+          "restoredTabs": 4,
+          "tabSwitches": 2,
+          "projectsRoundTrip": true,
+          "frameGeometryPreserved": true,
+          "draftCleared": true
+        }
+      ]
+    }
+  },
+  "verification": {
+    "build": "npm run build: passed (production webpack standalone)",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: passed",
+    "eslint": {
+      "touched_js_ts_files": 23,
+      "result": "passed"
+    },
+    "rule_check": {
+      "base": "origin/main",
+      "runtime_files": 10,
+      "violations": 0
+    },
+    "test_classification": "passed",
+    "focused_preservation": {
+      "files_passed": 14,
+      "tests_passed": 88
+    },
+    "device_handoff_cold_start_fixtures": {
+      "files_passed": 3,
+      "tests_passed": 31
+    },
+    "full_npm_test_first_tail": [
+      "Test Files  2 failed | 1210 passed | 3 skipped (1215)",
+      "Tests  7 failed | 8546 passed | 4 skipped (8557)"
+    ],
+    "full_npm_test_final_tail": [
+      "Test Files  1212 passed | 3 skipped (1215)",
+      "Tests  8553 passed | 4 skipped (8557)"
+    ],
+    "full_npm_test_final_duration_s": 288.14,
+    "independent_authentication_review": "no remaining findings",
+    "scope": "local standalone and fixture verification; no native runtime or real accounts"
+  }
+}
