@@ -321,6 +321,7 @@ import {
 } from './lib/realtime/negotiation';
 import { deviceE2eeFailureAction } from './lib/ws-server/device-e2ee-policy';
 import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
+import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import {
   sanitizePtyEnv,
@@ -8941,7 +8942,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('message', (raw) => {
-    handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString());
+    void withWsHealthHandler('ws-message', () => handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString()));
   });
 
   ws.on('pong', () => { client.alive = true; });

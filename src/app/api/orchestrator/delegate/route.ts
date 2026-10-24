@@ -1,3 +1,4 @@
+import { withWsHealthHandler } from '@/lib/ws-server/handler-activity';
 import { resolveReviewerPrSource, reviewerCreationBase, ReviewerPrSourceError, ReviewerPrInputError, validateReviewPullRequest } from '@/lib/orchestrator/reviewer-pr-source';
 import { NextRequest, NextResponse } from 'next/server';
 import { dispatch } from '@/lib/lane/commands';
@@ -377,7 +378,11 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export function POST(request: NextRequest) {
+  return withWsHealthHandler('dispatch', () => postDelegate(request));
+}
+
+async function postDelegate(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
   try { if (body) validateReviewPullRequest(body); } catch (error) {
     if (error instanceof DelegationSelectionError || error instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 400 });

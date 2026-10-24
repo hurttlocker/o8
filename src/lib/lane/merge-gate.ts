@@ -17,14 +17,14 @@
  * - commands.ts: final hard gate before merge execution
  */
 
-import { laneGitSync, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { createHash } from 'node:crypto';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { IMPLEMENTATION_NOTES_FILENAME } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
-import { getAllCached } from '@/lib/skeleton';
+import { getCachedFileLineCounts } from '@/lib/skeleton/store';
 import { checkUntrackedImports } from './check-untracked-imports';
 import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
@@ -122,15 +122,11 @@ function parseGitDiffFilePath(line: string): string | null {
   return path.startsWith('b/') ? path.slice(2) : path;
 }
 
-function getAddedLines(cwd: string, baseBranch: string, headSha: string, repoPath: string): AddedDiffLine[] {
+async function getAddedLines(cwd: string, baseBranch: string, headSha: string, repoPath: string): Promise<AddedDiffLine[]> {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const diff = laneGitSync(cwd, repoPath, ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
-      windowsHide: true,
-      cwd,
-      timeout: 15_000,
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
+    const { stdout: diff } = await laneGit(cwd, repoPath, ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
+      timeout: 15_000, maxBuffer: 10 * 1024 * 1024,
     });
     const addedLines: AddedDiffLine[] = [];
     let currentFile: string | null = null;
@@ -153,13 +149,8 @@ function getAddedLines(cwd: string, baseBranch: string, headSha: string, repoPat
   }
 }
 
-function readHeadSha(cwd: string, repoPath: string): string {
-  return laneGitSync(cwd, repoPath, ['rev-parse', 'HEAD'], {
-    windowsHide: true,
-    cwd,
-    timeout: 5_000,
-    encoding: 'utf-8',
-  }).trim();
+async function readHeadSha(cwd: string, repoPath: string): Promise<string> {
+  return (await laneGit(cwd, repoPath, ['rev-parse', 'HEAD'], { timeout: 5_000 })).stdout.trim();
 }
 
 interface DiffNumstat {
@@ -168,15 +159,10 @@ interface DiffNumstat {
   deletions: number;
 }
 
-function getDiffNumstat(cwd: string, baseBranch: string, repoPath: string): DiffNumstat[] {
+async function getDiffNumstat(cwd: string, baseBranch: string, repoPath: string): Promise<DiffNumstat[]> {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = laneGitSync(cwd, repoPath, ['diff', '--numstat', `${baseBranch}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      timeout: 10_000,
-      encoding: 'utf-8',
-    }).trim();
+    const output = (await laneGit(cwd, repoPath, ['diff', '--numstat', `${baseBranch}...HEAD`], { timeout: 10_000 })).stdout.trim();
 
     return output
       .split('\n')
@@ -200,16 +186,12 @@ function getDiffNumstat(cwd: string, baseBranch: string, repoPath: string): Diff
   }
 }
 
-function getChangedFiles(cwd: string, baseBranch: string, repoPath: string): string[] {
+async function getChangedFiles(cwd: string, baseBranch: string, repoPath: string): Promise<string[]> {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = laneGitSync(cwd, repoPath, ['diff', '--name-only', `${baseBranch}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      timeout: 10_000,
-      encoding: 'utf-8',
-      maxBuffer: 1024 * 1024,
-    }).trim();
+    const output = (await laneGit(cwd, repoPath, ['diff', '--name-only', `${baseBranch}...HEAD`], {
+      timeout: 10_000, maxBuffer: 1024 * 1024,
+    })).stdout.trim();
 
     return output.split('\n').map((line) => line.trim()).filter(Boolean);
   } catch (error) {
@@ -219,8 +201,8 @@ function getChangedFiles(cwd: string, baseBranch: string, repoPath: string): str
 }
 
 /** True when the packet edits the gate itself (#3414). The host still runs its own gate. */
-function changesMergeGate(cwd: string, baseBranch: string, repoPath: string): boolean {
-  return getChangedFiles(cwd, baseBranch, repoPath).includes(MERGE_GATE_FILE);
+async function changesMergeGate(cwd: string, baseBranch: string, repoPath: string): Promise<boolean> {
+  return (await getChangedFiles(cwd, baseBranch, repoPath)).includes(MERGE_GATE_FILE);
 }
 
 // ── Check 1: Security Patterns ──
@@ -234,11 +216,10 @@ function isCanonicalWebviewLatchBridge(file: string | null, text: string): boole
   return text.slice(1).replace(/\s+/g, '') === WEBVIEW_LATCH_BRIDGE_CALL;
 }
 
-function hasReviewedCliExit(cwd: string, headSha: string, repoPath: string): boolean {
+async function hasReviewedCliExit(cwd: string, headSha: string, repoPath: string): Promise<boolean> {
   try {
-    const contents = laneGitSync(cwd, repoPath, ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
-      cwd, windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const { stdout: contents } = await laneGit(cwd, repoPath, ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
+      timeout: 5_000, maxBuffer: 64 * 1024,
     });
     return createHash('sha256').update(contents).digest('hex') === REVIEWED_CLI_EXIT_SHA256;
   } catch (error) {
@@ -247,11 +228,11 @@ function hasReviewedCliExit(cwd: string, headSha: string, repoPath: string): boo
   }
 }
 
-function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[], repoPath: string): MergeViolation[] {
+async function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[], repoPath: string): Promise<MergeViolation[]> {
   const violations: MergeViolation[] = [];
   const reviewedCliExit = addedLines.some(({ file, text }) => (
     file === REVIEWED_CLI_EXIT_FILE && PROCESS_EXIT_PATTERN.test(text)
-  )) && hasReviewedCliExit(cwd, headSha, repoPath);
+  )) && await hasReviewedCliExit(cwd, headSha, repoPath);
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
     for (const { file, text } of addedLines) {
@@ -307,27 +288,36 @@ function checkScopePartitionHeuristics(addedLines: AddedDiffLine[]): MergeViolat
 // Security + integrity violations stay block-level regardless (those
 // catch genuine risks the orchestrator can't waive). See F25 / #1001.
 
-function checkDiffBudgets(
+async function checkDiffBudgets(
   cwd: string,
   baseBranch: string,
   repoPath: string,
   orchestratorApproved: boolean,
-): MergeViolation[] {
-  const numstat = getDiffNumstat(cwd, baseBranch, repoPath);
+): Promise<MergeViolation[]> {
+  const numstat = await getDiffNumstat(cwd, baseBranch, repoPath);
   if (numstat.length === 0) return [];
 
-  const skeleton = getAllCached(repoPath);
-  const relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch, (args) => laneGitSync(cwd, repoPath, args));
+  // Budgets need scalar line counts, never the repository's symbol/import JSON.
+  const skeleton = new Map(getCachedFileLineCounts(repoPath).map((file) => [file.relativePath, file.lineCount]));
+  let relocationCredits = new Map<string, number>();
+  try {
+    const { stdout } = await laneGit(cwd, repoPath, ['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`], {
+      timeout: 15_000, maxBuffer: 10 * 1024 * 1024,
+    });
+    relocationCredits = getRelocatedDeletionCredits(cwd, baseBranch, () => stdout);
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
+  }
   const violations: MergeViolation[] = [];
 
   for (const { file, insertions, deletions } of numstat) {
-    const skelFile = skeleton.find((s) => s.relativePath === file);
-    if (!skelFile || skelFile.lineCount === 0) continue; // New file — no budget applies
+    const lineCount = skeleton.get(file);
+    if (!lineCount) continue; // New file — no budget applies
 
-    const addBudget = Math.ceil(skelFile.lineCount * PRESERVATION_ADD_BUDGET_RATIO);
+    const addBudget = Math.ceil(lineCount * PRESERVATION_ADD_BUDGET_RATIO);
     const deleteBudget = Math.max(
       PRESERVATION_MIN_DELETE_BUDGET,
-      Math.ceil(skelFile.lineCount * PRESERVATION_DELETE_BUDGET_RATIO),
+      Math.ceil(lineCount * PRESERVATION_DELETE_BUDGET_RATIO),
     );
     const relocatedDeletions = Math.min(deletions, relocationCredits.get(file) ?? 0);
     const budgetedDeletions = deletions - relocatedDeletions;
@@ -339,7 +329,7 @@ function checkDiffBudgets(
         category: 'budget',
         severity,
         label: 'Delete budget exceeded',
-        detail: `${file}: deleted ${deletions} lines${relocatedDeletions > 0 ? ` (${relocatedDeletions} relocated, ${budgetedDeletions} budgeted)` : ''} (budget: ${deleteBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
+        detail: `${file}: deleted ${deletions} lines${relocatedDeletions > 0 ? ` (${relocatedDeletions} relocated, ${budgetedDeletions} budgeted)` : ''} (budget: ${deleteBudget}, original: ${lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
         file,
       });
     }
@@ -351,7 +341,7 @@ function checkDiffBudgets(
         category: 'budget',
         severity,
         label: 'Add budget exceeded',
-        detail: `${file}: added ${insertions} lines (budget: ${addBudget}, original: ${skelFile.lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
+        detail: `${file}: added ${insertions} lines (budget: ${addBudget}, original: ${lineCount} lines)${wouldBlock && orchestratorApproved ? ' — orchestrator-approved override' : ''}`,
         file,
       });
     }
@@ -362,8 +352,19 @@ function checkDiffBudgets(
 
 // ── Check 3: Untracked Imported Files ──
 
-function checkUntrackedImportViolations(cwd: string, baseBranch: string, repoPath: string): MergeViolation[] {
-  const result = checkUntrackedImports(cwd, baseBranch, repoPath, (args) => laneGitSync(cwd, repoPath, args));
+async function checkUntrackedImportViolations(cwd: string, baseBranch: string, repoPath: string): Promise<MergeViolation[]> {
+  const outputs = new Map<string, string>();
+  const untrackedArgs = ['ls-files', '--others', '--exclude-standard'];
+  const changedArgs = ['diff', '--name-only', '--diff-filter=ACMR', `${baseBranch}...HEAD`];
+  for (const args of [untrackedArgs, changedArgs]) {
+    if (args === changedArgs && !outputs.get(JSON.stringify(untrackedArgs))?.trim()) break;
+    try { outputs.set(JSON.stringify(args), (await laneGit(cwd, repoPath, args)).stdout); }
+    catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
+      outputs.set(JSON.stringify(args), '');
+    }
+  }
+  const result = checkUntrackedImports(cwd, baseBranch, repoPath, (args) => outputs.get(JSON.stringify(args)) ?? '');
   if (result.ok) return [];
 
   const fileCount = result.untrackedFiles.length;
@@ -427,7 +428,7 @@ export async function runMergeGate(
 ): Promise<MergeGateResult> {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
-  const headSha = readHeadSha(cwd, lane.repoPath);
+  const headSha = await readHeadSha(cwd, lane.repoPath);
   const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha, (args) => laneGit(cwd, lane.repoPath, args));
   const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
   const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
@@ -448,12 +449,12 @@ export async function runMergeGate(
       detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
     }];
 
-  const gateSelfUpdate = changesMergeGate(cwd, comparisonRef, lane.repoPath);
-  const addedLines = getAddedLines(cwd, comparisonRef, headSha, lane.repoPath);
-  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines, lane.repoPath);
+  const gateSelfUpdate = await changesMergeGate(cwd, comparisonRef, lane.repoPath);
+  const addedLines = await getAddedLines(cwd, comparisonRef, headSha, lane.repoPath);
+  const securityViolations = await checkSecurityPatterns(cwd, headSha, addedLines, lane.repoPath);
   const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
-  const budgetViolations = checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
-  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef, lane.repoPath);
+  const budgetViolations = await checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
+  const importViolations = await checkUntrackedImportViolations(cwd, comparisonRef, lane.repoPath);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
     [...securityViolations, ...scopePartitionViolations, ...budgetViolations, ...importViolations],

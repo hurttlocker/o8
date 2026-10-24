@@ -6534,6 +6534,15 @@
         "native-build",
         "real-path"
       ]
+    },
+    {
+      "path": "tests/ws-work-soak-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
     }
   ]
 }

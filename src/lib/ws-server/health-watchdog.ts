@@ -11,10 +11,12 @@
  * existing `/health` HTTP endpoint).
  *
  * Opt-in CPU sampling (O8_WS_CPU_EVIDENCE=1) rotates every 15 seconds; only
- * bounded repository call-site summaries are retained when lag is observed.
+ * bounded module/function summaries are retained when lag is observed (at most
+ * one capture per 30 seconds). Fixed handler labels are always available.
  * Raw profiles are discarded. Lag and wedge detection always remain active.
  */
 
+import { wsHandlersSince, wsInFlightHandlers, type WsHealthHandler } from './handler-activity';
 import { performance } from 'node:perf_hooks';
 import { WsCpuSampler, type WsCpuEvidence } from './cpu-evidence';
 
@@ -42,6 +44,9 @@ export interface WsHealthStats {
   sustainedSamples: number;
   /** Last lag capture; sampled overlap is diagnostic evidence, not causality. */
   cpuEvidence: WsCpuEvidence;
+  inFlightHandlers: WsHealthHandler[];
+  lastLagHandlers: WsHealthHandler[];
+  lastWedgeHandlers: WsHealthHandler[];
 }
 
 export interface WsWatchdogOptions {
@@ -76,6 +81,7 @@ export class WsWatchdog {
   private readonly log: (msg: string) => void;
   private readonly cpuSampler: WsWatchdogOptions['cpuSampler'];
   private capturePending = false;
+  private lastCaptureAt = -Infinity;
 
   private timer: { unref?: () => void } | null = null;
   private expected = 0;
@@ -106,6 +112,9 @@ export class WsWatchdog {
       intervalMs: this.intervalMs,
       thresholdMs: this.thresholdMs,
       sustainedSamples: this.sustainedSamples,
+      inFlightHandlers: [],
+      lastLagHandlers: [],
+      lastWedgeHandlers: [],
       cpuEvidence: { status: this.cpuSampler ? 'sampling' : 'unavailable', frames: [] },
     };
   }
@@ -128,7 +137,7 @@ export class WsWatchdog {
   }
 
   getStats(): WsHealthStats {
-    return { ...this.stats, cpuEvidence: this.cpuSampler ? this.cpuSampler.getEvidence() : this.stats.cpuEvidence };
+    return { ...this.stats, inFlightHandlers: wsInFlightHandlers(), lastLagHandlers: [...this.stats.lastLagHandlers], lastWedgeHandlers: [...this.stats.lastWedgeHandlers], cpuEvidence: this.cpuSampler ? this.cpuSampler.getEvidence() : this.stats.cpuEvidence };
   }
 
   /**
@@ -150,7 +159,12 @@ export class WsWatchdog {
     if (lag > this.thresholdMs) {
       // Capture the first delayed gap too: one long blocking call need not
       // produce three consecutive late timers. Wedge classification is unchanged.
-      if (this.cpuSampler && !this.capturePending) {
+      s.lastLagHandlers = [...new Set([
+        ...(s.consecutiveHighSamples > 0 ? s.lastLagHandlers : []),
+        ...wsHandlersSince(now - lag - this.intervalMs),
+      ])].sort();
+      if (this.cpuSampler && !this.capturePending && this.wallClock() - this.lastCaptureAt >= 30_000) {
+        this.lastCaptureAt = this.wallClock();
         this.capturePending = true;
         void this.cpuSampler.capture(this.wallClock() - lag).then((evidence) => {
           if (this.timer) this.log(`[ws-health] lag sample cpuEvidence=${JSON.stringify(evidence)}`);
@@ -163,10 +177,11 @@ export class WsWatchdog {
         s.wedgeCount += 1;
         s.lastWedgeAt = this.wallClock();
         s.lastWedgeLagMs = lag;
+        s.lastWedgeHandlers = [...s.lastLagHandlers];
         this.log(
           `[ws-health] event-loop wedge detected — lag=${Math.round(lag)}ms ` +
           `(${s.consecutiveHighSamples} consecutive samples >${this.thresholdMs}ms), ` +
-          `maxLag=${Math.round(s.maxLagMs)}ms, wedgeCount=${s.wedgeCount}`,
+          `maxLag=${Math.round(s.maxLagMs)}ms, wedgeCount=${s.wedgeCount}, handlers=${JSON.stringify(s.lastLagHandlers)}`,
         );
       }
     } else {

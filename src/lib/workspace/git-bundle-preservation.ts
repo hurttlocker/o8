@@ -6,7 +6,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
-import { laneGitArguments, laneGitEnvironment, laneGitInvocation } from '@/lib/lane/lane-git';
+import { laneGitArguments, laneGitEnvironment, laneGitInvocationAsync } from '@/lib/lane/lane-git';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   assertWorktreeMaterializationIdentity,
@@ -140,7 +140,7 @@ async function preservationGitValueNative(cwd: string, identity: WorktreeMateria
     // Private empty verifiers have no lane metadata or configured drivers.
     const invocation = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
       ? { args: laneGitArguments(args), env: gitEnvironment() }
-      : laneGitInvocation(cwd, cwd, args, true);
+      : await laneGitInvocationAsync(cwd, cwd, args, true);
     const { stdout } = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
       ? await executePreservationNode(
         `const input = JSON.parse(process.argv[1]); await runChild(input.command, input.args);`,
@@ -190,7 +190,7 @@ try {
 
 async function capturePreservationGitBundleNative(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
   repositoryIdentity: WorktreeMaterializationIdentity, preparation: string, identity: WorktreeMaterializationIdentity) {
-  const safe = laneGitInvocation(repositoryPath, repositoryPath, [
+  const safe = await laneGitInvocationAsync(repositoryPath, repositoryPath, [
     'bundle', 'create', '--version=3', '-', snapshot.recoveryRef,
   ], true);
   const invocation = guardedWorkspaceInvocation('git', safe.args, repositoryIdentity);

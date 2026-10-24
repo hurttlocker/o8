@@ -127,6 +127,14 @@ export function getCachedImports(repoPath: string): Array<Pick<FileSkeleton, 're
   }));
 }
 
+/** Merge budgets need paths and line counts without loading symbol/import blobs. */
+export function getCachedFileLineCounts(repoPath: string): Array<Pick<FileSkeleton, 'relativePath' | 'lineCount'>> {
+  const rows = getDb().prepare(
+    'SELECT file_path, line_count FROM skeleton_cache WHERE repo_path = ? ORDER BY file_path',
+  ).all(repoPath) as Array<Pick<SkeletonCacheRow, 'file_path' | 'line_count'>>;
+  return rows.map((row) => ({ relativePath: row.file_path, lineCount: row.line_count }));
+}
+
 /**
  * Get all cached skeletons for a repository.
  */
