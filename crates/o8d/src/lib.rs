@@ -3,6 +3,9 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use tokio::sync::{broadcast, Mutex};
 
+#[cfg(feature = "experimental-http")]
+pub mod http;
+
 #[cfg(feature = "experimental-ws")]
 pub mod websocket;
 
