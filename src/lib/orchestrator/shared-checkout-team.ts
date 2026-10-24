@@ -75,13 +75,16 @@ function changedFingerprint(root: string, relativePath: string): string {
   const digest = createHash('sha256');
   digest.update(git(root, 'status', '--porcelain', '-z', '--', relativePath));
   digest.update(git(root, 'diff', '--binary', 'HEAD', '--', relativePath));
+  digest.update(git(root, 'ls-files', '--stage', '-z', '--', relativePath));
   const info = lstatSync(file, { throwIfNoEntry: false });
-  if (!info) return digest.update('missing').digest('hex');
-  digest.update(String(info.mode));
-  if (info.isSymbolicLink()) digest.update(readlinkSync(file));
-  else if (info.isFile()) digest.update(readFileSync(file));
-  else digest.update(info.isDirectory() ? 'directory' : 'special');
-  return digest.digest('hex');
+  if (!info) digest.update('missing');
+  else {
+    digest.update(String(info.mode));
+    if (info.isSymbolicLink()) digest.update(readlinkSync(file));
+    else if (info.isFile()) digest.update(readFileSync(file));
+    else digest.update(info.isDirectory() ? 'directory' : 'special');
+  }
+  return `index-v2:${digest.digest('hex')}`;
 }
 
 function changedFingerprints(root: string, paths: string[]): Record<string, string> {
@@ -188,8 +191,14 @@ export function inspectSharedCheckoutTeam(input: TeamInput) {
   assertOwner(team, input, team.path, checkout.branch);
   const current = changedPaths(team.path);
   const baseline = new Set(team.initialChangedPaths);
+  // Older receipts do not identify the original index; preserve that uncertainty.
+  const baselineUnverifiable = team.initialChangedPaths.filter((path) => {
+    const fingerprint = team.initialChangedFingerprints?.[path];
+    return typeof fingerprint !== 'string' || fingerprint.length !== 73 || !/^index-v2:[0-9a-f]{64}$/.test(fingerprint);
+  });
+  const unverifiable = new Set(baselineUnverifiable);
   const baselineDrift = team.initialChangedPaths.filter((path) =>
-    team.initialChangedFingerprints?.[path] !== changedFingerprint(team.path, path));
+    !unverifiable.has(path) && team.initialChangedFingerprints[path] !== changedFingerprint(team.path, path));
   const newPaths = current.filter((path) => !baseline.has(path));
   const committed = committedPaths(team.path, team.baseHead);
   const claimed = team.members.filter((member) => member.state !== 'failed' || member.surfaceId).flatMap((member) => member.paths);
@@ -221,10 +230,11 @@ export function inspectSharedCheckoutTeam(input: TeamInput) {
     changedPaths: current,
     initialChangedPaths: team.initialChangedPaths,
     baselineDrift,
+    baselineUnverifiable,
     newPaths,
     committedPaths: committed,
     outsideClaims,
-    scopeClean: outsideClaims.length === 0 && baselineDrift.length === 0,
+    scopeClean: outsideClaims.length === 0 && baselineDrift.length === 0 && baselineUnverifiable.length === 0,
     baselineClean: team.initialChangedPaths.length === 0,
     review,
     reconciliation,
@@ -441,7 +451,7 @@ export async function reconcileSharedCheckoutTeam(input: TeamInput & {
     const workerEdits = status.newPaths.filter((path) => !status.outsideClaims.includes(path));
     if (workerEdits.length) throw new Error(`Team edits are still uncommitted: ${workerEdits.join(', ')}`);
     if (status.reconciliation) return status.reconciliation;
-    if (!status.outsideClaims.length && !status.baselineDrift.length) {
+    if (!status.outsideClaims.length && !status.baselineDrift.length && !status.baselineUnverifiable.length) {
       throw new Error('No independent checkout changes need reconciliation. Use Finish after reviewing the team.');
     }
     const receipt: SharedCheckoutReconciliation = { ...status.review,
@@ -475,6 +485,9 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
     }
     if (status.outsideClaims.length > 0 && !status.reconciliation) {
       throw new Error(`Changes outside worker scopes need review: ${status.outsideClaims.join(', ')}`);
+    }
+    if (status.baselineUnverifiable.length > 0 && !status.reconciliation) {
+      throw new Error(`Pre-existing operator edit fingerprints cannot be verified: ${status.baselineUnverifiable.join(', ')}. Review the original baseline before finishing.`);
     }
     if (status.baselineDrift.length > 0 && !status.reconciliation) {
       throw new Error(`Pre-existing operator edits changed during this team: ${status.baselineDrift.join(', ')}`);
