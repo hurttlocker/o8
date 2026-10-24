@@ -152,6 +152,7 @@ async function assessContractCoverage(
       evidence: readCoverageEvidence(approval.args),
       reviewedHeadSha,
       changedPaths: changed.paths,
+      repositoryPaths: changed.repositoryPaths,
     });
   } catch (error) {
     console.error(
@@ -185,8 +186,8 @@ export async function listChangedPathsForCoverage(
   lane: Pick<Lane, 'id' | 'baseBranch'>,
   cwd: string,
   headSha: string,
-): Promise<{ paths: string[]; resolved: boolean }> {
-  if (!cwd) return { paths: [], resolved: false };
+): Promise<{ paths: string[]; repositoryPaths: string[]; resolved: boolean }> {
+  if (!cwd) return { paths: [], repositoryPaths: [], resolved: false };
   const { execFile } = await import('@/lib/providers/child-process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
@@ -214,8 +215,9 @@ export async function listChangedPathsForCoverage(
 
   // If we could not establish the packet's range, say so rather than silently
   // grading against a narrower set of files than the packet really touched.
-  if (committed === null) return { paths: [], resolved: false };
-  return { paths: committed, resolved: true };
+  const repositoryPaths = await collect(['ls-tree', '-r', '--name-only', headSha]);
+  if (committed === null || repositoryPaths === null) return { paths: [], repositoryPaths: [], resolved: false };
+  return { paths: committed, repositoryPaths, resolved: true };
 }
 
 const UNCOMMITTED_PATHS_SHOWN = 10;
@@ -316,6 +318,11 @@ export async function assessDurableApprovedReview(
       };
     }
     const diffBudgetWaived = latestReview ? carriesAcceptedFinding(latestReview) : false;
+    const reviewAuthorized = latestReview.status === 'approved'
+      && latestReview.args?.approved !== false && reviewFindingsAreResolved(latestReview);
+    // Coverage is independent of pending passes and dirty edits. Report it even
+    // when another prerequisite withholds the review's merge authorization.
+    const coverage = reviewAuthorized ? await assessContractCoverage(lane, latestReview, currentHead) : null;
     if (
       latestReview.status === 'approved'
       && latestReview.args?.approved !== false
@@ -330,6 +337,7 @@ export async function assessDurableApprovedReview(
         approvalId: null,
         reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
         secondPassPending: true,
+        contractCoverage: coverage,
       };
     }
     const matching = latestReview
@@ -347,7 +355,7 @@ export async function assessDurableApprovedReview(
     // publication, so they withhold authorization until committed and reviewed.
     const uncommitted = await listUncommittedPaths(cwd);
     if (uncommitted === null) {
-      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'Uncommitted worktree changes could not be checked against the reviewed HEAD.' };
+      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, contractCoverage: coverage, reason: 'Uncommitted worktree changes could not be checked against the reviewed HEAD.' };
     }
     if (uncommitted.length > 0) {
       return {
@@ -356,13 +364,13 @@ export async function assessDurableApprovedReview(
         highConfidence: false,
         approvalId: null,
         reason: `Uncommitted edits are not covered by the AI review of ${currentHead}: ${formatUncommittedPaths(uncommitted)}. Commit them and review again.`,
+        contractCoverage: coverage,
       };
     }
 
     // Coverage gate: an approved-looking review cannot authorize a merge unless
     // every sealed requirement has machine-checked production-path evidence at
     // the HEAD being approved. Legacy packets return not-applicable and pass.
-    const coverage = await assessContractCoverage(lane, matching, currentHead);
     if (coverage && coverage.status === 'failed') {
       return {
         approved: false,

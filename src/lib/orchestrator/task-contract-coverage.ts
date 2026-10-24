@@ -8,9 +8,9 @@
  *
  * The check is deliberately dumb. It does not read prose, judge quality, or ask
  * a model anything — it verifies that the review recorded evidence for every
- * file-backed requirement id, that the evidence cites a production path the
- * change actually touched, and that process constraints carry separately typed
- * reviewer observations. All entries are bound to the contract version and
+ * file-backed requirement id, that file evidence cites a production path the
+ * change actually touched, and that non-file requirements and process constraints
+ * carry typed reviewer observations. All entries are bound to the contract version and
  * reviewed commit. The gate verifies the presence and shape of process evidence,
  * not the truth of the reviewer's observation.
  *
@@ -26,6 +26,7 @@ export type CoverageFailureReason =
   | 'cited-path-not-in-change'
   | 'contract-version-mismatch'
   | 'evidence-head-mismatch'
+  | 'invalid-non-file-evidence'
   | 'process-constraint-not-evidenced';
 
 export interface RequirementEvidence {
@@ -33,6 +34,9 @@ export interface RequirementEvidence {
   requirementId: string;
   /** Repo-relative path the reviewer cites as carrying the implementation. */
   productionPath: string;
+  /** Typed reviewer observation for a requirement whose production path is not a repository file. */
+  source?: ProcessConstraintEvidence['source'];
+  reference?: string;
   /** Optional line/symbol anchor within that path. */
   anchor?: string;
   /** What the reviewer ran or observed to prove the behavior. */
@@ -83,6 +87,8 @@ export interface ContractCoverageInput {
   reviewedHeadSha: string | null | undefined;
   /** Repo-relative paths the packet's change actually touched. */
   changedPaths: readonly string[];
+  /** Tracked files at the reviewed HEAD; required to admit non-file observations. */
+  repositoryPaths?: readonly string[];
 }
 
 function normalizePath(value: string): string {
@@ -94,6 +100,26 @@ function pathWasChanged(citedPath: string, changedPaths: readonly string[]): boo
   const cited = normalizePath(citedPath);
   if (cited.length === 0) return false;
   return changedPaths.some((changed) => normalizePath(changed) === cited);
+}
+
+export function requirementFilePaths(productionPath: string, repositoryPaths: readonly string[]): string[] {
+  const normalized = normalizePath(productionPath).replaceAll('->', ' ').replaceAll('→', ' ');
+  return repositoryPaths.filter(file => {
+    const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\w./-])${escaped}(?=$|[^\\w./-])`).test(normalized);
+  });
+}
+
+export function requirementUsesFile(productionPath: string, repositoryPaths: readonly string[]): boolean {
+  return requirementFilePaths(productionPath, repositoryPaths).length > 0
+    // A not-yet-implemented file remains a file obligation. Call paths and
+    // anchors must not convert it into an observation-only requirement.
+    || /(?:^|[\s('"`])(?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]*(?=$|[\s:#),;])/i.test(productionPath.replaceAll('->', ' ').replaceAll('→', ' '));
+}
+
+function isObservation(source: unknown, reference: unknown): boolean {
+  return (source === 'transcript' || source === 'lane-event' || source === 'command')
+    && typeof reference === 'string' && reference.trim().length > 0;
 }
 
 function failAll(
@@ -193,6 +219,13 @@ export function evaluateContractCoverage(input: ContractCoverageInput): Contract
       };
     }
     const citedPath = typeof entry.productionPath === 'string' ? entry.productionPath : '';
+    if (entry.source != null || entry.reference != null) {
+      const covered = input.repositoryPaths !== undefined
+        && !requirementUsesFile(requirement.productionPath, [...input.repositoryPaths, ...input.changedPaths])
+        && isObservation(entry.source, entry.reference);
+      return { requirementId: requirement.id, covered, citedPath: null,
+        failureReason: covered ? null : 'invalid-non-file-evidence' as const };
+    }
     if (!pathWasChanged(citedPath, input.changedPaths)) {
       return {
         requirementId: requirement.id,
@@ -212,10 +245,7 @@ export function evaluateContractCoverage(input: ContractCoverageInput): Contract
   const processEvidence = new Map((evidence.processEntries ?? []).map((entry) => [entry.constraintId, entry]));
   for (const constraint of contract.processConstraints ?? []) {
     const entry = processEvidence.get(constraint.id);
-    const evidenced = entry !== undefined
-      && (entry.source === 'transcript' || entry.source === 'lane-event' || entry.source === 'command')
-      && typeof entry.reference === 'string'
-      && entry.reference.trim().length > 0;
+    const evidenced = entry !== undefined && isObservation(entry.source, entry.reference);
     checks.push({
       requirementId: constraint.id,
       kind: 'process',

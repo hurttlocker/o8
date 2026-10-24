@@ -68,12 +68,15 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
 }): Promise<OperatorCheckoutMergeSafety> {
   const foundBranch = await currentBranch(input.repoPath);
   if (foundBranch !== input.baseBranch) {
+    const otherBaseWorktree = await findOtherBaseWorktree(input.repoPath, `refs/heads/${input.baseBranch}`);
     return {
       foundBranch,
       neededBranch: input.baseBranch,
       conflictingPaths: [],
-      status: 'safe',
-      detail: null,
+      status: otherBaseWorktree ? 'unsafe' : 'safe',
+      detail: otherBaseWorktree
+        ? `Base branch "${input.baseBranch}" is checked out in another worktree. Detach or switch that checkout away from the base branch before merging; its index and files cannot be advanced safely by updating the ref.`
+        : null,
     };
   }
 

@@ -16,13 +16,14 @@ import { laneGit } from '@/lib/lane/lane-git';
 
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import type { DirectiveCitationsPreview } from '@/lib/judgment/directive-citations-format';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
 import { runLaneRebaseLint, UNCONFINED_LINT_NOTE, type LaneRebaseLintResult } from './rebase-lint';
 import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
-import { mergeReviewPrerequisites, type MergeReviewRequirements } from './merge-review-prerequisites';
+import { mergePreviewApproval, mergeReviewPrerequisites, type MergeReviewRequirements } from './merge-review-prerequisites';
 
 // ── Public Types ──
 
@@ -37,7 +38,19 @@ export type MergeCheckName =
   | 'lint'
   | 'contract-review'
   | 'durable-review'
-  | 'file-size-approval';
+  | 'file-size-approval'
+  | 'merge-policy'
+  | 'merge-approval'
+  | 'mission-merge-hold'
+  | 'session-merge-restriction'
+  | 'packet-review'
+  | 'pr-only'
+  | 'dependency-materialization'
+  | 'reviewed-head'
+  | 'worktree-branch'
+  | 'work-admission'
+  | 'merge-order'
+  | 'tests';
 
 export type MergeCheckVerdict = 'pass' | 'fail' | 'skipped';
 
@@ -46,6 +59,8 @@ export interface MergeCheckResult {
   verdict: MergeCheckVerdict;
   /** Human-readable detail for failing checks. Empty string when passing. */
   detail?: string;
+  /** Concrete command or operator action that clears this check. */
+  actions?: string[];
 }
 
 /** Shape returned by `buildMergePreview` and by `o8_merge_preview`. */
@@ -71,6 +86,12 @@ export interface MergePreviewResult {
 
 interface MergePreviewOptions {
   orchestratorApproved?: boolean;
+  /** Only the operator repair path may assess a pending gate card without requiring itself. */
+  ignorePendingGateApproval?: boolean;
+  /** Merge's sibling sequence dispatches each prerequisite individually. */
+  skipMergeOrder?: boolean;
+  /** Fingerprinting only: the exact owned approval transition proven by spoken-review-guard. */
+  reviewResolutionProjection?: { approval: ApprovalRecord; laneStatus: Lane['status'] };
   /** Compute the advisory rule citations (#2446). Only surfaces that show them ask; default off, no git, no import. */
   directiveCitations?: boolean;
 }
@@ -217,7 +238,8 @@ export async function buildPreviewForLane(
     return {
       packetId,
       wouldMerge: false,
-      checks: ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
+      checks: [...ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
+        { name: 'worktree-branch', verdict: 'fail', actions: [`Run o8 packet restore ${packetId}, then rerun verification and merge-preview.`] }],
       blockers: ['workspace-parked'],
       branch: reviewSource.branch,
       diffBase: immutableSnapshotDiffBase(reviewSource, lane.baseBranch),
@@ -248,8 +270,16 @@ export async function buildPreviewForLane(
     },
     lintPreviewCheck(lint),
   ];
-  const checks = buildCheckList(gateResult, verificationChecks);
-  const blockers = buildBlockerList(gateResult, verificationChecks);
+  // An approved operator merge card is consumed by the real merge as actor:user.
+  // Security/budget/integrity policy findings are acknowledged by that card.
+  const remainingViolations = gateResult.violations.filter(violation => violation.label === 'Operator checkout blocks base fast-forward');
+  const effectiveGate = mergePreviewApproval(lane, false, options.reviewResolutionProjection?.approval).actor === 'user'
+    ? { ...gateResult, passed: remainingViolations.every(violation => violation.severity !== 'block'), violations: remainingViolations } : gateResult;
+  const checks = buildCheckList(effectiveGate, verificationChecks);
+  const { resolveMergeTestReplayEnabledSync } = await import('@/lib/operator/defaults');
+  if (resolveMergeTestReplayEnabledSync()) checks.push({ name: 'tests', verdict: 'skipped',
+    detail: 'Configured test replay runs against the rebased integration state during merge.',
+    actions: ['Pass the configured test replay against the rebased integration state before publication.'] });
   let packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
   if (!packet) {
     const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
@@ -257,36 +287,33 @@ export async function buildPreviewForLane(
       ?.mission.packets.find((candidate) => candidate.id === packetId);
   }
   let reviewPrerequisite: string | undefined;
-  const prerequisites = await mergeReviewPrerequisites(resolvedLane, packet);
+  const prerequisites = await mergeReviewPrerequisites(resolvedLane, packet, gateResult, options.ignorePendingGateApproval, options.reviewResolutionProjection?.approval);
   checks.push(...prerequisites.checks);
-  blockers.push(...prerequisites.checks.filter(check => check.verdict === 'fail').map(check => check.name));
   let contractReviewReady = true;
   if (packet?.taskContractRequired && packet.taskContract) {
     const assessment = prerequisites.review;
-    contractReviewReady = assessment.approved;
-    reviewPrerequisite = assessment.approved
+    contractReviewReady = assessment.contractCoverage?.status === 'passed';
+    reviewPrerequisite = contractReviewReady
       ? 'The current HEAD has an approved review with task-contract evidence.'
-      : `An approved review at the current HEAD still needs file-backed coverage and any process-constraint evidence. ${assessment.reason}`;
+      : `An approved review at the current HEAD still needs file or non-file requirement coverage and any process-constraint evidence. ${assessment.contractCoverage?.reason ?? assessment.reason}`;
     checks.push({
       name: 'contract-review',
       verdict: contractReviewReady ? 'pass' : 'fail',
       detail: reviewPrerequisite,
+      actions: prerequisites.contractActions,
     });
-    if (!contractReviewReady) blockers.push('contract-review');
   } else if (packet?.taskContractRequired && !packet.taskContract) {
     if (packet.taskContractSource === 'default') {
       const assessment = prerequisites.review;
-      contractReviewReady = assessment.approved && assessment.contractCoverage?.status === 'waived';
+      contractReviewReady = assessment.contractCoverage?.status === 'waived';
       reviewPrerequisite = contractReviewReady
         ? assessment.contractCoverage?.reason ?? 'The operator waived missing-contract coverage for this reviewed HEAD.'
         : `The runtime-default task contract was not captured. Requirement coverage is unproven; an explicit operator waiver at the current HEAD is required. ${assessment.reason}`;
-      checks.push({ name: 'contract-review', verdict: contractReviewReady ? 'pass' : 'fail', detail: reviewPrerequisite });
-      if (!contractReviewReady) blockers.push('contract-review');
+      checks.push({ name: 'contract-review', verdict: contractReviewReady ? 'pass' : 'fail', detail: reviewPrerequisite, actions: prerequisites.contractActions });
     } else {
       contractReviewReady = false;
       reviewPrerequisite = 'The explicitly required task contract is missing; restore or capture it before approval.';
-      checks.push({ name: 'contract-review', verdict: 'fail', detail: reviewPrerequisite });
-      blockers.push('contract-review');
+      checks.push({ name: 'contract-review', verdict: 'fail', detail: reviewPrerequisite, actions: prerequisites.contractActions });
     }
   }
   const dirtyDetail = await readDirtyWorktreeDetail(reviewSource.cwd, lane.repoPath);
@@ -296,14 +323,30 @@ export async function buildPreviewForLane(
       cleanCheck.verdict = 'fail';
       cleanCheck.detail = dirtyDetail;
     }
-    if (!blockers.includes('clean-worktree')) blockers.unshift('clean-worktree');
   }
+  const { mergeRuntimePrerequisites } = await import('./merge-runtime-prerequisites');
+  checks.push(...await mergeRuntimePrerequisites(resolvedLane));
+  if (!options.skipMergeOrder) {
+    const { mergeOrderPrerequisites } = await import('./merge-order-prerequisites');
+    checks.push(...await mergeOrderPrerequisites(packetId, options.reviewResolutionProjection?.laneStatus));
+  }
+  for (const check of checks) {
+    if (check.verdict !== 'fail' || check.actions?.length) continue;
+    check.actions = check.name === 'clean-worktree'
+      ? check.detail?.includes('checked out in another worktree')
+        ? [`Run git worktree list; in the checkout holding ${lane.baseBranch}, switch to another existing branch or detach HEAD, then rerun merge-preview.`]
+        : ['In the affected checkout, commit and review the listed changes, or remove only disposable uncommitted changes; then rerun merge-preview.']
+      : check.name === 'lint'
+        ? ['Fix the reported changed-file lint errors, commit and review the new HEAD, then rerun merge-preview.']
+        : ['Resolve the reported security, budget or integrity findings, commit and review the new HEAD; an intentional policy override requires operator inspection and approval of the merge gate card.'];
+  }
+  const blockers = [...new Set(checks.filter(check => check.verdict === 'fail').map(check => check.name))];
   const directiveCitations = options.directiveCitations
     ? await (await import('@/lib/judgment/directive-citations')).directiveCitationsForPreview(lane, packetId, reviewSource.cwd, baseRef)
     : undefined;
   return {
     packetId,
-    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail && contractReviewReady && prerequisites.ready,
+    wouldMerge: blockers.length === 0,
     checks,
     blockers,
     branch: lane.branch ?? null,
@@ -328,6 +371,7 @@ export async function previewPacketMerge(packetId: string): Promise<MergePreview
       wouldMerge: false,
       checks: ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
       blockers: ['no-lane'],
+      mergeUnavailableReason: 'Dispatch the packet to create its lane before requesting a merge.',
       branch: null,
       unwired: true,
     };

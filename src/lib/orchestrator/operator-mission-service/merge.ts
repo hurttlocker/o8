@@ -13,6 +13,7 @@ export { HeadShaMismatchError, isHeadShaMismatchError } from './merge-head-error
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import { packetReleaseGeneration, packetReleaseIdentityIsCurrent } from '@/lib/orchestrator/release-ownership';
 import { withPacketMergeWorkspace } from './merge-workspace-guard';
+import { findLatestMergeApproval } from '@/lib/lane/merge-approval-context';
 import { selectMergeSequence } from './merge-order';
 export { selectMergeSequence } from './merge-order';
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
@@ -74,7 +75,7 @@ function isPacketAwaitingMerge(packet: OrchestratorPacket) {
     && packet.review?.approved !== false;
 }
 
-async function getWaveMergeOrder(
+export async function getWaveMergeOrder(
   state: OrchestratorMissionState,
   packetId: string,
 ): Promise<OrderedMergeCandidate[] | null> {
@@ -236,15 +237,6 @@ async function withGateVerdict(
     blockers,
     reason,
   };
-}
-
-async function findLatestMergeApproval(packetId: string, laneId: string, sessionKey?: string | null) {
-  const { listApprovalsForContext } = await loadApprovalsStore();
-  return listApprovalsForContext({
-    packetId,
-    laneId,
-    sessionKey: sessionKey ?? undefined,
-  }).find((approval) => approval.continuation?.kind === 'lane' && approval.continuation.verb === 'merge') ?? null;
 }
 
 async function dispatchPacketMerge(
@@ -576,7 +568,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
-  const latestMergeApproval = await findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
+  let latestMergeApproval = await findLatestMergeApproval(packet.id, lane.id, lane.sessionKey);
   if (latestMergeApproval?.status === 'pending') {
     // A live human operator clicking merge IS the approval — resolve the
     // pending card (full audit trail) and fall through to the merge instead
@@ -587,10 +579,11 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
       const { buildPreviewForLane } = await loadPreviewMerge();
       const preview = await buildPreviewForLane(lane, packet.id, {
         orchestratorApproved: packet.review?.approved === true,
+        ignorePendingGateApproval: true,
       });
       if (preview.wouldMerge) {
         const { resolveApproval } = await import('@/lib/approvals/resolution');
-        resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator waiver now satisfies the merge gate.');
+        latestMergeApproval = resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator waiver now satisfies the merge gate.');
       } else {
         return withGateVerdict(packet.id, {
           merged: false,
@@ -600,7 +593,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
       }
     } else if (input.actor === 'user' && !isPacketMergeHeld(packet.id)) {
       const { resolveApproval } = await import('@/lib/approvals/resolution');
-      resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
+      latestMergeApproval = resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
     } else {
       return withGateVerdict(packet.id, {
         merged: false,

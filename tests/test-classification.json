@@ -3691,6 +3691,15 @@
       ]
     },
     {
+      "path": "tests/merge-preview-all-gates-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/merge-settles-on-cleanup-refusal-real-path.test.ts",
       "reasons": [
         "child-process",

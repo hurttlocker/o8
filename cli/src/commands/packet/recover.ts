@@ -52,10 +52,11 @@ interface OperatorResponse<T> {
 interface MergePreviewResult {
   packetId: string;
   wouldMerge: boolean;
-  checks?: Array<{ name?: string; passed?: boolean; detail?: string }>;
+  checks?: Array<{ name?: string; verdict?: string; detail?: string; actions?: string[] }>;
   blockers?: string[];
   branch?: string;
   reviewPrerequisite?: string;
+  reviewRequirements?: { contractKind: string; requirementIds: string[]; processConstraintIds: string[]; actions: string[] };
   error?: string;
 }
 
@@ -253,6 +254,14 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
       ['branch', preview.branch ?? '(unknown)'],
       ['blockers', preview.blockers?.length ? preview.blockers.join(', ') : '(none)'],
       ['review prerequisite', preview.reviewPrerequisite ?? '(none)'],
+      ['contract kind', preview.reviewRequirements?.contractKind ?? '(unknown)'],
+      ['requirement IDs', preview.reviewRequirements?.requirementIds.join(', ') ?? ''],
+      ['process IDs', preview.reviewRequirements?.processConstraintIds.join(', ') ?? ''],
+      ['checks', preview.checks?.map(check => `${check.name}: ${check.verdict}${check.detail ? ` - ${check.detail}` : ''}`).join('\n') ?? ''],
+      ['clear gates', [...new Set([
+        ...(preview.reviewRequirements?.actions ?? []),
+        ...preview.checks?.filter(check => check.verdict === 'fail').flatMap(check => check.actions ?? []) ?? [],
+      ])].join('\n')],
     ]);
   } else {
     printJson(payload);
