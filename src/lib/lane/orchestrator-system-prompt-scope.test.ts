@@ -61,7 +61,7 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(prompt).toContain('o8_html_render');
     expect(prompt).toContain('o8_visualization_read');
     expect(prompt).toContain('a rendered mock does not');
-    expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+    expect(prompt).not.toContain('## Orchestrator protocol');
   });
   it('finds the registered tool catalogs it guards', () => {
     expect(readFileSync(new URL('cortex-mcp-server.ts', MCP_DIR), 'utf8')).toContain('...CORTEX_WORKER_TOOLS');
@@ -105,7 +105,7 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
     const solo = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false, toolProfile: 'solo' });
 
-    for (const heading of ['## FINAL-MESSAGE FORMAT FOR DISPATCH', '## ORCHESTRATOR PROTOCOL', '## Huddle mode']) {
+    for (const heading of ['## Final-message format for dispatch', '## Orchestrator protocol', '## Huddle mode']) {
       expect(full, heading).toContain(heading);
       expect(solo, heading).not.toContain(heading);
     }
@@ -150,9 +150,9 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(codex).not.toContain('Claude Code orchestrator backend');
     expect(claude).not.toContain('Codex orchestrator backend');
 
-    expect(claude).toContain('### YOU ARE CLAUDE CODE UNDER THE HOOD');
+    expect(claude).toContain('### Native backend helpers');
     expect(claude).toContain('native Claude sub-agents');
-    for (const claudeOnly of ['### YOU ARE CLAUDE CODE UNDER THE HOOD', 'native Claude sub-agents', 'You are Claude']) {
+    for (const claudeOnly of ['### Native backend helpers', 'native Claude sub-agents', 'You are Claude']) {
       expect(codex, claudeOnly).not.toContain(claudeOnly);
     }
     // Backend-neutral dispatch guidance survives on both.

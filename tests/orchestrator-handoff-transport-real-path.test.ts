@@ -287,7 +287,7 @@ describe('scripted cross-backend handoff through the production transport', () =
     expect(packet.narrative.messages.map((message) => message.content)).toContain(sourceReply);
     expect(packet.narrative.messages.map((message) => message.content)).not.toContain(operatorMessage);
     expect(prompt.indexOf(operatorMessage)).toBeGreaterThan(prompt.indexOf('</o8_handoff_packet>'));
-    expect(prompt).toContain('COLD cross-backend continuation');
+    expect(prompt).toContain('cold cross-backend continuation');
     expect(prompt).toContain('Omitted layers: intent.');
     expect(packet.workspace).toMatchObject({ repoPath, worktreePath: repoPath, branch: 'main', dirty: true,
       evidence: { laneId: lane.id, headSha: sourceHead, against: sourceHead,

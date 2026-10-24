@@ -9,7 +9,7 @@ export const COMMENT_FACT_EXTRACTION_PROMPT_TEMPLATE_V1 = `You are extracting st
 
 Read the COMMENT BODY below and emit a JSON array of facts. Each fact is one self-contained piece of organizational knowledge — a decision, spec, process, incident, ownership claim, cross-repo invariant, or directive. If the comment is purely conversational ("ok", "thanks", "lgtm"), reactionary, or contains no extractable factual content, emit an empty array [].
 
-Output format — STRICT JSON, no prose, no code fences, no explanation:
+Output format — Strict JSON, no prose, no code fences, no explanation:
 
 [
   {
@@ -20,9 +20,9 @@ Output format — STRICT JSON, no prose, no code fences, no explanation:
   }
 ]
 
-Hard rules — facts that violate these will be silently rejected, so don't emit them:
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of the COMMENT BODY. No paraphrasing, no truncation markers, no quotation reformatting.
-- content must NOT invent information not present in the comment. If a name, number, repo, or file isn't in the body, don't put it in the fact.
+Rules: facts that violate these will be silently rejected, so don't emit them:
+- source_excerpt must be a verbatim, case-sensitive, character-for-character substring of the COMMENT BODY. No paraphrasing, no truncation markers, no quotation reformatting.
+- content must not invent information not present in the comment. If a name, number, repo, or file isn't in the body, don't put it in the fact.
 - content must be self-contained — readable without seeing the comment.
 - Confidence below 0.6 will be dropped, so don't emit facts you're not at least somewhat sure about.
 
@@ -68,14 +68,14 @@ export function buildDocumentationFactExtractionPromptV1(
 
   return `You are extracting structured facts from documentation chunks. Each chunk has an id; for each chunk return zero or more facts as JSON.
 
-Output format — STRICT JSON, one object, no prose, no fences:
+Output format — Strict JSON, one object, no prose, no fences:
 
 {
   "<chunk_id>": [
     {
       "kind": "decision" | "spec" | "process" | "incident" | "ownership" | "cross_repo" | "directive" | "other",
       "content": "<one declarative sentence quoting concrete values, max 500 chars>",
-      "source_excerpt": "<8-30 word verbatim substring of THAT chunk's text>",
+      "source_excerpt": "<8-30 word verbatim substring of that chunk's text>",
       "confidence": <number 0.0-1.0>
     }
   ],
@@ -84,10 +84,10 @@ Output format — STRICT JSON, one object, no prose, no fences:
 }
 
 Rules:
-- Each fact is ONE declarative sentence quoting concrete values (file paths, table names, env vars, commands, numbers).
+- Each fact is one declarative sentence quoting concrete values (file paths, table names, env vars, commands, numbers).
 - Skip a chunk (return []) if it is a table of contents, navigation, license boilerplate, or pure markdown structure.
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of THAT chunk's text. No paraphrasing.
-- content must NOT invent information not present in the chunk.
+- source_excerpt must be a verbatim, case-sensitive, character-for-character substring of that chunk's text. No paraphrasing.
+- content must not invent information not present in the chunk.
 - content must be self-contained — readable without the chunk.
 - Confidence below 0.6 will be dropped, so don't emit facts you're not at least somewhat sure about.
 
@@ -120,7 +120,7 @@ export function buildCommitFactExtractionPromptV1(
 
 Read the COMMIT below and emit a JSON array of facts. Each fact is one self-contained piece of engineering knowledge: a decision, spec, process change, architecture note, or directive. If the commit message is purely mechanical ("fix typo", "bump version", "merge", "chore"), emit an empty array [].
 
-Output format — STRICT JSON, no prose, no code fences:
+Output format — Strict JSON, no prose, no code fences:
 
 [
   {
@@ -131,10 +131,10 @@ Output format — STRICT JSON, no prose, no code fences:
   }
 ]
 
-Hard rules — violating these will silently reject the fact:
-- source_excerpt MUST be a verbatim, case-sensitive, character-for-character substring of the COMMIT MESSAGE.
+Rules: violating these will silently reject the fact:
+- source_excerpt must be a verbatim, case-sensitive, character-for-character substring of the COMMIT MESSAGE.
 - content must be self-contained — readable without seeing the commit.
-- content must NOT invent information not present in the commit message.
+- content must not invent information not present in the commit message.
 - Confidence below 0.6 will be dropped, so don't emit facts you're not sure about.
 
 Kind selector:

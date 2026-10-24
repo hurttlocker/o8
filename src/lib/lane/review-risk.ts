@@ -139,12 +139,12 @@ export function buildAdversarialReviewProtocol(tier: ReviewRiskTier): string {
   if (tier !== 'high') return '';
 
   return [
-    '## HIGH-RISK REVIEW',
+    '## High-risk review',
     '',
     'This diff touches live state / data writes.',
-    'After your first verdict, do a SECOND skeptical pass in THIS SAME turn that ASSUMES the change is wrong and specifically tries to prove a scope/partition leak or an inert guard.',
-    'KEEP an approve verdict only if the second pass also clears it, citing the file:line that proves correctness.',
-    'Do NOT default to reject.',
+    'After your first verdict, do a second skeptical pass in the same turn. Try to disprove the change by finding a scope/partition leak or inert guard.',
+    'Keep an approve verdict only if the second pass also clears it, citing the file:line that proves correctness.',
+    'Do not default to reject.',
   ].join('\n');
 }
 

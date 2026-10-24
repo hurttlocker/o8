@@ -128,6 +128,19 @@ describe('orchestrator delegate worker routing', () => {
     }));
   });
 
+  it('renders one completion contract at the delegate launch entry point', async () => {
+    mocks.dispatch.mockClear();
+    const response = await delegateRoute.POST(request({ runtime: 'codex' }));
+    expect(response.status).toBe(200);
+    const launch = mocks.dispatch.mock.calls.find(([command]) => command.verb === 'launch_session')?.[0];
+    const prompt = (launch as unknown as { prompt: string }).prompt;
+    for (const rule of ['git diff main...HEAD', 'two fix attempts', 'every production path',
+      'implementation_ready', 'partial', 'blocked', '<self-review>', '"evidence"', '"residual"',
+      'commit all packet changes', 'Preserve unrelated edits']) expect(prompt, rule).toContain(rule);
+    expect(prompt.match(/Uncommitted changes/g)).toHaveLength(1);
+    expect(prompt).not.toMatch(/CRITICAL|MUST|Do NOT/);
+  });
+
   it('persists read-only delegation and launches it with the governed evidence receipt', async () => {
     mocks.dispatch.mockClear();
     mocks.state.packets.length = 0;
