@@ -148,7 +148,13 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
     if (repoPath) params.set('repoPath', repoPath);
     if (reloadKey > 0) params.set('refresh', '1');
     fetch(`${catalogueUrl ?? '/api/orchestrator/backend-models'}${params.size ? `?${params}` : ''}`, { cache: 'no-store' })
-      .then(async (res) => { if (!res.ok) throw new Error('Could not read the model list.'); return res.json(); })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(typeof data?.error === 'string' ? data.error : 'Could not read the model list.');
+        }
+        return res.json();
+      })
       .then((data) => {
         if (cancelled) return;
         if (data?.available === false) { setState('unavailable'); return; }
