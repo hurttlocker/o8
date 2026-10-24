@@ -1,11 +1,16 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 // Same disposable host entry point as the native history/composer fixtures.
 // The terminal mode must cross src/ws-server.ts and a real fixture PTY.
 const credential = 'fixture-next-terminal-operator';
+const directory = mkdtempSync(join(tmpdir(), 'o8-next-terminal-start-'));
+const startupGate = join(directory, 'start');
 let child: ChildProcess;
 let socket: WebSocket;
 let origin = '';
@@ -22,7 +27,8 @@ async function until(predicate: () => boolean, label: string) {
 beforeAll(async () => {
   child = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs',
     '--import', 'tsx', 'scripts/next/dev-server.ts', '--terminal'], {
-    env: { ...process.env, O8_NEXT_API_TOKEN: credential }, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, O8_NEXT_API_TOKEN: credential, O8_NEXT_TERMINAL_START_GATE: startupGate },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   child.stdout!.on('data', chunk => {
@@ -43,6 +49,7 @@ afterAll(async () => {
   if (child && child.exitCode === null) {
     const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited;
   }
+  rmSync(directory, { recursive: true, force: true });
 });
 
 it('attaches, replays, writes and resizes an existing fixture PTY through the production server', async () => {
@@ -60,7 +67,17 @@ it('attaches, replays, writes and resizes an existing fixture PTY through the pr
   await until(() => frames.some(f => f.event === 'attached'), 'production attach');
   send({ type: 'terminal-visibility', visible: true, epoch: 1, needsResync: true });
   await until(() => frames.some(f => f.event === 'resync'), 'production replay barrier');
-  const replay = frames.find(f => f.event === 'resync')!;
+  const initialReplay = frames.find(f => f.event === 'resync')!;
+  expect(Buffer.from(String(initialReplay.data.data), 'base64').toString('utf8')).not.toContain('READY');
+  // Spawn acknowledgement and a quiet replay do not imply child readiness.
+  // Hold its first write past the initial snapshot, then observe it on the wire
+  // before requesting the history we intend to assert. No startup sleep can
+  // establish this ordering on a loaded runner.
+  writeFileSync(startupGate, 'start');
+  await until(() => text().includes('READY'), 'fixture PTY startup output');
+  send({ type: 'terminal-visibility', visible: true, epoch: 2, needsResync: true });
+  await until(() => frames.some(f => f.event === 'resync' && f.data.epoch === 2), 'ready PTY replay');
+  const replay = frames.find(f => f.event === 'resync' && f.data.epoch === 2)!;
   expect(Buffer.from(String(replay.data.data), 'base64').toString('utf8')).toContain('READY');
   send({ type: 'terminal-input', data: 'key\r' });
   await until(() => text().includes('KEY'), 'fixture PTY input');

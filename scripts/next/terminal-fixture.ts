@@ -43,8 +43,8 @@ export async function startTerminalFixture(dataDir: string, repo: string, apiPor
       body: JSON.stringify({ sessionName, shellCommand: `python3 '${script}'`, cwd: repo, cols: 80, rows: 24 }),
     });
     if (!response.ok) throw new Error(`Fixture PTY spawn failed (${response.status})`);
-    // Allow the raw peer's initial output to enter the real server replay ring.
-    await new Promise(ready => setTimeout(ready, 100));
+    // Spawn acknowledges the PTY, not the child's first write. Consumers must
+    // observe readiness through terminal data before asserting replay content.
     return { port, sessionName, close };
   } catch (error) { await close(); throw error; }
 }

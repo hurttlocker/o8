@@ -14,6 +14,11 @@ def emit(text):
     os.write(sys.stdout.fileno(), text.encode())
 
 
+# The real-path regression can hold the first write until after an empty replay.
+# This models a scheduled-out child without relying on machine-specific sleeps.
+startup_gate = os.environ.get("O8_NEXT_TERMINAL_START_GATE")
+while startup_gate and not os.path.exists(startup_gate):
+    time.sleep(0.01)
 emit("\x1b[2J\x1b[HREADY\r\n")
 pending = b""
 while True:
