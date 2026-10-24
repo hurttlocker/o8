@@ -101,7 +101,7 @@ it('keeps unsupported models on the existing transport lifecycle', () => {
   const transport = createOpenRouterPiTransport({ model: openRouterPiModel('fixture/model', pricing), pricing,
     ceiling: new OpenRouterSpendCeiling(1), resolveKey: async () => null });
   expect(transport.prepare).toBeUndefined();
-  expect(transport.duringTool).toBeUndefined();
+  expect(transport).not.toHaveProperty('duringTool');
 });
 
 it('does not send or reserve a delayed credential lookup after the run stops', async () => {

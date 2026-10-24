@@ -110,8 +110,6 @@ export interface OpenRouterPiTransportOptions {
   fetch?: typeof fetch;
   maxOutputTokens?: number;
   timeoutMs?: number;
-  /** Trusted timing seam for recorded fixtures, never a request/tool argument. */
-  cacheRefreshMs?: number;
 }
 
 /** A 402 means the OpenRouter account or key has no credit left; o8 spent nothing on the refused call. */
@@ -132,12 +130,7 @@ function withoutProviderDiagnostics(event: AssistantMessageEvent): AssistantMess
 export function createOpenRouterPiTransport(options: OpenRouterPiTransportOptions): PiModelTransport {
   const maxOutputTokens = options.maxOutputTokens ?? OPENROUTER_PI_MAX_OUTPUT_TOKENS;
   const policy = promptCachePolicy(options.model.id);
-  const states = new WeakMap<AbortSignal, { prefix?: Context; prepared: boolean; refreshes: number; lastUsed: number; pending?: Promise<void> }>();
-  const stateFor = (signal: AbortSignal) => {
-    let state = states.get(signal);
-    if (!state) { state = { prepared: false, refreshes: 0, lastUsed: Date.now() }; states.set(signal, state); }
-    return state;
-  };
+  const preparedSessions = new WeakSet<AbortSignal>();
   const run = async function* (context: Context, signal: AbortSignal, purpose: OpenRouterPiReceipt['purpose'] = 'turn'): AsyncGenerator<AssistantMessageEvent> {
     signal.throwIfAborted();
     const started = Date.now();
@@ -167,7 +160,7 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
         body = JSON.stringify(warm);
       }
       // Extended cache writes have a higher input price. Reserve that price
-      // even for a refresh: a provider eviction can turn any hit into a write.
+      // even for a hit: a provider eviction can turn any hit into a write.
       reservedUsd = worstCaseCallUsd(Buffer.byteLength(body, 'utf8'), outputLimit,
         { ...options.pricing, inputPerMillion: options.pricing.inputPerMillion * (policy && promptCacheEnabled() ? policy.writeMultiplier : 1) });
       if (!options.ceiling.reserve(reservedUsd)) {
@@ -254,51 +247,18 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
     }
   };
 
-  const refresh = async (context: Context, signal: AbortSignal, purpose: 'prewarm' | 'keepalive') => {
-    if (signal.aborted || !promptCacheEnabled()) return;
-    // Warm output is never delivered to the agent or added to its conversation.
-    try { for await (const _event of run(context, signal, purpose)) { /* receipt owns usage */ } }
-    catch { /* Warming is best effort; ordinary turns retain their error handling. */ }
-  };
   const transport: PiModelTransport = async function* (context, signal) {
-    const state = stateFor(signal);
-    await state.pending;
-    state.prefix = cachePrefixContext(context);
     yield* run(context, signal);
-    state.lastUsed = Date.now();
   };
   if (!policy) return transport;
   transport.prepare = async (context, signal) => {
-    const state = stateFor(signal);
-    if (state.prepared || !promptCacheEnabled()) return;
-    state.prepared = true;
-    state.prefix = cachePrefixContext(context);
-    if (state.prefix) state.pending = refresh(state.prefix, signal, 'prewarm');
-    await state.pending;
-    state.lastUsed = Date.now();
-  };
-  transport.duringTool = signal => {
-    const state = stateFor(signal);
-    const controller = new AbortController();
-    const refreshSignal = AbortSignal.any([signal, controller.signal]);
-    const interval = options.cacheRefreshMs ?? policy.ttlMs - 60_000;
-    let pending: Promise<void> | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      if (refreshSignal.aborted || !promptCacheEnabled() || !state.prefix || state.refreshes >= 2) return;
-      timer = setTimeout(() => {
-        if (refreshSignal.aborted || !promptCacheEnabled() || state.refreshes >= 2) return;
-        state.refreshes += 1;
-        pending = refresh(state.prefix!, refreshSignal, 'keepalive').then(() => {
-          state.lastUsed = Date.now(); schedule();
-        });
-      }, Math.max(1, interval - (Date.now() - state.lastUsed)));
-      timer.unref?.();
-    };
-    const stop = () => { clearTimeout(timer); controller.abort(); };
-    refreshSignal.addEventListener('abort', stop, { once: true });
-    schedule();
-    return async () => { stop(); await pending; refreshSignal.removeEventListener('abort', stop); };
+    if (preparedSessions.has(signal) || signal.aborted || !promptCacheEnabled()) return;
+    preparedSessions.add(signal);
+    const prefix = cachePrefixContext(context);
+    if (!prefix) return;
+    // Warm output is never delivered to the agent or added to its conversation.
+    try { for await (const _event of run(prefix, signal, 'prewarm')) { /* receipt owns usage */ } }
+    catch { /* Warming is best effort; ordinary turns retain their error handling. */ }
   };
   return transport;
 }
