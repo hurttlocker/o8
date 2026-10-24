@@ -1,0 +1,8 @@
+vendor/
+node_modules/
+dist/
+raw/
+screenshots/
+*.log
+__pycache__/
+pure-gpui/target/

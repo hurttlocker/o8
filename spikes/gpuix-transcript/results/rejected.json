@@ -1,0 +1,40 @@
+{
+  "legacyDesktopProbes": {
+    "accepted": false,
+    "reason": "Retired method used global synthetic input and installed application windows; excluded from all results",
+    "webFailuresReported": 6
+  },
+  "isolatedProbes": [
+    {
+      "arm": "web",
+      "reason": "Probe completed but result persistence failed on missing native fixture hash; fixed by hashing the actual in-page fixture"
+    },
+    {
+      "arm": "terminal",
+      "reason": "Initial live-renderer handle used incorrect return shape; no accepted samples"
+    },
+    {
+      "arm": "terminal",
+      "reason": "Unmaterialized tail window caused stream frame timeout; explicit scroll windowing fixed"
+    },
+    {
+      "arm": "terminal",
+      "reason": "Direct keystroke helper omitted terminal text-input path; replaced with owned PTY bytes and painted-input acknowledgement"
+    },
+    {
+      "arm": "native",
+      "reason": "Long scroll probe exceeded the lifetime budget; final runs use 100 anchors with a parent-enforced nine-second kill"
+    },
+    {
+      "arm": "all",
+      "reason": "Earlier 200-anchor partial batch excluded; final accepted fixture uses 100 identical anchors per arm"
+    }
+  ],
+  "rawEvidence": "Retained locally in ignored raw/; contains legacy desktop captures and must not be published",
+  "supersededFourArmBatch": {
+    "reason": "Recollected pure GPUI and PTY after adding initial transcript-tail materialization acknowledgement",
+    "earlierPureColdLaunchMs": 3213.7845799922943,
+    "preserved": "ignored raw/four-arm-before-first-content-check.json",
+    "notAClaimOfControlledColdCaches": true
+  }
+}

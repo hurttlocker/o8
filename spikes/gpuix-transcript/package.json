@@ -1,0 +1,30 @@
+{
+  "name": "o8-gpuix-transcript-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Isolated transcript renderer measurement spike.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "bench": "node measure.mjs",
+    "summarize": "node summarize.mjs",
+    "build:pure": "cargo +1.97.1 build --manifest-path pure-gpui/Cargo.toml --release --locked --target x86_64-apple-darwin",
+    "audit:pure": "node license-audit.mjs",
+    "verify:pure": "node validate-pure.mjs"
+  },
+  "dependencies": {
+    "@gpuix/native": "0.11.0",
+    "@gpuix/react": "0.11.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.10.4",
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "@types/react-dom": "19.0.4",
+    "esbuild": "0.28.1",
+    "playwright-core": "1.60.0",
+    "typescript": "5.8.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "entries": 2000,
+  "bytes": 477752,
+  "sha256": "46471f2c5a78d461e9e11b4f30129a23f18aee84644b856cd2440373e85ae238",
+  "roles": {
+    "user": 250,
+    "assistant": 1260,
+    "tool": 490
+  },
+  "diffs": 20,
+  "codeBlocks": 125
+}

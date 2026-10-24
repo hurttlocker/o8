@@ -1,0 +1,825 @@
+{
+  "surface": "pure",
+  "fixtureHash": "46471f2c5a78d461e9e11b4f30129a23f18aee84644b856cd2440373e85ae238",
+  "rows": 2000,
+  "width": 1200,
+  "height": 816,
+  "stream": [
+    {
+      "elapsedMs": 1.374964,
+      "drawMs": 0.502004
+    },
+    {
+      "elapsedMs": 1.685038,
+      "drawMs": 0.531115
+    },
+    {
+      "elapsedMs": 1.464485,
+      "drawMs": 0.512325
+    },
+    {
+      "elapsedMs": 1.6015720000000002,
+      "drawMs": 0.563052
+    },
+    {
+      "elapsedMs": 1.4084290000000002,
+      "drawMs": 0.509701
+    },
+    {
+      "elapsedMs": 1.4695559999999999,
+      "drawMs": 0.503769
+    },
+    {
+      "elapsedMs": 1.5037900000000002,
+      "drawMs": 0.5278210000000001
+    },
+    {
+      "elapsedMs": 1.499403,
+      "drawMs": 0.5680620000000001
+    },
+    {
+      "elapsedMs": 1.422562,
+      "drawMs": 0.514636
+    },
+    {
+      "elapsedMs": 1.465462,
+      "drawMs": 0.5484939999999999
+    },
+    {
+      "elapsedMs": 1.518396,
+      "drawMs": 0.595602
+    },
+    {
+      "elapsedMs": 1.416407,
+      "drawMs": 0.514693
+    },
+    {
+      "elapsedMs": 1.393429,
+      "drawMs": 0.503698
+    },
+    {
+      "elapsedMs": 1.456091,
+      "drawMs": 0.526224
+    },
+    {
+      "elapsedMs": 1.584364,
+      "drawMs": 0.528984
+    },
+    {
+      "elapsedMs": 1.5152150000000002,
+      "drawMs": 0.584432
+    },
+    {
+      "elapsedMs": 1.503098,
+      "drawMs": 0.519702
+    },
+    {
+      "elapsedMs": 1.548713,
+      "drawMs": 0.531218
+    },
+    {
+      "elapsedMs": 1.4463659999999998,
+      "drawMs": 0.522241
+    },
+    {
+      "elapsedMs": 1.6109390000000001,
+      "drawMs": 0.53732
+    },
+    {
+      "elapsedMs": 1.3656339999999998,
+      "drawMs": 0.497485
+    },
+    {
+      "elapsedMs": 1.397346,
+      "drawMs": 0.505434
+    },
+    {
+      "elapsedMs": 1.439942,
+      "drawMs": 0.514712
+    },
+    {
+      "elapsedMs": 1.4932299999999998,
+      "drawMs": 0.5303690000000001
+    },
+    {
+      "elapsedMs": 1.6241050000000001,
+      "drawMs": 0.6693899999999999
+    },
+    {
+      "elapsedMs": 1.4101569999999999,
+      "drawMs": 0.496779
+    },
+    {
+      "elapsedMs": 1.427686,
+      "drawMs": 0.514942
+    },
+    {
+      "elapsedMs": 1.643663,
+      "drawMs": 0.535582
+    },
+    {
+      "elapsedMs": 1.537877,
+      "drawMs": 0.549401
+    },
+    {
+      "elapsedMs": 1.508117,
+      "drawMs": 0.522502
+    },
+    {
+      "elapsedMs": 1.544893,
+      "drawMs": 0.5262319999999999
+    },
+    {
+      "elapsedMs": 1.435548,
+      "drawMs": 0.509932
+    },
+    {
+      "elapsedMs": 1.460675,
+      "drawMs": 0.5089750000000001
+    },
+    {
+      "elapsedMs": 1.423758,
+      "drawMs": 0.511094
+    },
+    {
+      "elapsedMs": 1.469891,
+      "drawMs": 0.518328
+    },
+    {
+      "elapsedMs": 1.520511,
+      "drawMs": 0.520467
+    },
+    {
+      "elapsedMs": 1.474565,
+      "drawMs": 0.5098239999999999
+    },
+    {
+      "elapsedMs": 1.55051,
+      "drawMs": 0.528513
+    },
+    {
+      "elapsedMs": 1.5484369999999998,
+      "drawMs": 0.528354
+    },
+    {
+      "elapsedMs": 1.509172,
+      "drawMs": 0.53052
+    },
+    {
+      "elapsedMs": 1.49271,
+      "drawMs": 0.521201
+    },
+    {
+      "elapsedMs": 1.471396,
+      "drawMs": 0.531076
+    },
+    {
+      "elapsedMs": 1.491521,
+      "drawMs": 0.522496
+    },
+    {
+      "elapsedMs": 1.465129,
+      "drawMs": 0.5126590000000001
+    },
+    {
+      "elapsedMs": 1.556018,
+      "drawMs": 0.54667
+    },
+    {
+      "elapsedMs": 1.481118,
+      "drawMs": 0.5177120000000001
+    },
+    {
+      "elapsedMs": 1.607879,
+      "drawMs": 0.541703
+    },
+    {
+      "elapsedMs": 1.4758079999999998,
+      "drawMs": 0.535766
+    },
+    {
+      "elapsedMs": 1.5219129999999998,
+      "drawMs": 0.54269
+    },
+    {
+      "elapsedMs": 1.5332709999999998,
+      "drawMs": 0.5400280000000001
+    },
+    {
+      "elapsedMs": 1.554362,
+      "drawMs": 0.542672
+    },
+    {
+      "elapsedMs": 1.519387,
+      "drawMs": 0.534407
+    },
+    {
+      "elapsedMs": 1.5603500000000001,
+      "drawMs": 0.5343979999999999
+    },
+    {
+      "elapsedMs": 1.506345,
+      "drawMs": 0.52893
+    },
+    {
+      "elapsedMs": 1.738054,
+      "drawMs": 0.604884
+    },
+    {
+      "elapsedMs": 1.6417510000000002,
+      "drawMs": 0.6140100000000001
+    },
+    {
+      "elapsedMs": 1.60531,
+      "drawMs": 0.5470889999999999
+    },
+    {
+      "elapsedMs": 1.6353389999999999,
+      "drawMs": 0.5668230000000001
+    },
+    {
+      "elapsedMs": 1.60928,
+      "drawMs": 0.5656100000000001
+    },
+    {
+      "elapsedMs": 1.5176429999999999,
+      "drawMs": 0.5264859999999999
+    },
+    {
+      "elapsedMs": 1.5147,
+      "drawMs": 0.524031
+    },
+    {
+      "elapsedMs": 1.565669,
+      "drawMs": 0.5456369999999999
+    },
+    {
+      "elapsedMs": 1.611829,
+      "drawMs": 0.5682740000000001
+    },
+    {
+      "elapsedMs": 1.5471949999999999,
+      "drawMs": 0.532015
+    },
+    {
+      "elapsedMs": 1.672763,
+      "drawMs": 0.58004
+    },
+    {
+      "elapsedMs": 1.578943,
+      "drawMs": 0.555405
+    },
+    {
+      "elapsedMs": 1.599059,
+      "drawMs": 0.555741
+    },
+    {
+      "elapsedMs": 1.629036,
+      "drawMs": 0.558822
+    },
+    {
+      "elapsedMs": 2.429665,
+      "drawMs": 0.787567
+    },
+    {
+      "elapsedMs": 1.661493,
+      "drawMs": 0.56195
+    },
+    {
+      "elapsedMs": 1.641455,
+      "drawMs": 0.5718080000000001
+    },
+    {
+      "elapsedMs": 1.660498,
+      "drawMs": 0.5771529999999999
+    },
+    {
+      "elapsedMs": 1.680225,
+      "drawMs": 0.579786
+    },
+    {
+      "elapsedMs": 1.694454,
+      "drawMs": 0.5748759999999999
+    },
+    {
+      "elapsedMs": 1.63044,
+      "drawMs": 0.560465
+    },
+    {
+      "elapsedMs": 1.569022,
+      "drawMs": 0.542882
+    },
+    {
+      "elapsedMs": 1.717552,
+      "drawMs": 0.586651
+    },
+    {
+      "elapsedMs": 1.6685910000000002,
+      "drawMs": 0.569542
+    },
+    {
+      "elapsedMs": 1.668072,
+      "drawMs": 0.5712
+    },
+    {
+      "elapsedMs": 2.122551,
+      "drawMs": 0.682765
+    }
+  ],
+  "keys": [
+    {
+      "elapsedMs": 1.141977,
+      "drawMs": 0.497704
+    },
+    {
+      "elapsedMs": 1.203033,
+      "drawMs": 0.510923
+    },
+    {
+      "elapsedMs": 1.096697,
+      "drawMs": 0.496505
+    },
+    {
+      "elapsedMs": 1.167475,
+      "drawMs": 0.5060330000000001
+    },
+    {
+      "elapsedMs": 1.105055,
+      "drawMs": 0.492873
+    },
+    {
+      "elapsedMs": 1.11739,
+      "drawMs": 0.502328
+    },
+    {
+      "elapsedMs": 1.142215,
+      "drawMs": 0.503788
+    },
+    {
+      "elapsedMs": 1.093664,
+      "drawMs": 0.49028099999999997
+    },
+    {
+      "elapsedMs": 1.182311,
+      "drawMs": 0.5030800000000001
+    },
+    {
+      "elapsedMs": 1.140332,
+      "drawMs": 0.51221
+    },
+    {
+      "elapsedMs": 1.090073,
+      "drawMs": 0.49508199999999997
+    },
+    {
+      "elapsedMs": 1.1131540000000002,
+      "drawMs": 0.499923
+    },
+    {
+      "elapsedMs": 1.155453,
+      "drawMs": 0.5181129999999999
+    },
+    {
+      "elapsedMs": 1.193336,
+      "drawMs": 0.534863
+    },
+    {
+      "elapsedMs": 1.154686,
+      "drawMs": 0.540027
+    },
+    {
+      "elapsedMs": 1.222108,
+      "drawMs": 0.532281
+    },
+    {
+      "elapsedMs": 1.193822,
+      "drawMs": 0.537472
+    },
+    {
+      "elapsedMs": 1.256566,
+      "drawMs": 0.543528
+    },
+    {
+      "elapsedMs": 1.161772,
+      "drawMs": 0.527818
+    },
+    {
+      "elapsedMs": 1.904818,
+      "drawMs": 0.776307
+    }
+  ],
+  "scroll": [
+    {
+      "elapsedMs": 9.334933999999999,
+      "drawMs": 0.554963
+    },
+    {
+      "elapsedMs": 4.655178,
+      "drawMs": 0.5343840000000001
+    },
+    {
+      "elapsedMs": 4.9033180000000005,
+      "drawMs": 0.523169
+    },
+    {
+      "elapsedMs": 4.518527,
+      "drawMs": 0.530056
+    },
+    {
+      "elapsedMs": 4.778708,
+      "drawMs": 0.5406799999999999
+    },
+    {
+      "elapsedMs": 4.4529369999999995,
+      "drawMs": 0.521604
+    },
+    {
+      "elapsedMs": 4.5664750000000005,
+      "drawMs": 0.551237
+    },
+    {
+      "elapsedMs": 5.37676,
+      "drawMs": 0.586552
+    },
+    {
+      "elapsedMs": 5.159004,
+      "drawMs": 0.5666869999999999
+    },
+    {
+      "elapsedMs": 4.7072449999999995,
+      "drawMs": 0.5462480000000001
+    },
+    {
+      "elapsedMs": 5.461809,
+      "drawMs": 0.563974
+    },
+    {
+      "elapsedMs": 4.678194,
+      "drawMs": 0.553616
+    },
+    {
+      "elapsedMs": 4.815918,
+      "drawMs": 0.533528
+    },
+    {
+      "elapsedMs": 4.574199,
+      "drawMs": 0.553378
+    },
+    {
+      "elapsedMs": 4.700656,
+      "drawMs": 0.544128
+    },
+    {
+      "elapsedMs": 4.558946000000001,
+      "drawMs": 0.560758
+    },
+    {
+      "elapsedMs": 4.823027,
+      "drawMs": 0.5481429999999999
+    },
+    {
+      "elapsedMs": 4.65482,
+      "drawMs": 0.556985
+    },
+    {
+      "elapsedMs": 4.687976,
+      "drawMs": 0.532326
+    },
+    {
+      "elapsedMs": 5.0503290000000005,
+      "drawMs": 0.571797
+    },
+    {
+      "elapsedMs": 4.7853710000000005,
+      "drawMs": 0.536472
+    },
+    {
+      "elapsedMs": 4.560648,
+      "drawMs": 0.5650609999999999
+    },
+    {
+      "elapsedMs": 5.693047,
+      "drawMs": 0.7378
+    },
+    {
+      "elapsedMs": 6.602339,
+      "drawMs": 0.603092
+    },
+    {
+      "elapsedMs": 5.289615,
+      "drawMs": 0.653914
+    },
+    {
+      "elapsedMs": 7.136179,
+      "drawMs": 1.017163
+    },
+    {
+      "elapsedMs": 5.8367510000000005,
+      "drawMs": 0.560527
+    },
+    {
+      "elapsedMs": 4.592509,
+      "drawMs": 0.5299560000000001
+    },
+    {
+      "elapsedMs": 4.501288,
+      "drawMs": 0.515091
+    },
+    {
+      "elapsedMs": 4.373858,
+      "drawMs": 0.525286
+    },
+    {
+      "elapsedMs": 4.516257,
+      "drawMs": 0.5011129999999999
+    },
+    {
+      "elapsedMs": 4.316333,
+      "drawMs": 0.5291920000000001
+    },
+    {
+      "elapsedMs": 4.391319,
+      "drawMs": 0.500456
+    },
+    {
+      "elapsedMs": 4.687608,
+      "drawMs": 0.573431
+    },
+    {
+      "elapsedMs": 4.700047,
+      "drawMs": 0.542065
+    },
+    {
+      "elapsedMs": 4.557808,
+      "drawMs": 0.547025
+    },
+    {
+      "elapsedMs": 4.768093,
+      "drawMs": 0.551105
+    },
+    {
+      "elapsedMs": 4.5445709999999995,
+      "drawMs": 0.540772
+    },
+    {
+      "elapsedMs": 4.610742,
+      "drawMs": 0.549274
+    },
+    {
+      "elapsedMs": 4.665858999999999,
+      "drawMs": 0.574222
+    },
+    {
+      "elapsedMs": 4.9938839999999995,
+      "drawMs": 0.581305
+    },
+    {
+      "elapsedMs": 4.647637,
+      "drawMs": 0.5303610000000001
+    },
+    {
+      "elapsedMs": 4.643523,
+      "drawMs": 0.5575410000000001
+    },
+    {
+      "elapsedMs": 6.430112,
+      "drawMs": 0.8606360000000001
+    },
+    {
+      "elapsedMs": 4.989859,
+      "drawMs": 0.552454
+    },
+    {
+      "elapsedMs": 5.145341,
+      "drawMs": 0.57102
+    },
+    {
+      "elapsedMs": 4.761951000000001,
+      "drawMs": 0.5671320000000001
+    },
+    {
+      "elapsedMs": 4.6701429999999995,
+      "drawMs": 0.553629
+    },
+    {
+      "elapsedMs": 4.742119000000001,
+      "drawMs": 0.591519
+    },
+    {
+      "elapsedMs": 4.764946,
+      "drawMs": 0.593322
+    },
+    {
+      "elapsedMs": 5.147846,
+      "drawMs": 0.618581
+    },
+    {
+      "elapsedMs": 4.957198,
+      "drawMs": 0.5920740000000001
+    },
+    {
+      "elapsedMs": 5.300749000000001,
+      "drawMs": 0.5791280000000001
+    },
+    {
+      "elapsedMs": 4.5152090000000005,
+      "drawMs": 0.540182
+    },
+    {
+      "elapsedMs": 4.576973,
+      "drawMs": 0.5570860000000001
+    },
+    {
+      "elapsedMs": 4.678357999999999,
+      "drawMs": 0.576274
+    },
+    {
+      "elapsedMs": 4.764474,
+      "drawMs": 0.5756789999999999
+    },
+    {
+      "elapsedMs": 4.633113000000001,
+      "drawMs": 0.58825
+    },
+    {
+      "elapsedMs": 4.992904,
+      "drawMs": 0.6199950000000001
+    },
+    {
+      "elapsedMs": 5.459994999999999,
+      "drawMs": 0.699633
+    },
+    {
+      "elapsedMs": 5.0572550000000005,
+      "drawMs": 0.553857
+    },
+    {
+      "elapsedMs": 4.805203,
+      "drawMs": 0.574082
+    },
+    {
+      "elapsedMs": 5.108652,
+      "drawMs": 0.586506
+    },
+    {
+      "elapsedMs": 5.139742,
+      "drawMs": 0.5994280000000001
+    },
+    {
+      "elapsedMs": 5.0653060000000005,
+      "drawMs": 0.563833
+    },
+    {
+      "elapsedMs": 4.707687,
+      "drawMs": 0.57073
+    },
+    {
+      "elapsedMs": 5.032534,
+      "drawMs": 0.585902
+    },
+    {
+      "elapsedMs": 4.580326,
+      "drawMs": 0.5550280000000001
+    },
+    {
+      "elapsedMs": 4.76574,
+      "drawMs": 0.554839
+    },
+    {
+      "elapsedMs": 5.774900000000001,
+      "drawMs": 0.659488
+    },
+    {
+      "elapsedMs": 4.934346,
+      "drawMs": 0.559868
+    },
+    {
+      "elapsedMs": 4.837541,
+      "drawMs": 0.596084
+    },
+    {
+      "elapsedMs": 5.026681,
+      "drawMs": 0.5799289999999999
+    },
+    {
+      "elapsedMs": 4.590932,
+      "drawMs": 0.543814
+    },
+    {
+      "elapsedMs": 4.5768830000000005,
+      "drawMs": 0.525455
+    },
+    {
+      "elapsedMs": 4.607378,
+      "drawMs": 0.562414
+    },
+    {
+      "elapsedMs": 4.693053,
+      "drawMs": 0.557808
+    },
+    {
+      "elapsedMs": 4.551862,
+      "drawMs": 0.571341
+    },
+    {
+      "elapsedMs": 4.760468,
+      "drawMs": 0.5602940000000001
+    },
+    {
+      "elapsedMs": 4.623772,
+      "drawMs": 0.605333
+    },
+    {
+      "elapsedMs": 4.757252,
+      "drawMs": 0.5515519999999999
+    },
+    {
+      "elapsedMs": 4.6132159999999995,
+      "drawMs": 0.5655060000000001
+    },
+    {
+      "elapsedMs": 4.6877510000000004,
+      "drawMs": 0.5426880000000001
+    },
+    {
+      "elapsedMs": 4.64377,
+      "drawMs": 0.5461360000000001
+    },
+    {
+      "elapsedMs": 4.411149,
+      "drawMs": 0.5387700000000001
+    },
+    {
+      "elapsedMs": 4.542377,
+      "drawMs": 0.541481
+    },
+    {
+      "elapsedMs": 4.3771770000000005,
+      "drawMs": 0.534399
+    },
+    {
+      "elapsedMs": 4.636075,
+      "drawMs": 0.609505
+    },
+    {
+      "elapsedMs": 5.304511,
+      "drawMs": 0.717702
+    },
+    {
+      "elapsedMs": 6.271269,
+      "drawMs": 0.62239
+    },
+    {
+      "elapsedMs": 5.460384,
+      "drawMs": 0.6321789999999999
+    },
+    {
+      "elapsedMs": 4.99731,
+      "drawMs": 0.578025
+    },
+    {
+      "elapsedMs": 4.683901,
+      "drawMs": 0.566898
+    },
+    {
+      "elapsedMs": 4.994841,
+      "drawMs": 0.60534
+    },
+    {
+      "elapsedMs": 4.597114,
+      "drawMs": 0.5291659999999999
+    },
+    {
+      "elapsedMs": 4.620567,
+      "drawMs": 0.608189
+    },
+    {
+      "elapsedMs": 5.0811720000000005,
+      "drawMs": 0.602527
+    },
+    {
+      "elapsedMs": 4.794148,
+      "drawMs": 0.556785
+    },
+    {
+      "elapsedMs": 4.617815,
+      "drawMs": 0.583971
+    },
+    {
+      "elapsedMs": 2.986987,
+      "drawMs": 0.610616
+    }
+  ],
+  "tokens": 80,
+  "inputAcknowledged": 20,
+  "streamMs": 1604.132054,
+  "tokensPerSecond": 49.87120592753893,
+  "coldInAppMs": 173.114587,
+  "idleRssMiB": 37.55859375,
+  "paintCallbacks": 405,
+  "processMs": 2273.123988,
+  "measurement": "gpui 0.2.2 hidden-window CPU scene draw completion and paint callback; no presentation",
+  "coldLaunchMs": 182.33001697063446,
+  "processWallMs": 2307.1816210746765,
+  "run": 2
+}
