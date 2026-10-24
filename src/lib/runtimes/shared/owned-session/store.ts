@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { bindControlledTaskSession } from '@/lib/mcp/task-execution-admission';
 import {
@@ -163,7 +164,11 @@ export function createOwnedSessionStore(
     try {
       return await withSurfaceLock(`${surfacePrefix}${id}`, () => withOwnedArtifactAdmission(root, () => (
         launchAdmitted(request, repoPath, repo, id, executionPolicy, prompt)
-      )));
+      ), (attempt, cause) => {
+        if (request.laneId) recordLaneEvent(request.laneId, 'artifact_admission_retry', 'system', {
+          packetId: request.packetId, runtime: runtimeId, attempt, cause,
+        });
+      }));
     } catch (error) {
       if (error instanceof OwnedArtifactAdmissionError) return {
         ok: false, runtime: runtimeId, surfaceId: `${surfacePrefix}${id}`, note: error.message, sideEffect: error.sideEffect,

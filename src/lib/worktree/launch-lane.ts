@@ -31,17 +31,29 @@ export function captureLaunchLaneValidation(opts: WorktreeLaunchOptions): ((work
   return (worktree) => sqlite.transaction(() => {
     const lane = exactLane(worktree.path);
     const anchorPresent = sqlite.prepare('SELECT id FROM lane_events WHERE lane_id = ? AND rowid = ?').pluck().get(laneId, anchor.sequence);
-    const rows = sqlite.prepare('SELECT id, rowid AS sequence, verb, actor, payload_json FROM lane_events WHERE lane_id = ? AND rowid > ? ORDER BY rowid LIMIT ?')
-      .all(laneId, anchor.sequence, EVENT_LIMIT + 1) as StoredEvent[];
-    if (anchorPresent !== anchor.id || rows.length > EVENT_LIMIT) throw new Error(INVALID_LANE);
-    const suffix = rows.map((event) => ({ ...event, payload: JSON.parse(event.payload_json) as Record<string, unknown> }));
-    // Dependency, manifest and preparation-timing receipts do not grant or revoke launch
-    // authority. Every other intervening decision, binding, reservation or new
-    // attempt invalidates it.
-    const decisions = suffix.filter((event) => !(event.actor === 'system'
-      && (event.verb === 'dependency_materialized' || event.verb === 'worktree_preparation_timing'
-        || event.verb === 'workspace_manifest_applied' || event.verb === 'workspace_manifest_failed'
-        || event.verb === 'workspace_manifest_skipped')));
+    if (anchorPresent !== anchor.id) throw new Error(INVALID_LANE);
+    const decisions: Array<StoredEvent & { payload: Record<string, unknown> }> = [];
+    let cursor = anchor.sequence;
+    for (;;) {
+      const rows = sqlite.prepare('SELECT id, rowid AS sequence, verb, actor, payload_json FROM lane_events WHERE lane_id = ? AND rowid > ? ORDER BY rowid LIMIT ?')
+        .all(laneId, cursor, EVENT_LIMIT) as StoredEvent[];
+      // Page through progress receipts without bounding the duration of a healthy
+      // queue wait. Keep every decision, including any in later pages.
+      for (const row of rows) {
+        const event = { ...row, payload: JSON.parse(row.payload_json) as Record<string, unknown> };
+        const progress = event.actor === 'system'
+          && (event.verb === 'dependency_materialized' || event.verb === 'worktree_preparation_timing'
+            || event.verb === 'workspace_manifest_applied' || event.verb === 'workspace_manifest_failed'
+            || event.verb === 'workspace_manifest_skipped'
+            || event.verb === 'worktree_provision_queued' || event.verb === 'worktree_provision_started'
+            || (event.verb === 'update' && (event.payload.eventLabel === 'worktree_provision_queued'
+              || event.payload.eventLabel === 'worktree_provision_started')));
+        if (!progress) decisions.push(event);
+        if (decisions.length > 2) throw new Error(INVALID_LANE);
+      }
+      if (rows.length < EVENT_LIMIT) break;
+      cursor = rows[rows.length - 1].sequence;
+    }
     if (lane.status === 'launching' && decisions.length === 0) return;
     const [wedge, transition] = decisions;
     if (lane.status !== 'awaiting_orchestrator' || lane.lastEventLabel !== 'launch_stalled'

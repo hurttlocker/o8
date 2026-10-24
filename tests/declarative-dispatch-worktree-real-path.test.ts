@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -15,6 +16,23 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+const queueProbe = vi.hoisted(() => ({ entered: 0 }));
+const artifactRace = vi.hoisted(() => ({ file: '', reads: 0, continuous: false }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    lstat: async (...args: Parameters<typeof actual.lstat>) => {
+      if (String(args[0]) === artifactRace.file
+        && (++artifactRace.reads === 2 || (artifactRace.continuous && artifactRace.reads % 2 === 0))) {
+        await actual.appendFile(artifactRace.file, 'writer update\n');
+      }
+      return actual.lstat(...args);
+    },
+  };
+});
 
 const readinessBoundary = vi.hoisted(() => ({ real: false }));
 
@@ -66,6 +84,7 @@ vi.mock('@/lib/worktree', async (importOriginal) => {
     prepareLaunchWorktree: async (
       options: Parameters<typeof actual.prepareLaunchWorktree>[0],
     ) => {
+      queueProbe.entered += 1;
       if (provisioningRace.enabled) {
         provisioningRace.provisioningEntered = true;
         while (!provisioningRace.releaseProvisioning) {
@@ -364,6 +383,164 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]));
     const captureAfterFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     expect(captureAfterFailure).toEqual(captureBeforeFailure);
+  }, 120_000);
+
+  it('queues four dispatches behind a live root owner beyond five minutes, then launches each packet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick }, lanes, leases, controlPlane] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
+      import('@/lib/orchestrator/workspace-lifecycle-lease'), import('@/lib/orchestrator/control-plane'),
+    ]);
+    const packets = Array.from({ length: 4 }, (_, index) => packet(repoPath, `pkt-root-queue-${index}`));
+    const initial = { ...await mission(repoPath, packets[0]), packets };
+    controlPlane.writeOrchestratorControlPlaneState(initial);
+    const rootKey = createHash('sha256').update(realpathSync(repoPath)).digest('hex');
+    const owner = await leases.acquireWorkspaceLifecycleLease(`managed-worktree-root:${rootKey}`);
+    queueProbe.entered = 0;
+    const dispatches = packets.map((target) => runDispatchTick({ ...initial, packets: [target] }, {
+      launchBudget: { maxLaunches: 1 },
+    }));
+    let queuedOrder: string[] = [];
+    const clock = Date.now.bind(Date);
+    let dateSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await waitFor(() => queueProbe.entered === 4 ? true : null, 'four provisioning requests');
+      await waitFor(() => {
+        const waiting = controlPlane.reconcileOrchestratorControlPlaneState(initial).packets;
+        return waiting.every((target) => target.blockedReason?.startsWith('Queued for provisioning')) ? waiting : null;
+      }, 'visible provisioning queue');
+      const waiting = controlPlane.reconcileOrchestratorControlPlaneState(initial).packets;
+      queuedOrder = [...waiting].sort((left, right) =>
+        Number(left.blockedReason!.match(/position (\d+)/)![1])
+        - Number(right.blockedReason!.match(/position (\d+)/)![1])).map((target) => target.id);
+      expect(waiting.map((target) => Number(target.blockedReason!.match(/position (\d+)/)![1])).sort()).toEqual([1, 2, 3, 4]);
+      const waitingLane = lanes.findLatestLaneByPacket(packets[0].id)!;
+      for (let heartbeat = 0; heartbeat < 501; heartbeat += 1) {
+        lanes.appendEvent(waitingLane.id, 'worktree_provision_queued', 'system', { packetId: packets[0].id, position: 1 });
+      }
+      dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock() + 6 * 60_000);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } finally {
+      dateSpy?.mockRestore();
+      leases.releaseWorkspaceLifecycleLease(owner);
+    }
+    const results = await Promise.all(dispatches);
+    const { getSqlite } = await import('@/lib/db');
+    const startedOrder = getSqlite().prepare(`
+      SELECT payload_json FROM lane_events WHERE verb = 'worktree_provision_started' ORDER BY rowid
+    `).all() as Array<{ payload_json: string }>;
+    expect(startedOrder.map((event) => JSON.parse(event.payload_json).packetId)
+      .filter((id: string) => packets.some((target) => target.id === id))).toEqual(queuedOrder);
+    expect(getSqlite().prepare('SELECT COUNT(*) FROM workspace_provision_queue').pluck().get()).toBe(0);
+    for (const [index, result] of results.entries()) {
+      const lane = lanes.findLatestLaneByPacket(packets[index].id)!;
+      const events = lanes.getLaneEvents(lane.id, 200);
+      expect(result.packets[0].status, result.packets[0].blockedReason ?? undefined).toBe('launching');
+      expect(events.some((event) => event.verb === 'worktree_provision_failed')).toBe(false);
+      expect(events.some((event) => event.payload.eventLabel === 'session_launched')).toBe(true);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ verb: 'worktree_provision_queued', payload: expect.objectContaining({
+          packetId: packets[index].id, position: expect.any(Number),
+        }) }),
+      ]));
+    }
+  }, 120_000);
+
+  it('retries changing artifact accounting before spawning and records the admission cause', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    mkdirSync(ownedRoot, { recursive: true });
+    artifactRace.file = join(ownedRoot, 'active-writer.log');
+    artifactRace.reads = 0;
+    writeFileSync(artifactRace.file, 'initial writer output\n');
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick }, lanes] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
+    ]);
+    const packetId = 'pkt-artifact-admission-retry';
+    const before = existsSync(capturePath) ? readFileSync(capturePath, 'utf8').trim().split('\n').length : 0;
+    try {
+      const result = await runDispatchTick(await mission(repoPath, packet(repoPath, packetId)), {
+        launchBudget: { maxLaunches: 1 },
+      });
+      const lane = lanes.findLatestLaneByPacket(packetId)!;
+      expect(result.packets[0].status, result.packets[0].blockedReason ?? undefined).toBe('launching');
+      expect(lanes.getLaneEvents(lane.id, 200)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ verb: 'artifact_admission_retry', payload: expect.objectContaining({
+          attempt: 1, cause: expect.stringContaining('artifact accounting changed'),
+        }) }),
+      ]));
+      await waitFor(() => readFileSync(capturePath, 'utf8').trim().split('\n').length === before + 1 ? true : null,
+        'one admitted spawn');
+      expect(readFileSync(artifactRace.file, 'utf8')).toContain('writer update');
+    } finally {
+      rmSync(artifactRace.file, { force: true });
+      artifactRace.file = '';
+    }
+  }, 120_000);
+
+  it('stops after three admission retries when the writer never settles, without spawning or deleting evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    mkdirSync(ownedRoot, { recursive: true });
+    artifactRace.file = join(ownedRoot, 'continuous-writer.log');
+    artifactRace.reads = 0;
+    artifactRace.continuous = true;
+    writeFileSync(artifactRace.file, 'initial writer output\n');
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick }, lanes] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
+    ]);
+    const packetId = 'pkt-artifact-admission-bounded';
+    const before = existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '';
+    try {
+      const result = await runDispatchTick(await mission(repoPath, packet(repoPath, packetId)), {
+        launchBudget: { maxLaunches: 1 },
+      });
+      const lane = lanes.findLatestLaneByPacket(packetId)!;
+      expect(result.packets[0].status).toBe('blocked');
+      expect(result.packets[0].blockedReason).toContain('artifact accounting changed');
+      expect(lanes.getLaneEvents(lane.id, 200).filter((event) => event.verb === 'artifact_admission_retry')
+        .map((event) => event.payload.attempt)).toEqual([1, 2, 3]);
+      expect(existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '').toBe(before);
+      expect(readFileSync(artifactRace.file, 'utf8').match(/writer update/g)).toHaveLength(4);
+    } finally {
+      rmSync(artifactRace.file, { force: true });
+      artifactRace.file = '';
+      artifactRace.continuous = false;
+    }
+  }, 120_000);
+
+  it('retries a busy artifact namespace before launch', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick }, lanes, { withOwnedArtifactRootLock }] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
+      import('@/lib/runtimes/shared/owned-session/artifact-admission'),
+    ]);
+    const packetId = 'pkt-busy-artifact-namespace';
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const held = withOwnedArtifactRootLock(ownedRoot, () => new Promise<void>((resolve) => { release = resolve; entered(); }));
+    await ready;
+    let finished = false;
+    const dispatch = runDispatchTick(await mission(repoPath, packet(repoPath, packetId)), { launchBudget: { maxLaunches: 1 } })
+      .then((result) => { finished = true; return result; });
+    try {
+      await waitFor(() => {
+        const lane = lanes.findLatestLaneByPacket(packetId);
+        return finished || (lane && lanes.getLaneEvents(lane.id, 200).some((event) => event.verb === 'artifact_admission_retry')) ? true : null;
+      }, 'artifact namespace retry');
+    } finally {
+      release();
+      await held;
+    }
+    const result = await dispatch;
+    expect(result.packets[0].status, result.packets[0].blockedReason ?? undefined).toBe('launching');
   }, 120_000);
 
   it('records a failed backend handoff on the real declarative packet lane and never spawns', async () => {

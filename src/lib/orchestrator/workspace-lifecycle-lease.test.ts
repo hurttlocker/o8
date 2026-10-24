@@ -14,7 +14,7 @@ const hold = process.env.O8_LIFECYCLE_HOLD === '1';
 const imported = await import('./src/lib/orchestrator/lifecycle-mutation-lock.ts');
 const { withPacketLifecycleMutationLock } = imported.default ?? imported;
 process.stdout.write('O8_LIFECYCLE_ATTEMPT\n');
-await withPacketLifecycleMutationLock(packetId, async ({ contended }) => {
+const enter = async (contended) => {
   process.stdout.write('O8_LIFECYCLE_ENTERED ' + String(contended) + '\n');
   if (hold) {
     await new Promise((resolve) => {
@@ -22,15 +22,23 @@ await withPacketLifecycleMutationLock(packetId, async ({ contended }) => {
       process.stdin.resume();
     });
   }
-});
+};
+if (process.env.O8_LIFECYCLE_QUEUE === '1') {
+  const queue = await import('./src/lib/worktree/provision-queue.ts');
+  await (queue.default ?? queue).withWorktreeProvisionQueue(packetId, (position) => {
+    process.stdout.write('O8_QUEUE_POSITION ' + position + '\n');
+  }, () => enter(true));
+} else {
+  await withPacketLifecycleMutationLock(packetId, ({ contended }) => enter(contended));
+}
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
 `;
 
-function launch(dataDir: string, hold: boolean): ChildProcessWithoutNullStreams {
-  const command = resolveTsxProcess(['--eval', childScript]);
+function launch(dataDir: string, hold: boolean, queued = false): ChildProcessWithoutNullStreams {
+  const command = resolveTsxProcess(['--conditions=react-server', '--eval', childScript]);
   return spawn(command.file, command.args, {
     cwd: process.cwd(),
     env: {
@@ -39,6 +47,7 @@ function launch(dataDir: string, hold: boolean): ChildProcessWithoutNullStreams 
       CORTEX_IDE_DATA_DIR: dataDir,
       O8_LIFECYCLE_PACKET: 'packet-cross-process',
       O8_LIFECYCLE_HOLD: hold ? '1' : '0',
+      O8_LIFECYCLE_QUEUE: queued ? '1' : '0',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -127,4 +136,53 @@ describe('cross-process workspace lifecycle lease', () => {
     expect(await waitForMarker(replacement)).toBe(true);
     expect(await waitForExit(replacement)).toBe(0);
   }, 20_000);
+
+  it('keeps FIFO provisioning across processes and reclaims an owner that dies with its ticket', async () => {
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-provision-queue-crash-'));
+    roots.push(dataDir);
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const queuedChild = (hold: boolean) => {
+      const child = launch(dataDir, hold, true);
+      children.push(child);
+      let output = '';
+      child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+      return { child, output: () => output };
+    };
+    const waitForPosition = async (read: () => string, position: number) => {
+      const deadline = Date.now() + 20_000;
+      while (!read().includes(`O8_QUEUE_POSITION ${position}\n`)) {
+        if (Date.now() > deadline) throw new Error(`Queue position ${position} was not reported: ${read()}`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    try {
+      const owner = queuedChild(true);
+      expect(await waitForMarker(owner.child)).toBe(true);
+      const second = queuedChild(true);
+      await waitForPosition(second.output, 1);
+      const third = queuedChild(false);
+      await waitForPosition(third.output, 2);
+      expect(second.output()).not.toContain('O8_LIFECYCLE_ENTERED');
+      expect(third.output()).not.toContain('O8_LIFECYCLE_ENTERED');
+      const secondEntered = waitForMarker(second.child);
+      const ownerExit = waitForExit(owner.child);
+      owner.child.kill('SIGKILL');
+      await ownerExit;
+      expect(await secondEntered).toBe(true);
+      await waitForPosition(third.output, 1);
+      expect(third.output()).not.toContain('O8_LIFECYCLE_ENTERED');
+      const thirdEntered = waitForMarker(third.child);
+      const secondExit = waitForExit(second.child);
+      second.child.stdin.end('release\n');
+      expect(await secondExit).toBe(0);
+      expect(await thirdEntered).toBe(true);
+      expect(await waitForExit(third.child)).toBe(0);
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        await waitForExit(child);
+      }
+    }
+  }, 90_000);
+
 });

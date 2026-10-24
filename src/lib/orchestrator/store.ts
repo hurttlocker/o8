@@ -4,7 +4,7 @@ import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
-import { preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
+import { applyLanePendingStatus, preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizePacketAlignmentResolvedAt } from '@/lib/orchestrator/packet-alignment-normalize';
@@ -1018,7 +1018,7 @@ export function reconcileOrchestratorMissionState(
       const ds = domainLane.status;
       if (ds === 'reviewing' && runtimeTruthHasActiveWriter(runtime)) { next.status = 'running'; return next; }
       if (ds === 'reviewing') { next.status = 'awaiting_review'; return next; }
-      if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
+      if (applyLanePendingStatus(next, domainLane)) return next;
       if (ds === 'completed') { applyLaneCompletedRelease(next); return next; }
       if (ds === 'archived') { next.status = 'archived'; next.queueState = 'held'; return next; }
       if (ds === 'recovering') { next.status = 'recovering'; next.blockedReason = domainLane.lastEventLabel ?? 'Lane recovering'; return next; }
