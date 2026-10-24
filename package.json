@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=22.0.0 <23.0.0"
   },
-  "packageManager": "npm@11.8.0",
+  "packageManager": "npm@11.21.1",
   "o8DependencyClone": {
     "lifecycleInputs": ["scripts/postinstall.mjs"]
   },

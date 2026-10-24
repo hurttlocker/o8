@@ -49,7 +49,7 @@ jobs:
       # npm 10, whose `npm ci` validator rejects npm-11 lock graphs with
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - uses: actions/cache/restore@v4
         id: typecheck-cache
@@ -89,7 +89,7 @@ jobs:
       # npm 10, whose `npm ci` validator rejects npm-11 lock graphs with
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - uses: actions/cache/restore@v4
         id: lint-cache
@@ -123,7 +123,7 @@ jobs:
       # npm 10, whose `npm ci` validator rejects npm-11 lock graphs with
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - if: matrix.shard == 1
         run: npm run test:classification:check
@@ -184,7 +184,7 @@ jobs:
           HEAD_REF: ${{ github.event.merge_group.head_sha || github.sha }}
         run: node scripts/ci/resource-owning-changed.mjs "$BASE_REF" "$HEAD_REF"
       - if: steps.select.outputs.count != '0'
-        run: npm install -g npm@11
+        run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: steps.select.outputs.count != '0'
         run: npm ci --prefer-offline
       - name: Install content-search prerequisite
@@ -228,7 +228,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - name: Install content-search prerequisite
         run: |
@@ -314,7 +314,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - name: Audit root dependencies
         run: npm audit --audit-level=high
         continue-on-error: true
@@ -352,7 +352,7 @@ jobs:
       # npm 10, whose `npm ci` validator rejects npm-11 lock graphs with
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - name: Merge-requires-review governance gate
         run: timeout --signal=KILL 300 env CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
@@ -378,7 +378,7 @@ jobs:
       # npm 10, whose `npm ci` validator rejects npm-11 lock graphs with
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
-      - run: npm install -g npm@11
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
       - run: npm run build
         env:
