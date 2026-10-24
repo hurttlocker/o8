@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { pullRequestListQuery } from '@/lib/github-client';
+import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
 import type { PRHoverDetail } from './types';
 
 export interface ActivityPrHoverStatus {
@@ -32,19 +33,6 @@ class PrHoverDeferredError extends Error {
   }
 }
 
-function retryAt(response: Response) {
-  const now = Date.now();
-  const retry = response.headers.get('retry-after');
-  if (retry) {
-    const seconds = Number(retry);
-    if (Number.isFinite(seconds) && seconds > 0) return now + seconds * 1000;
-    const date = Date.parse(retry);
-    if (Number.isFinite(date) && date > now) return date;
-  }
-  const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-  return reset > now ? reset : now + 300_000;
-}
-
 function hoverQuery(repo: string, number: number | null) {
   const queryKey = ['gh', repo, 'activity-pr-hover', number];
   return {
@@ -53,7 +41,8 @@ function hoverQuery(repo: string, number: number | null) {
     queryFn: async ({ signal }: { signal: AbortSignal }): Promise<PRHoverDetail> => {
       if (!repo || number === null) throw new Error('No pull request selected');
       const response = await fetch(`/api/panel/pr?repo=${encodeURIComponent(repo)}&number=${number}`, { signal });
-      if (response.status === 403 || response.status === 429) throw new PrHoverDeferredError(response.status, retryAt(response));
+      const retryAt = githubQuotaDeadline(response);
+      if (retryAt !== null) throw new PrHoverDeferredError(response.status, retryAt);
       if (!response.ok) throw new Error(`PR detail request failed (${response.status})`);
       const detail: unknown = await response.json();
       if (!validDetail(detail, repo, number)) throw new Error('Invalid PR detail response');
