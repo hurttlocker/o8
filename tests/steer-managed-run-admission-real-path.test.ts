@@ -21,6 +21,7 @@ const dataDir = mkdtempSync(join(tmpdir(), 'o8-steer-run-admission-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 const { closeDb } = await import('@/lib/db');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -59,9 +60,9 @@ function fixture(operatorStopped = false) {
   return { packet, lane, sessionKey };
 }
 
-function request(path: string, body: unknown, method = 'POST') {
+function request(path: string, body: unknown, method = 'POST', token = getOrCreateWsToken()) {
   return new NextRequest(`http://localhost${path}`, { method, headers: {
-    authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json',
+    authorization: `Bearer ${token}`, 'content-type': 'application/json',
   }, body: JSON.stringify(body) });
 }
 function steer(packetId: string) {
@@ -69,18 +70,52 @@ function steer(packetId: string) {
     packetId, message: 'Run the remaining verification', idempotencyKey: `steer-${packetId}`,
   }));
 }
-function register(packet: OrchestratorPacket, suffix = 'first') {
+function register(packet: OrchestratorPacket, suffix = 'first', token = getOrCreateWsToken()) {
   const id = `run${sequence}${suffix}`;
   return runsRoute.POST(request('/api/panel/managed-runs', {
     id, session: `cortex-run-${id}`, command: 'node --version',
     cwd: packet.workspaceTargetPath, packetId: packet.id, laneId: packet.lane?.laneId,
-  }));
+  }, 'POST', token));
 }
 
 beforeEach(() => perform.mockReset());
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('steered-turn managed-run admission through production routes', () => {
+  it('admits the steered packet worker through durable credentials and closes admission on exit', async () => {
+    const { packet, lane, sessionKey } = fixture();
+    const token = mintPacketWorkerToken(packet.id);
+    expect((await steer(packet.id)).status).toBe(200);
+    closeDb();
+    const admitted = await register(packet, 'worker', token);
+    expect(admitted.status, await admitted.clone().text()).toBe(200);
+    expect(findManagedRun(`run${sequence}worker`)).toMatchObject({ packetId: packet.id, status: 'running' });
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, exitCode: 0 });
+    const packetStatus = readOrchestratorControlPlaneState().packets.find(candidate => candidate.id === packet.id)!.status;
+    const refused = await register(packet, 'workerAfterExit', token);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      error: 'packet_not_accepting_managed_runs',
+      packetStatus,
+      message: expect.stringContaining(packetStatus),
+      hint: expect.stringContaining('rerun_with_feedback'),
+    });
+    expect(findManagedRun(`run${sequence}workerAfterExit`)).toBeNull();
+  });
+
+  it('gives a held worker a reset action without allowing registration', async () => {
+    const { packet } = fixture(true);
+    const response = await register(packet, 'heldWorker', mintPacketWorkerToken(packet.id));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      reason: 'packet_held',
+      packetStatus: 'awaiting_review',
+      message: expect.stringContaining('awaiting_review'),
+      hint: expect.stringContaining('reset'),
+    });
+    expect(findManagedRun(`run${sequence}heldWorker`)).toBeNull();
+  });
+
   it('admits a delayed steer after the previous turn exits', async () => {
     const { packet, lane, sessionKey } = fixture();
     perform.mockResolvedValueOnce({ ok: false, status: 'unavailable', reason: 'surface_not_ready' });

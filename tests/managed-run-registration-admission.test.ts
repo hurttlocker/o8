@@ -82,6 +82,17 @@ describe('packet-bound managed-run admission', () => {
     });
   });
 
+  it('names the recovery action when the packet no longer exists', async () => {
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    const response = await managedRunsRoute.POST(registerRequest('missing123'));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: 'packet_not_accepting_managed_runs', reason: 'packet_not_found', packetStatus: null,
+      message: expect.stringContaining('missing'), hint: expect.stringContaining('packet ID'),
+    });
+    expect(findManagedRun('missing123')).toBeNull();
+  });
+
   it('rejects a late registration after the packet hold is durable', async () => {
     writeOrchestratorControlPlaneState({
       ...createEmptyOrchestratorMissionState(),
@@ -98,6 +109,8 @@ describe('packet-bound managed-run admission', () => {
       error: 'packet_not_accepting_managed_runs',
       reason: 'packet_held',
       packetStatus: 'blocked',
+      message: expect.stringContaining('blocked'),
+      hint: expect.stringContaining('reset'),
     });
     expect(findManagedRun('held1234')).toBeNull();
   });
