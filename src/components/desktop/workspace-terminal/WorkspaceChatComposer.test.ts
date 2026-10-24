@@ -62,3 +62,18 @@ it('ignores a late upload from the old repository and prepares the new repositor
   expect(chat.sendText).not.toHaveBeenCalled(); await submit();
   expect(fetch).toHaveBeenCalledTimes(2); expect(vi.mocked(fetch).mock.calls[1][0]).toContain(encodeURIComponent('/fixture/retarget'));
 });
+it.each([true, false])('uses native sizing without forced reads when supported: %s', async nativeSizing => {
+  vi.stubGlobal('CSS', { supports: (property: string) => property === 'field-sizing' && nativeSizing });
+  const reads = vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get').mockReturnValue(52);
+  await render(); reads.mockClear();
+  const input = host.querySelector('textarea')!;
+  for (let index = 1; index <= 20; index++) await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'x'.repeat(index));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  console.info('[worker-input] native=%s keystrokes=20 forced-height-reads=%d', nativeSizing, reads.mock.calls.length);
+  expect(chat.setDraft).toHaveBeenCalledTimes(20);
+  expect(chat.setDraft).toHaveBeenLastCalledWith('x'.repeat(20));
+  expect(reads.mock.calls.length).toBe(nativeSizing ? 0 : 20);
+  reads.mockRestore();
+});

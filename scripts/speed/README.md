@@ -159,3 +159,20 @@ runs settle for 45 seconds before each measurement and record memory both before
 and after explicit collection. The 150 MB check uses settled idle RSS before collection and loaded RSS after
 collection; the receipt also retains the raw loaded RSS. `--entry=<bundle>` can measure an already-built baseline artifact.
 Keep the raw snapshots private, as with the other speed probes above.
+
+The streaming acceptance check runs the real dashboard with the same 300-entry,
+20 Hz fixture and three alternating windows for each producer count:
+
+```sh
+node scripts/speed/streaming-check.mjs --output=work/streaming-check --trace
+```
+
+It rejects main-thread medians of 100 ms/s or more, input p95 of 50 ms or more,
+censored inputs, stalled visible text, changed message order or scroll pinning,
+and a missing 150 ms input calibration. `--trace` adds separate CDP timeline and
+V8 profiles after the untraced latency windows. Keep these raw artifacts private.
+The fixture now uses a native loopback WebSocket through the runtime port
+resolver; DevTools frame injection added renderer work to the earlier probe.
+The composer probe acknowledges the first frame after its changed value was
+painted, without an additional wait frame. Compare revisions using the same
+probe version, and retain the original probe results separately.
