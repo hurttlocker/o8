@@ -5969,6 +5969,13 @@
       ]
     },
     {
+      "path": "tests/transcript-tab-reuse-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/transcript-visualizations-real-path.test.ts",
       "reasons": [
         "child-process",
