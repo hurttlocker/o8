@@ -38,10 +38,12 @@ describe('test data root cleanup', () => {
     const now = Date.now();
     for (const target of [staleLegacy, staleRun, recentRun, foreign]) mkdirSync(target);
     for (const target of [staleLegacy, staleRun, recentRun, foreign]) writeTestRunOwner(target);
-    writeFileSync(path.join(staleRun, TEST_RUN_OWNER_FILE), JSON.stringify({
-      pid: Number.MAX_SAFE_INTEGER,
-      startedAt: new Date(now - (25 * 60 * 60 * 1_000)).toISOString(),
-    }));
+    for (const target of [staleLegacy, staleRun, foreign]) {
+      writeFileSync(path.join(target, TEST_RUN_OWNER_FILE), JSON.stringify({
+        pid: Number.MAX_SAFE_INTEGER,
+        startedAt: new Date(now - (25 * 60 * 60 * 1_000)).toISOString(),
+      }));
+    }
     symlinkSync(external, linked);
     const stale = new Date(now - (25 * 60 * 60 * 1_000));
     for (const target of [staleLegacy, staleRun, foreign, linked]) utimesSync(target, stale, stale);

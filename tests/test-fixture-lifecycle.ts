@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -6,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -33,6 +34,11 @@ interface AttachedFixtureImage {
 
 export interface FixtureSweepReceipt {
   detachedImages: string[];
+  pendingDetachImages: string[];
+  pendingRemovalPaths: string[];
+  receiptPath: string;
+  skippedRetainedPaths: string[];
+  skippedOwnershipPaths: string[];
   reclaimedBytes: number;
   removedPaths: string[];
   retainedImages: string[];
@@ -125,9 +131,56 @@ async function readTestRunOwner(target: string): Promise<TestRunOwner | null> {
   }
 }
 
-async function hasLiveRunOwner(target: string): Promise<boolean> {
+type FixtureGuard = { fingerprint: string; reason: null | 'live' | 'retained' | 'ownership' };
+
+async function fixtureGuard(target: string): Promise<FixtureGuard> {
+  const held = (reason: FixtureGuard['reason']): FixtureGuard => ({ fingerprint: '', reason });
+  const identity = await lstat(target).catch(() => null);
+  if (!identity?.isDirectory() || identity.isSymbolicLink()) return held('ownership');
+  if (testRunRetainedAfterTimeout(target)) return held('retained');
+  const ownerPath = path.join(target, TEST_RUN_OWNER_FILE);
+  const before = await lstat(ownerPath).catch(() => null);
   const owner = await readTestRunOwner(target);
-  return owner ? isPidLive(owner.pid) : false;
+  const after = await lstat(ownerPath).catch(() => null);
+  if (!owner || !before || !after || before.dev !== after.dev || before.ino !== after.ino
+    || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) return held('ownership');
+  if (isPidLive(owner.pid)) return held('live');
+  const final = await lstat(target).catch(() => null);
+  if (!final?.isDirectory() || final.isSymbolicLink()
+    || final.dev !== identity.dev || final.ino !== identity.ino) return held('ownership');
+  if (testRunRetainedAfterTimeout(target)) return held('retained');
+  return {
+    fingerprint: JSON.stringify([identity.dev, identity.ino, before.dev, before.ino,
+      before.mtimeMs, before.ctimeMs, owner]),
+    reason: null,
+  };
+}
+
+// A dead outer run does not release evidence or a still-live nested fixture.
+async function nestedFixtureState(target: string): Promise<FixtureGuard> {
+  const snapshots: unknown[] = [];
+  try {
+    for (const entry of await readdir(target, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const child = path.join(target, entry.name);
+      const identity = await lstat(child);
+      if (!identity.isDirectory() || identity.isSymbolicLink()) return { fingerprint: '', reason: 'ownership' };
+      if (testRunRetainedAfterTimeout(child)) return { fingerprint: '', reason: 'retained' };
+      const marker = await lstat(path.join(child, TEST_RUN_OWNER_FILE)).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      });
+      const guard = marker ? await fixtureGuard(child) : { fingerprint: '', reason: null };
+      if (guard.reason) return guard;
+      const nested = await nestedFixtureState(child);
+      if (nested.reason) return nested;
+      snapshots.push([entry.name, identity.dev, identity.ino, guard.fingerprint, nested.fingerprint]);
+    }
+    snapshots.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return { fingerprint: createHash('sha256').update(JSON.stringify(snapshots)).digest('hex'), reason: null };
+  } catch {
+    return { fingerprint: '', reason: 'ownership' };
+  }
 }
 
 function pathIsInsideRoot(target: string, root: string): boolean {
@@ -224,7 +277,7 @@ async function imageIsOrphaned(
   thresholdMs: number,
 ): Promise<boolean> {
   const runRoot = enclosingRunRoot(parentDir, image.fixtureRoot);
-  if (runRoot && await hasLiveRunOwner(runRoot)) return false;
+  if (runRoot && (await fixtureGuard(runRoot)).reason) return false;
   const [imageIdentity, fixtureIdentity] = await Promise.all([
     lstat(image.imagePath).catch(() => null),
     lstat(image.fixtureRoot).catch(() => null),
@@ -236,6 +289,8 @@ async function detachOrphanedFixtureImages(
   parentDir: string,
   now: number,
   thresholdMs: number,
+  receipt: FixtureSweepReceipt,
+  persist: () => Promise<void>,
 ): Promise<{ detached: string[]; retained: string[]; inspectionFailed: boolean }> {
   if (process.platform !== 'darwin') return { detached: [], retained: [], inspectionFailed: false };
   let output: string;
@@ -252,27 +307,72 @@ async function detachOrphanedFixtureImages(
       retained.push(image.fixtureRoot);
       continue;
     }
-    if (!await imageIsOrphaned(parentDir, image, now, thresholdMs)) {
+    const imageIdentity = await lstat(image.imagePath).catch(() => null);
+    if (!imageIdentity?.isFile() || imageIdentity.isSymbolicLink()) {
       retained.push(image.fixtureRoot);
       continue;
     }
-    if (!await readTestRunOwner(ownershipRoot)) {
+    const runRoot = enclosingRunRoot(parentDir, image.fixtureRoot);
+    const scopes = [...new Set([ownershipRoot, ...(runRoot ? [runRoot] : [])])];
+    const authorize = async (): Promise<string | null> => {
+      const fingerprints: string[] = [];
+      for (const scope of scopes) {
+        const nested = await nestedFixtureState(scope);
+        const guard = await fixtureGuard(scope);
+        if (nested.reason || guard.reason) return null;
+        fingerprints.push(JSON.stringify([guard.fingerprint, nested.fingerprint]));
+      }
+      const currentImage = await lstat(image.imagePath).catch(() => null);
+      if (!currentImage?.isFile() || currentImage.isSymbolicLink()
+        || currentImage.dev !== imageIdentity.dev || currentImage.ino !== imageIdentity.ino
+        || !await imageIsOrphaned(parentDir, image, now, thresholdMs)) return null;
+      return JSON.stringify(fingerprints);
+    };
+    const initial = await authorize();
+    if (initial === null) {
       retained.push(image.fixtureRoot);
       continue;
     }
-    if (await detachImage(image)) detached.push(image.imagePath);
-    else retained.push(image.fixtureRoot);
+    receipt.pendingDetachImages.push(image.imagePath);
+    await persist();
+    if (await authorize() !== initial) {
+      receipt.pendingDetachImages = [];
+      await persist();
+      retained.push(image.fixtureRoot);
+      continue;
+    }
+    if (await detachImage(image, async () => await authorize() === initial)) {
+      detached.push(image.imagePath);
+      receipt.detachedImages.push(image.imagePath);
+    } else retained.push(image.fixtureRoot);
+    receipt.pendingDetachImages = [];
+    await persist();
   }
   return { detached, retained, inspectionFailed: false };
 }
 
-async function detachImage(image: AttachedFixtureImage): Promise<boolean> {
+async function detachImage(
+  image: AttachedFixtureImage,
+  authorize: () => Promise<boolean> = async () => true,
+): Promise<boolean> {
   if (!image.baseDevice) return false;
+  const stillAttached = async () => {
+    try {
+      const { stdout } = await execFileAsync('/usr/bin/hdiutil', ['info'], { encoding: 'utf8' });
+      return attachedFixtureImages(path.dirname(image.fixtureRoot), stdout).some((current) => (
+        current.baseDevice === image.baseDevice && current.imagePath === image.imagePath
+      ));
+    } catch { return false; }
+  };
   try {
+    if (!await authorize() || !await stillAttached()) return false;
     await execFileAsync('/usr/bin/hdiutil', ['detach', image.baseDevice], { timeout: 15_000 });
     return true;
   } catch {
     try {
+      // A failed detach can release the device before reporting failure. Never
+      // force a stale device identifier that the OS may already have reused.
+      if (!await authorize() || !await stillAttached()) return false;
       await execFileAsync('/usr/bin/hdiutil', ['detach', image.baseDevice, '-force'], {
         timeout: 15_000,
       });
@@ -327,55 +427,85 @@ export async function sweepStaleTestFixtures(
   const thresholdMs = options.thresholdMs ?? DEFAULT_STALE_FIXTURE_AGE_MS;
   const canonicalParent = await realpath(parentDir);
   await assertTemporarySweepParent(canonicalParent);
-  const imageSweep = await detachOrphanedFixtureImages(canonicalParent, now, thresholdMs);
-  const mountPaths = await readMountPaths();
+  const receiptRoot = await mkdtemp(path.join(canonicalParent, '.o8-fixture-sweep-'));
   const receipt: FixtureSweepReceipt = {
-    detachedImages: imageSweep.detached,
-    reclaimedBytes: 0,
-    removedPaths: [],
-    retainedImages: imageSweep.retained,
-    skippedLivePaths: [],
-    skippedMountedPaths: [],
-    thresholdMs,
+    detachedImages: [], pendingDetachImages: [], pendingRemovalPaths: [],
+    receiptPath: path.join(receiptRoot, 'receipt.json'),
+    reclaimedBytes: 0, removedPaths: [], retainedImages: [],
+    skippedLivePaths: [], skippedMountedPaths: [], skippedRetainedPaths: [],
+    skippedOwnershipPaths: [], thresholdMs,
+  };
+  const persist = async () => {
+    const pending = path.join(receiptRoot, 'pending.json');
+    const file = await open(pending, 'w', 0o600);
+    try {
+      await file.writeFile(`${JSON.stringify(receipt, null, 2)}\n`);
+      await file.sync();
+    } finally { await file.close(); }
+    await rename(pending, receipt.receiptPath);
+    // POSIX directory sync makes the renamed receipt survive a crash before
+    // the following destructive action. Windows cannot open directories here.
+    if (process.platform !== 'win32') {
+      for (const directory of [receiptRoot, canonicalParent]) {
+        const handle = await open(directory, 'r');
+        try { await handle.sync(); } finally { await handle.close(); }
+      }
+    }
+  };
+  await persist();
+  const imageSweep = await detachOrphanedFixtureImages(canonicalParent, now, thresholdMs, receipt, persist);
+  receipt.retainedImages = imageSweep.retained;
+  const mountPaths = await readMountPaths();
+  const hold = (target: string, reason: FixtureGuard['reason']) => {
+    const paths = reason === 'live' ? receipt.skippedLivePaths
+      : reason === 'retained' ? receipt.skippedRetainedPaths : receipt.skippedOwnershipPaths;
+    paths.push(target);
   };
   const entries = await readdir(canonicalParent, { withFileTypes: true });
-  const candidates: string[] = [];
+  const candidates: Array<{ target: string; fingerprint: string; nestedFingerprint: string }> = [];
   for (const entry of entries) {
     if (!FIXTURE_NAME.test(entry.name)) continue;
     const target = path.join(canonicalParent, entry.name);
     const identity = await lstat(target).catch(() => null);
     if (!identity || identity.isSymbolicLink() || !identity.isDirectory()) continue;
     if (now - identity.mtimeMs < thresholdMs) continue;
-    if (!await readTestRunOwner(target)) continue;
-    if (RUN_FIXTURE_NAME.test(entry.name) && await hasLiveRunOwner(target)) {
-      receipt.skippedLivePaths.push(target);
+    const nested = await nestedFixtureState(target);
+    const guard = await fixtureGuard(target);
+    const reason = guard.reason ?? nested.reason;
+    if (reason) {
+      hold(target, reason);
       continue;
     }
     if (imageSweep.inspectionFailed || imageSweep.retained.some((root) => (
       root === target || root.startsWith(`${target}${path.sep}`)
-    ))) {
+    )) || !mountPaths || fixturePathHasMount(target, mountPaths)) {
       receipt.skippedMountedPaths.push(target);
       continue;
     }
-    if (!mountPaths || fixturePathHasMount(target, mountPaths)) {
-      receipt.skippedMountedPaths.push(target);
-      continue;
-    }
-    candidates.push(target);
+    candidates.push({ target, fingerprint: guard.fingerprint, nestedFingerprint: nested.fingerprint });
   }
 
-  const finalMountPaths = await readMountPaths();
-  for (const target of candidates) {
-    if (!await readTestRunOwner(target)) continue;
-    if (!finalMountPaths || fixturePathHasMount(target, finalMountPaths)) {
-      receipt.skippedMountedPaths.push(target);
-      continue;
-    }
+  for (const { target, fingerprint, nestedFingerprint } of candidates) {
     const bytes = await allocatedBytes(target);
-    await rm(target, { recursive: true, force: false });
-    receipt.reclaimedBytes += bytes;
-    receipt.removedPaths.push(target);
+    receipt.pendingRemovalPaths = [target];
+    await persist();
+    const finalMountPaths = await readMountPaths();
+    const nested = await nestedFixtureState(target);
+    const guard = await fixtureGuard(target);
+    const reason = guard.reason ?? nested.reason;
+    if (reason || guard.fingerprint !== fingerprint || nested.fingerprint !== nestedFingerprint) {
+      hold(target, reason ?? 'ownership');
+    } else if (!finalMountPaths || fixturePathHasMount(target, finalMountPaths)) {
+      receipt.skippedMountedPaths.push(target);
+    } else {
+      await rm(target, { recursive: true, force: false });
+      receipt.reclaimedBytes += bytes;
+      receipt.removedPaths.push(target);
+    }
+    receipt.pendingRemovalPaths = [];
+    await persist();
   }
+  await persist();
   return receipt;
 }
 
@@ -456,5 +586,5 @@ export function testRunRetainedAfterTimeout(runRoot: string): boolean {
 }
 
 export function fixtureSweepSummary(receipt: FixtureSweepReceipt): string {
-  return `[fixture-cleanup] Reclaimed ${receipt.reclaimedBytes} fixture bytes from ${receipt.removedPaths.length} stale o8-* directories; detached ${receipt.detachedImages.length} orphaned o8-apfs-* images; skipped ${receipt.skippedMountedPaths.length} mounted directories.`;
+  return `[fixture-cleanup] Reclaimed ${receipt.reclaimedBytes} fixture bytes from ${receipt.removedPaths.length} stale o8-* directories; detached ${receipt.detachedImages.length} orphaned o8-apfs-* images; skipped ${receipt.skippedMountedPaths.length} mounted directories; held ${receipt.skippedLivePaths.length} live, ${receipt.skippedRetainedPaths.length} retained and ${receipt.skippedOwnershipPaths.length} unknown or changed owners; receipt ${receipt.receiptPath}.`;
 }

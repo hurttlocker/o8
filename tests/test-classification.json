@@ -2825,7 +2825,9 @@
     {
       "path": "tests/fixture-sweeper-ownership-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
+        "fixture-lifecycle",
         "real-path"
       ]
     },
