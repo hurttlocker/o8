@@ -1,11 +1,13 @@
 import { relative } from 'node:path';
-import { BaseSequencer, type TestSpecification } from 'vitest/node';
+import type { TestSequencer, TestSpecification, Vitest } from 'vitest/node';
 import durations from './hermetic-durations.json';
 
 // Longest-first scheduling keeps slow fixtures off the end of a worker queue.
 // Every shard uses the same compact estimates, never a local run cache.
-export default class DurationSequencer extends BaseSequencer {
+export default class DurationSequencer implements TestSequencer {
   private estimates = new Map<string, number>();
+
+  constructor(private readonly ctx: Vitest) {}
   private key(file: TestSpecification) {
     return relative(this.ctx.config.root, file.moduleId).replaceAll('\\', '/');
   }

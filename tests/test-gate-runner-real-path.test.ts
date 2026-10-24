@@ -64,10 +64,18 @@ describe('split test gate real entry point', () => {
     const orderLog = join(fixture, 'order.log');
     const timingReport = join(fixture, 'timings.json');
     const processLog = join(fixture, 'processes.jsonl');
+    const cacheInputs = join(fixture, 'cache-inputs.json');
     const config = (file: string) => `
+import { writeFileSync } from 'node:fs';
 import unitConfig from ${JSON.stringify(join(process.cwd(), 'config/vitest/vitest.unit.config.ts'))};
 export default {
   ...unitConfig,
+  plugins: [...(unitConfig.plugins ?? []), {
+    name: 'record-test-cache-inputs',
+    configResolved(config) {
+      writeFileSync(${JSON.stringify(cacheInputs)}, JSON.stringify(config.configFileDependencies));
+    },
+  }],
   test: {
     ...unitConfig.test,
     projects: undefined,
@@ -172,6 +180,11 @@ it('integration fails second', () => {
     expect(processes).toHaveLength(2);
     expect(processes[0]).not.toBe(processes[1]);
     expect(result.stdout).toContain('[test-timing] slowest files');
+    expect(result.stdout).toContain('[test-timing] phase totals');
+    const dependencies = JSON.parse(readFileSync(cacheInputs, 'utf8')) as string[];
+    for (const file of ['test-timing-reporter.ts', 'duration-sequencer.ts', 'hermetic-durations.json']) {
+      expect(dependencies.some(path => path.replaceAll('\\', '/').endsWith(`/config/vitest/${file}`)), file).toBe(false);
+    }
     const timings = JSON.parse(readFileSync(timingReport, 'utf8'));
     expect(timings.files).toEqual([expect.objectContaining({
       path: 'integration.test.js', tests: 1, state: 'failed',
@@ -179,6 +192,10 @@ it('integration fails second', () => {
       setupMs: expect.any(Number), testsMs: expect.any(Number),
     })]);
     expect(timings.files[0].totalMs).toBeGreaterThanOrEqual(timings.files[0].testsMs);
+    expect(timings.phaseTotals).toMatchObject({
+      collectMs: timings.files[0].collectMs, environmentMs: timings.files[0].environmentMs,
+      setupMs: timings.files[0].setupMs, testsMs: timings.files[0].testsMs,
+    });
 
     const estimatesPath = join(fixture, 'duration-estimates.json');
     const update = spawnSync(process.execPath, [

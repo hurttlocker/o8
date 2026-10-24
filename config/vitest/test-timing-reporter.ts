@@ -34,9 +34,14 @@ export default class TestTimingReporter implements Reporter {
         testsMs: round(timing.duration),
       };
     }).sort((a, b) => b.totalMs - a.totalMs || a.path.localeCompare(b.path));
+    const fields = ['prepareMs', 'environmentMs', 'setupMs', 'collectMs', 'testsMs'] as const;
+    const phaseTotals = Object.fromEntries(fields.map(field => [
+      field, round(files.reduce((sum, file) => sum + file[field], 0)),
+    ]));
     const report = {
       schema: 'o8/test-timings/v1',
       wallMs: round(performance.now() - this.started),
+      phaseTotals,
       files,
     };
     const output = process.env.O8_TEST_TIMING_REPORT_PATH;
@@ -45,11 +50,19 @@ export default class TestTimingReporter implements Reporter {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`);
     }
+    this.context.logger.log('[test-timing] phase totals (overlap across workers), ms: '
+      + fields.map(field => `${field} ${phaseTotals[field].toFixed(0)}`).join(', '));
     this.context.logger.log('[test-timing] slowest files (environment + setup + imports + tests), ms');
     for (const file of files.slice(0, 30)) {
       this.context.logger.log(`[test-timing] ${file.totalMs.toFixed(0)} ${file.path}`
         + ` (prepare ${file.prepareMs.toFixed(0)}, environment ${file.environmentMs.toFixed(0)},`
         + ` setup ${file.setupMs.toFixed(0)}, imports ${file.collectMs.toFixed(0)}, tests ${file.testsMs.toFixed(0)})`);
+    }
+    for (const [label, field] of [['imports', 'collectMs'], ['environment', 'environmentMs'], ['setup', 'setupMs']] as const) {
+      this.context.logger.log(`[test-timing] slowest ${label}, ms`);
+      for (const file of [...files].sort((a, b) => b[field] - a[field]).slice(0, 5)) {
+        this.context.logger.log(`[test-timing] ${file[field].toFixed(0)} ${file.path}`);
+      }
     }
   }
 }

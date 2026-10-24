@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import path from 'node:path';
+import { require as tsxRequire } from 'tsx/cjs/api';
 import { defineConfig } from 'vitest/config';
-import DurationSequencer from './duration-sequencer';
-import TestTimingReporter from './test-timing-reporter';
 import { sharedVitestConfig } from './vitest.shared';
+
+// Reporting and scheduling do not affect application transforms. Load them
+// outside the config bundle so tuning them preserves Vitest's module cache.
+const { default: DurationSequencer } = tsxRequire('./duration-sequencer.ts', import.meta.url) as {
+  default: typeof import('./duration-sequencer').default;
+};
 
 const classification = JSON.parse(readFileSync(
   new URL('../../tests/test-classification.json', import.meta.url),
@@ -28,7 +33,7 @@ export default defineConfig({
     sequence: { sequencer: DurationSequencer },
     reporters: [
       'default',
-      new TestTimingReporter(),
+      path.resolve(__dirname, 'test-timing-reporter.ts'),
       ...(process.env.O8_TEST_GATE_REPORT_PATH
         ? [['json', { outputFile: process.env.O8_TEST_GATE_REPORT_PATH }] as ['json', { outputFile: string }]]
         : []),
