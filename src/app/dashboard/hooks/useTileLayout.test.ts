@@ -20,24 +20,22 @@ const workspaceBoundary = vi.hoisted(() => ({
   openRemoteTerminal: null as ((details: { command: string; machineId: string; machineLabel: string; sessionId: string }) => void) | null,
 }));
 
-vi.mock('@/lib/react/retrying-lazy', () => ({
-  retryingLazy: (_loader: unknown, options: { label?: string }) => (
-    options.label === 'Workspace terminal'
-      ? (props: { preferredRepo?: { localPath?: string } | null; onOpenRemoteTerminal?: (details: RemoteTerminalDetails) => void }) => {
-          const repoPath = props.preferredRepo?.localPath ?? null;
-          workspaceBoundary.preferredRepoPaths.push(repoPath);
-          workspaceBoundary.openRemoteTerminal = props.onOpenRemoteTerminal ?? null;
-          if (repoPath) {
-            void fetch('/api/runtime/launch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ repoPath }),
-            });
-          }
-          return null;
-        }
-      : () => null
-  ),
+vi.mock('@/lib/react/retrying-lazy', () => ({ retryingLazy: () => () => null }));
+
+vi.mock('@/components/desktop/WorkspaceTerminal', () => ({
+  WorkspaceTerminal: (props: { preferredRepo?: { localPath?: string } | null; onOpenRemoteTerminal?: (details: RemoteTerminalDetails) => void }) => {
+    const repoPath = props.preferredRepo?.localPath ?? null;
+    workspaceBoundary.preferredRepoPaths.push(repoPath);
+    workspaceBoundary.openRemoteTerminal = props.onOpenRemoteTerminal ?? null;
+    if (repoPath) {
+      void fetch('/api/runtime/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPath }),
+      });
+    }
+    return null;
+  },
 }));
 
 function persistedLayout(repoPath: string): TileLayout {
