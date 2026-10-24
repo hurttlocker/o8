@@ -10,7 +10,7 @@ export async function runNext(args: string[]): Promise<number> {
     process.stdout.write('App shell: --app-shell [--server ORIGIN] [--shell-state ABSOLUTE_FILE]. Uses existing local port/token configuration.\n');
   }
   if (args.includes('--help')) {
-    process.stdout.write('o8 next --enable-next --binary /absolute/path/o8-next --server http://127.0.0.1:PORT [--offscreen]\nSaved sessions and composer; build native/o8-next separately. Set O8_NEXT_API_TOKEN for the selected server.\n');
+    process.stdout.write('o8 next --enable-next --binary /absolute/path/o8-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID]\nSaved sessions, composer and opt-in terminal; build native/o8-next separately. Set O8_NEXT_API_TOKEN for the selected server.\n');
     return 0;
   }
   const at = args.indexOf('--binary');

@@ -6,6 +6,8 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+alacritty_terminal = { version = "=0.26.0", default-features = false }
+base64 = "=0.22.1"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 regex = "=1.13.1"
