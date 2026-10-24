@@ -91,7 +91,7 @@ async function releaseAndSettleFreshFetch() {
   await act(async () => {
     releaseFreshFetch?.();
     await pending;
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
   });
 }
 
@@ -174,12 +174,11 @@ function RoutingThoughtsHarness({ panelRef, initialComposerMode, observeIdle = f
 }
 
 async function waitForPayload(count: number) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  return vi.waitFor(() => {
     const payloads = sentTurnPayloads();
-    if (payloads.length >= count) return payloads[count - 1]!;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`Timed out waiting for outbound payload ${count}`);
+    if (payloads.length < count) throw new Error(`Timed out waiting for outbound payload ${count}`);
+    return payloads[count - 1]!;
+  }, { timeout: 200, interval: 5 });
 }
 
 function sentTurnPayloads() {
@@ -190,6 +189,7 @@ function sentTurnPayloads() {
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -249,7 +249,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await act(async () => root.unmount());
+  try {
+    await act(async () => root.unmount());
+  } finally {
+    vi.useRealTimers();
+  }
   delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
   host.remove();
   localStorage.clear();
@@ -272,7 +276,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     const panelRef = createRef<ThoughtsChatPanelHandle>();
     await act(async () => {
       root.render(createElement(RoutingThoughtsHarness, { panelRef, observeIdle: true, visible: true }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(50);
     });
     const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
     expect(requests.some((url) => url.startsWith('/api/runtime/inventory'))).toBe(true);
@@ -289,7 +293,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     for (let mount = 0; mount < 2; mount += 1) {
       await act(async () => {
         root.render(createElement(RoutingThoughtsHarness, { key: mount, panelRef, observeIdle: true, visible }));
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await vi.advanceTimersByTimeAsync(50);
       });
       expect(sentTurnPayloads()).toEqual([]);
       const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
@@ -305,7 +309,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     expect(sentTurnPayloads()[0].message).toContain('Delegate only when the user asks');
     // Let this mount's 800ms history debounce land against its own synthetic
     // transport before the next test installs a real history-route fixture.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(950); });
   });
 
   it('keeps a new chat on its selected repository through the first send and history reload', async () => {
@@ -366,7 +370,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       })));
       await act(async () => {
         panelRef.current!.loadThread(tabId);
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await vi.advanceTimersByTimeAsync(50);
       });
       const pickProject = async (current: string, next: string) => {
         const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label="Project target: ${current}"]`);
@@ -383,7 +387,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       expect(host.querySelector('button[aria-label="Project target: new-turn-home"]')).toBeTruthy();
       await act(async () => {
         expect(panelRef.current?.sendNow('Continue in the new repository')).toBe(true);
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await vi.advanceTimersByTimeAsync(30);
       });
       expect(sentTurnPayloads()).toHaveLength(0);
       await act(async () => {
@@ -394,14 +398,14 @@ describe('composer fresh operator defaults at the send seam', () => {
       releasePost();
       expect(sentTurnPayloads()[0]?.threadId).toBe(tabId);
       expect(sentTurnPayloads()[0]?.repoPath).toBe(newRepo);
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(950); });
       const record = await GET_CHAT(new NextRequest(`http://127.0.0.1/api/v2/chat-history?tabId=${tabId}`));
       const persisted = await record.json();
       expect(persisted.repoPath).toBe(newRepo);
       expect(persisted.messages.find((message: { role: string }) => message.role === 'user')).toMatchObject({ content: 'Continue in the new repository' });
       await act(async () => {
         panelRef.current!.loadThread(tabId);
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await vi.advanceTimersByTimeAsync(50);
       });
       expect(host.querySelector('button[aria-label^="Project target"]')).toBeNull();
     } finally {
@@ -505,14 +509,14 @@ describe('composer fresh operator defaults at the send seam', () => {
         onMissionStateChange: () => {},
         onChromeChange: () => {},
       }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(50);
     });
     await persistDefaults('gpt-5.6-terra', 'codex');
     let payload: Record<string, unknown> = {};
     await act(async () => {
       expect(panelRef.current?.sendNow('operator message')).toBe(true);
       payload = await waitForPayload(1);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await vi.advanceTimersByTimeAsync(20);
     });
     const modelButton = [...host.querySelectorAll('button')]
       .find((button) => button.title.startsWith('Terra'));
@@ -543,7 +547,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         thoughtsBodyBackground: 'transparent', thoughtsElevatedSurface: 'transparent', thoughtsElevatedBorder: 'none',
         thoughtsElevatedShadow: 'none', thoughtsMutedGlass: 'transparent', onMissionStateChange: () => {}, onChromeChange: () => {},
       }));
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(50);
     });
     let payload: Record<string, unknown> = {};
     await act(async () => {
@@ -572,7 +576,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         thoughtsBodyBackground: 'transparent', thoughtsElevatedSurface: 'transparent', thoughtsElevatedBorder: 'none',
         thoughtsElevatedShadow: 'none', thoughtsMutedGlass: 'transparent', onMissionStateChange: () => {}, onChromeChange: () => {},
       }));
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(50);
     });
     let payload: Record<string, unknown> = {};
     await act(async () => {
@@ -596,7 +600,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       const panelRef = createRef<ThoughtsChatPanelHandle>();
       await act(async () => {
         root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'moa' }));
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await vi.advanceTimersByTimeAsync(50);
       });
 
       const modelTrigger = selectorEnabled
@@ -605,7 +609,7 @@ describe('composer fresh operator defaults at the send seam', () => {
           .find((button) => button.title.endsWith(' · Compare plans'));
       await act(async () => {
         modelTrigger!.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.advanceTimersByTimeAsync(0);
       });
       if (selectorEnabled) {
         act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-codex"]')!.click());
@@ -614,7 +618,7 @@ describe('composer fresh operator defaults at the send seam', () => {
           .find((button) => button.textContent?.trim() === 'Codex')!;
         await act(async () => {
           codexHouse.click();
-          await new Promise((resolve) => setTimeout(resolve, 0));
+          await vi.advanceTimersByTimeAsync(0);
         });
       }
       const pickedModel = selectorEnabled
@@ -662,12 +666,12 @@ describe('composer fresh operator defaults at the send seam', () => {
     const panelRef = createRef<ThoughtsChatPanelHandle>();
     await act(async () => {
       root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'fusion' }));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(50);
     });
     expect(panelRef.current).not.toBeNull();
     await act(async () => {
       panelRef.current!.loadThread('backend-handoff-thread');
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await vi.advanceTimersByTimeAsync(100);
     });
 
     const modeTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
@@ -682,7 +686,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       .find((button) => button.textContent === 'Hand off')!;
     await act(async () => {
       handoff.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(0);
     });
     expect(modeTrigger.getAttribute('aria-label')).toContain('Delegation off');
     expect(readStoredOrchestratorModel(repoPath)).toBe('claude-sonnet-5');
