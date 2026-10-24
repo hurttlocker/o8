@@ -107,7 +107,7 @@ describe('prompt audit: required rules survive real renderers', () => {
       'A refused pin is a blocker', 'do not create replacement packets',
       'does not impose a hold on the builder packet', 'approval HEAD',
       'side-effecting commands; read-only limits you to inspection',
-      'npx tsc --noEmit', 'gh uses the operator', 'never use it for bulk listing or polling',
+      'npm run typecheck:fast', 'npm run typecheck:tsc', 'gh uses the operator', 'never use it for bulk listing or polling',
       'second skeptical pass', 'do not default to reject', 'Resolved unknowns',
       'o8 packet report --event huddle', 'stops before editing',
       'Claim only dispatches that happened', 'governance']) expect(prompt.toLowerCase(), rule).toContain(rule.toLowerCase());

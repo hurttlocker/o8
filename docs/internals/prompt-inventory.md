@@ -22,7 +22,7 @@ escaped source characters and format slots make them conservative source estimat
 | [scripts/bench/coding-prompts.ts](../../scripts/bench/coding-prompts.ts) | JUDGE_PROMPT | Model input and output contract | 306 | 306 | 1 |
 | [scripts/bench/judge-coding-end-to-end.ts](../../scripts/bench/judge-coding-end-to-end.ts) | prompt | Model input and output contract | 39 | 39 | 5 |
 | [scripts/bench/run-coding-end-to-end.ts](../../scripts/bench/run-coding-end-to-end.ts) | prompt | Model input and output contract | 2 | 2 | 2 |
-| [scripts/dogfood/prompt.md](../../scripts/dogfood/prompt.md) | asset | Model input and output contract | 1164 | 1164 | 0 |
+| [scripts/dogfood/prompt.md](../../scripts/dogfood/prompt.md) | asset | Model input and output contract | 1164 | 1184 | 0 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | messages:message | Model input and output contract | 1 | 1 | 2 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | O8_PRODUCTION_HIGH_PROMPT | Model input and output contract | 502 | 502 | 0 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | ROUND2_TUNED_V2_PROMPT | Model input and output contract | 813 | 813 | 0 |
@@ -356,7 +356,7 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/dispatch/decomposition-pipeline.ts](../../src/lib/dispatch/decomposition-pipeline.ts) | buildDecompositionPrompt | Task decomposition | 231 | 231 | 6 |
 | [src/lib/dispatch/decomposition-pipeline.ts](../../src/lib/dispatch/decomposition-pipeline.ts) | inline-model-context | Task decomposition | 118 | 118 | 21 |
 | [src/lib/dispatch/edge-case-surfacer.ts](../../src/lib/dispatch/edge-case-surfacer.ts) | renderEdgeCaseSections | Worker scope, launch and completion | 71 | 71 | 4 |
-| [src/lib/dispatch/prompts/decompose.md](../../src/lib/dispatch/prompts/decompose.md) | asset | Worker scope, launch and completion | 898 | 898 | 0 |
+| [src/lib/dispatch/prompts/decompose.md](../../src/lib/dispatch/prompts/decompose.md) | asset | Worker scope, launch and completion | 898 | 917 | 0 |
 | [src/lib/dispatch/read-budget.ts](../../src/lib/dispatch/read-budget.ts) | renderReadBudgetSections | Worker scope, launch and completion | 142 | 142 | 3 |
 | [src/lib/harness/evaluator.ts](../../src/lib/harness/evaluator.ts) | buildPrompt | Model input and output contract | 354 | 354 | 2 |
 | [src/lib/intake/github-intake.ts](../../src/lib/intake/github-intake.ts) | buildPlanningPrompt | Issue planning | 220 | 220 | 6 |
@@ -382,7 +382,7 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/lane/orchestrator-resident-process.ts](../../src/lib/lane/orchestrator-resident-process.ts) | withOrchestratorPromptPolicy | Orchestration and tool authority | 20 | 20 | 0 |
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | buildOrchestratorSystemPrompt | Orchestration and tool authority | 49 | 49 | 6 |
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | FALLBACK_PROMPT | Orchestration and tool authority | 70 | 70 | 0 |
-| [src/lib/lane/orchestrator.md](../../src/lib/lane/orchestrator.md) | asset | Orchestration and tool authority | 8315 | 7427 | 0 |
+| [src/lib/lane/orchestrator.md](../../src/lib/lane/orchestrator.md) | asset | Orchestration and tool authority | 8315 | 7448 | 0 |
 | [src/lib/lane/packet-explainer.ts](../../src/lib/lane/packet-explainer.ts) | buildExplainerPrompt | Worker scope, launch and completion | 196 | 196 | 4 |
 | [src/lib/lane/review-risk.ts](../../src/lib/lane/review-risk.ts) | buildAdversarialReviewProtocol | Independent review and evidence | 95 | 87 | 0 |
 | [src/lib/llm/context.ts](../../src/lib/llm/context.ts) | buildSystemPrompt | Model input and output contract | 287 | 287 | 10 |

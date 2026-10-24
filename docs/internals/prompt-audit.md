@@ -38,21 +38,22 @@ The table below measures actual rendered strings from fixed, isolated fixtures i
 `src/lib/prompts/prompt-audit.test.ts`. Task text, branch, contract, tool catalogs, and repository
 placeholders are held constant. The baseline run captured the original builders before rewriting;
 Solo baselines use the unchanged production scoper over the baseline template. Read and write
-workers differ deliberately. UI capture instructions appear only for the UI fixture.
+workers differ deliberately. UI capture instructions appear only for the UI fixture. After values
+include the verification-command migration retained when rebasing onto main.
 
 | Rendered fixture | Before ~tokens | After ~tokens |
 | --- | ---: | ---: |
 | `worker-write` | 1973 | 1942 |
 | `worker-read` | 818 | 818 |
 | `worker-ui` | 2369 | 2237 |
-| `orchestrator-claude` | 8188 | 7322 |
-| `orchestrator-claude-solo` | 1956 | 1446 |
-| `orchestrator-codex` | 7750 | 6891 |
-| `orchestrator-codex-solo` | 1953 | 1443 |
-| `orchestrator-pi` | 7749 | 6889 |
-| `orchestrator-pi-solo` | 1952 | 1442 |
-| `orchestrator-muse` | 7752 | 6893 |
-| `orchestrator-muse-solo` | 1955 | 1445 |
+| `orchestrator-claude` | 8188 | 7343 |
+| `orchestrator-claude-solo` | 1956 | 1466 |
+| `orchestrator-codex` | 7750 | 6912 |
+| `orchestrator-codex-solo` | 1953 | 1463 |
+| `orchestrator-pi` | 7749 | 6911 |
+| `orchestrator-pi-solo` | 1952 | 1461 |
+| `orchestrator-muse` | 7752 | 6914 |
+| `orchestrator-muse-solo` | 1955 | 1465 |
 | `review-false` | 1304 | 1264 |
 | `review-blind-false` | 779 | 779 |
 | `review-true` | 1914 | 1873 |
@@ -106,6 +107,8 @@ Focused verification passed 168 cases across 22 files in aggregate after fixture
 TypeScript passed with the CI 8 GB heap setting after the default heap was exhausted. Touched-file lint, changed-source rule-check, test classification, and local documentation links passed. The full local test suite was not run.
 
 Correction-round verification passed 121 focused tests across 14 files, including all 20 prompt-audit cases. TypeScript, touched-file ESLint, rule-check, test classification, and 637 local documentation links passed again.
+
+After rebasing onto main, 135 focused tests across 17 files passed, including the updated verification-command assertions and the persisted handoff transport test. `npm run typecheck:fast`, touched-file ESLint, rule-check, classification, and documentation checks passed. The classification manifest was regenerated with its script. No Rust crate or Cargo file changed relative to main.
 
 No live model tasks were replayed, and no outcome improvement is claimed.
 Source and rendered-input sizes do not establish total task cost, completion quality, latency,
