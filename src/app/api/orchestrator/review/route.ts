@@ -5,6 +5,7 @@ import { submitPacketReview } from '@/lib/orchestrator/operator-mission-service'
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { readCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import { ReviewValidationError } from '@/lib/orchestrator/operator-mission-service/review-validation';
+import { supplementPacketReviewProcessEvidence } from '@/lib/orchestrator/operator-mission-service/review-process-evidence';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -37,6 +38,14 @@ export async function POST(request: NextRequest) {
 
   if (typeof record.approved !== 'boolean') {
     return operatorError('invalid_request', 'approved is required.', 400);
+  }
+  if (record.supplementProcessEvidence !== undefined && (
+    record.supplementProcessEvidence !== true || principal.role !== 'operator'
+    || record.approved !== true || !Array.isArray(record.findings) || record.findings.length !== 0
+  )) {
+    return operatorError('invalid_process_evidence_supplement',
+      'Process evidence supplementation requires an operator and an approved request with no replacement findings.',
+      principal.role === 'operator' ? 422 : 403);
   }
   const waiverInput = record.missingContractWaiverReason;
   if (waiverInput !== undefined && (
@@ -79,6 +88,7 @@ export async function POST(request: NextRequest) {
         ? record.reviewedHeadSha.trim()
         : undefined,
       contractCoverageEvidence: contractCoverageEvidence ?? undefined,
+      ...(record.supplementProcessEvidence === true ? { supplementProcessEvidence: true } : {}),
       ...(waiverInput !== undefined ? { missingContractWaiverReason: (waiverInput as string).trim() } : {}),
   };
   const canonicalBody = JSON.stringify(reviewInput);
@@ -100,7 +110,9 @@ export async function POST(request: NextRequest) {
       scopeId: packetId,
     }, async () => {
       try {
-        return { ok: true as const, result: await submitPacketReview(reviewInput) };
+        return { ok: true as const, result: reviewInput.supplementProcessEvidence
+          ? await supplementPacketReviewProcessEvidence(reviewInput)
+          : await submitPacketReview(reviewInput) };
       } catch (error) {
         return {
           ok: false as const,

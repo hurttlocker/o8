@@ -1,4 +1,5 @@
 import { access, open, readdir, realpath } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
@@ -12,7 +13,7 @@ import { operatorSteerFailure, QUEUED_STEER_NOTE } from '@/lib/orchestrator/oper
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
 import { readOwnedPiBuiltinTelemetryTail } from '@/lib/pi-builtin/telemetry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
-import { normalizeCodexEvents, type TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
+import { createCodexEventNormalizer, normalizeCodexEvents, type TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import {
   normalizeClaudeCodeEvents,
   normalizeOpencodeEvents,
@@ -26,6 +27,7 @@ type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'gemini' | 'pi-b
 
 interface ResolvedJsonl {
   raw: string;
+  events?: TranscriptEvent[];
   runtime: TranscriptRuntime;
   fallbackTimestamp?: string;
   unsupportedReason?: string;
@@ -121,7 +123,31 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
   return null;
 }
 
-async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJsonl> {
+/** Stream complete Codex history without retaining raw tool payloads in memory. */
+async function readCodexHistory(paths: string[]): Promise<TranscriptEvent[]> {
+  const normalizer = createCodexEventNormalizer();
+  for (const filePath of paths) {
+    const handle = await open(await realpath(filePath), 'r');
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size === 0) continue;
+      // Fix the snapshot end so an actively growing log cannot prolong this request.
+      const stream = handle.createReadStream({ start: 0, end: stat.size - 1, autoClose: false });
+      const lines = createInterface({ input: stream, crlfDelay: Infinity });
+      try {
+        for await (const line of lines) normalizer.append(line);
+      } finally {
+        lines.close();
+        stream.destroy();
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+  return normalizer.events;
+}
+
+async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false): Promise<ResolvedJsonl> {
   if (!sessionKey) return { raw: '', runtime: null };
 
   if (sessionKey.startsWith('pi-builtin-owned:')) {
@@ -138,12 +164,17 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
       if (sources.threadId) try {
         const identityId = await getOwnedCodexSessionIdentityId(sessionKey);
         const rolloutPath = await getCodexRolloutPath(`codex:${sources.threadId}`, identityId ?? undefined);
+        if (fullHistory && rolloutPath) {
+          const events = await readCodexHistory([rolloutPath]);
+          if (events.length) return { raw: '', events, runtime: 'codex' };
+        }
         const raw = rolloutPath ? await readRawTail(rolloutPath) : '';
         if (raw.trim()) return { raw, runtime: 'codex' };
       } catch {
         // A missing runtime inventory must not hide the owned stdout fallback.
       }
       const tail = await readOwnedRunStdouts(sources.stdoutPaths);
+      if (fullHistory) return { raw: '', events: await readCodexHistory(sources.stdoutPaths), runtime: 'codex' };
       return { raw: tail.raw, runtime: 'codex', fallbackTimestamp: tail.modifiedAt };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -154,6 +185,7 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
     try {
       const rolloutPath = await getCodexRolloutPath(sessionKey);
       if (!rolloutPath) return { raw: '', runtime: 'codex' };
+      if (fullHistory) return { raw: '', events: await readCodexHistory([rolloutPath]), runtime: 'codex' };
       return { raw: await readRawTail(rolloutPath), runtime: 'codex' };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -346,8 +378,8 @@ export function readSessionHuddleTranscriptEvents(sessionKey: string): LaneHuddl
   return laneHuddleEventsForSession(sessionKey);
 }
 
-export async function readSessionTranscriptEvents(sessionKey: string): Promise<SessionTranscriptReadback> {
-  const resolved = await resolveRawJsonlForSession(sessionKey);
+export async function readSessionTranscriptEvents(sessionKey: string, fullHistory = false): Promise<SessionTranscriptReadback> {
+  const resolved = await resolveRawJsonlForSession(sessionKey, fullHistory);
   if (resolved.unsupportedReason) {
     return {
       sessionKey,
@@ -361,13 +393,13 @@ export async function readSessionTranscriptEvents(sessionKey: string): Promise<S
     sessionKey,
     runtime: resolved.runtime,
     events: mergeTranscriptEvents(
-      normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp),
+      resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp),
       [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
     ),
   };
 }
 
-export async function readPacketTranscriptEvents(packetId: string): Promise<PacketTranscriptReadback> {
+export async function readPacketTranscriptEvents(packetId: string, fullHistory = false): Promise<PacketTranscriptReadback> {
   const packet = findPacket(packetId);
   const packetSessionKey = packet?.lane?.sessionKey?.trim() ?? '';
   const packetLane = findLatestLaneByPacket(packetId);
@@ -383,7 +415,7 @@ export async function readPacketTranscriptEvents(packetId: string): Promise<Pack
     return { packetId, sessionKey: '', runtime: null, events: [], note: 'no_session_binding', terminalReason };
   }
 
-  const readback = await readSessionTranscriptEvents(sessionKey);
+  const readback = await readSessionTranscriptEvents(sessionKey, fullHistory);
   const packetEvents = packetLane && packetLane.sessionKey !== sessionKey
     ? [...laneHuddleEvents(packetLane.id), ...laneSteerEvents(packetLane.id)]
     : [];

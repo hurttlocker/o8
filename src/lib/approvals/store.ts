@@ -339,6 +339,22 @@ export function markSecondPassAgreed(approvalId: string): void {
   });
 }
 
+/** Compare-and-update the evidence only; never alter the review decision or second pass. */
+export function supplementReviewCoverageEvidence(id: string, expectedUpdatedAt: number, evidence: unknown, isCurrent: () => boolean): boolean {
+  return getApprovalDb().transaction(() => {
+    if (!isCurrent()) return false;
+    const existing = getApproval(id);
+    if (!existing || existing.updatedAt !== expectedUpdatedAt || existing.args?.reviewSuperseded === true) return false;
+    updateApprovalRecord({ ...existing,
+      args: { ...existing.args, contractCoverageEvidence: evidence }, updatedAt: Date.now() });
+    recordApprovalAudit(id, 'updated', 'desktop', 'Operator supplied process evidence for the existing reviewed HEAD.', {
+      reviewedHeadSha: existing.args?.reviewedHeadSha as string,
+      rawText: JSON.stringify(evidence),
+    });
+    return true;
+  });
+}
+
 function mapApprovalRows(rows: ApprovalRow[]) {
   return rows
     .map((row) => mapApprovalRow(row)!)

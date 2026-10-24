@@ -109,11 +109,15 @@ interface IdentityAlias { callId: string; shapes: Set<ToolCallShape>; }
  * malformed lines are skipped. Returns `[]` when input is empty or entirely
  * unparseable so callers can treat absence as a benign condition.
  */
-export function normalizeCodexEvents(
-  rawJsonl: string,
-  fallbackTimestamp = new Date().toISOString(),
-): TranscriptEvent[] {
+export function normalizeCodexEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
+  const normalizer = createCodexEventNormalizer(fallbackTimestamp);
+  normalizer.append(rawJsonl);
+  return normalizer.events;
+}
+
+/** Incremental JSONL ingestion retains call identities across file chunks and runs. */
+export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOString()) {
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
@@ -215,160 +219,162 @@ export function normalizeCodexEvents(
     if (previous) previous.resultIndex = out.length - 1;
   };
 
-  for (const rawLine of rawJsonl.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
+  const append = (rawJsonl: string) => {
+    for (const rawLine of rawJsonl.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
 
-    let parsed: Record<string, unknown> | null = null;
-    try { parsed = safeObject(JSON.parse(line)); } catch { parsed = null; }
-    if (!parsed) continue;
+      let parsed: Record<string, unknown> | null = null;
+      try { parsed = safeObject(JSON.parse(line)); } catch { parsed = null; }
+      if (!parsed) continue;
 
-    const type = readStr(parsed, 'type');
-    const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
-    const ts = normalizedTimestamp.value;
-    const payload = safeObject(parsed.payload);
-    const payloadType = payload ? readStr(payload, 'type') : '';
+      const type = readStr(parsed, 'type');
+      const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
+      const ts = normalizedTimestamp.value;
+      const payload = safeObject(parsed.payload);
+      const payloadType = payload ? readStr(payload, 'type') : '';
 
-    // Assistant text
-    if (type === 'event_msg' && payloadType === 'agent_message') {
-      const text = clip(
-        typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
-        MAX_ASSISTANT_TEXT, true,
-      );
-      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
-      continue;
-    }
-
-    if (type === 'item.completed') {
-      const item = safeObject(parsed.item);
-      const itemType = item ? readStr(item, 'type') : '';
-
-      if (itemType === 'agent_message') {
+      // Assistant text
+      if (type === 'event_msg' && payloadType === 'agent_message') {
         const text = clip(
-          readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
+          typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
         );
         if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
         continue;
       }
 
-      if (itemType === 'command_execution') {
-        const command = readStr(item, 'command');
-        const itemId = readStr(item, 'id');
-        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId;
-        pushToolResult(ts, callId, 'exec_command', extractText(item!.aggregated_output), readNum(item, 'exit_code'));
-        continue;
+      if (type === 'item.completed') {
+        const item = safeObject(parsed.item);
+        const itemType = item ? readStr(item, 'type') : '';
+
+        if (itemType === 'agent_message') {
+          const text = clip(
+            readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
+            MAX_ASSISTANT_TEXT, true,
+          );
+          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+          continue;
+        }
+
+        if (itemType === 'command_execution') {
+          const command = readStr(item, 'command');
+          const itemId = readStr(item, 'id');
+          const callId = itemId && command ? `${itemId}\u0000${command}` : itemId;
+          pushToolResult(ts, callId, 'exec_command', extractText(item!.aggregated_output), readNum(item, 'exit_code'));
+          continue;
+        }
+
+        if (itemType === 'tool_use') {
+          const callId = readStr(item, 'id');
+          const fallback = readStr(item, 'name', 'tool_name') || 'tool';
+          pushToolResult(ts, callId, fallback, extractText(item!.output ?? item!.result), undefined);
+          continue;
+        }
       }
 
-      if (itemType === 'tool_use') {
-        const callId = readStr(item, 'id');
-        const fallback = readStr(item, 'name', 'tool_name') || 'tool';
-        pushToolResult(ts, callId, fallback, extractText(item!.output ?? item!.result), undefined);
-        continue;
-      }
-    }
-
-    // Tool calls
-    if (type === 'response_item' && (payloadType === 'function_call' || payloadType === 'custom_tool_call')) {
-      const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('tool');
-      const tool = readStr(payload, 'name', 'namespace', 'execution') || 'tool';
-      const rawArgs = payloadType === 'custom_tool_call' ? payload!.input : payload!.arguments;
-      pushToolCall({
-        ts,
-        timestampReliable: normalizedTimestamp.reliable,
-        callId,
-        shape: payloadType === 'custom_tool_call' ? 'response-custom' : 'response-function',
-        tool,
-        args: argsPreview(rawArgs),
-        identityArgs: normalizedArgs(rawArgs),
-      });
-      continue;
-    }
-
-    if (type === 'event_msg' && payloadType === 'exec_command_begin') {
-      const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('exec');
-      const command = readStr(payload, 'parsed_cmd', 'cmd', 'command');
-      pushToolCall({
-        ts,
-        timestampReliable: normalizedTimestamp.reliable,
-        callId,
-        shape: 'event-exec',
-        tool: 'exec_command',
-        args: clip(command, MAX_ARGS),
-        identityArgs: normalizedArgs(command),
-      });
-      continue;
-    }
-
-    if (type === 'item.started') {
-      const item = safeObject(parsed.item);
-      if (item && readStr(item, 'type') === 'command_execution') {
-        const command = readStr(item, 'command');
-        const itemId = readStr(item, 'id');
-        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId || nextSyntheticCallId('exec');
+      // Tool calls
+      if (type === 'response_item' && (payloadType === 'function_call' || payloadType === 'custom_tool_call')) {
+        const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('tool');
+        const tool = readStr(payload, 'name', 'namespace', 'execution') || 'tool';
+        const rawArgs = payloadType === 'custom_tool_call' ? payload!.input : payload!.arguments;
         pushToolCall({
           ts,
           timestampReliable: normalizedTimestamp.reliable,
           callId,
-          shape: 'item-exec',
+          shape: payloadType === 'custom_tool_call' ? 'response-custom' : 'response-function',
+          tool,
+          args: argsPreview(rawArgs),
+          identityArgs: normalizedArgs(rawArgs),
+        });
+        continue;
+      }
+
+      if (type === 'event_msg' && payloadType === 'exec_command_begin') {
+        const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('exec');
+        const command = readStr(payload, 'parsed_cmd', 'cmd', 'command');
+        pushToolCall({
+          ts,
+          timestampReliable: normalizedTimestamp.reliable,
+          callId,
+          shape: 'event-exec',
           tool: 'exec_command',
           args: clip(command, MAX_ARGS),
           identityArgs: normalizedArgs(command),
         });
         continue;
       }
-      if (item && readStr(item, 'type') === 'tool_use') {
-        const callId = readStr(item, 'id') || nextSyntheticCallId('tool');
-        const tool = readStr(item, 'name', 'tool_name') || 'tool';
-        const rawInput = item.input ?? item.arguments ?? item.invocation;
-        pushToolCall({
-          ts,
-          timestampReliable: normalizedTimestamp.reliable,
-          callId,
-          shape: 'item-tool',
-          tool,
-          args: argsPreview(rawInput),
-          identityArgs: normalizedArgs(rawInput),
-        });
+
+      if (type === 'item.started') {
+        const item = safeObject(parsed.item);
+        if (item && readStr(item, 'type') === 'command_execution') {
+          const command = readStr(item, 'command');
+          const itemId = readStr(item, 'id');
+          const callId = itemId && command ? `${itemId}\u0000${command}` : itemId || nextSyntheticCallId('exec');
+          pushToolCall({
+            ts,
+            timestampReliable: normalizedTimestamp.reliable,
+            callId,
+            shape: 'item-exec',
+            tool: 'exec_command',
+            args: clip(command, MAX_ARGS),
+            identityArgs: normalizedArgs(command),
+          });
+          continue;
+        }
+        if (item && readStr(item, 'type') === 'tool_use') {
+          const callId = readStr(item, 'id') || nextSyntheticCallId('tool');
+          const tool = readStr(item, 'name', 'tool_name') || 'tool';
+          const rawInput = item.input ?? item.arguments ?? item.invocation;
+          pushToolCall({
+            ts,
+            timestampReliable: normalizedTimestamp.reliable,
+            callId,
+            shape: 'item-tool',
+            tool,
+            args: argsPreview(rawInput),
+            identityArgs: normalizedArgs(rawInput),
+          });
+          continue;
+        }
+      }
+
+      // Tool results
+      if (type === 'response_item' && (payloadType === 'function_call_output' || payloadType === 'custom_tool_call_output')) {
+        const callId = readStr(payload, 'call_id', 'id');
+        pushToolResult(ts, callId, 'tool', extractText(payload!.output), readNum(payload, 'exit_code'));
+        continue;
+      }
+
+      if (type === 'event_msg' && payloadType === 'exec_command_end') {
+        const callId = readStr(payload, 'call_id', 'id');
+        const rawOutput = extractText(payload!.aggregated_output ?? payload!.output);
+        pushToolResult(ts, callId, 'exec_command', rawOutput, readNum(payload, 'exit_code'));
+        continue;
+      }
+
+      // Errors
+      if (type === 'error' || type === 'turn.failed' || type === 'run.failed'
+        || (type === 'event_msg' && payloadType === 'error')) {
+        const message = clip(
+          readStr(parsed, 'message', 'error')
+            || readStr(payload, 'message', 'error')
+            || extractText(parsed.error)
+            || extractText(payload?.content),
+          MAX_SUMMARY,
+        );
+        out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error' });
+        continue;
+      }
+
+      // Terminal
+      if (type === 'turn.completed' || (type === 'event_msg' && payloadType === 'task_complete')) {
+        const exitCode = readNum(parsed, 'exit_code') ?? readNum(payload, 'exit_code') ?? 0;
+        out.push({ seq: nextSeq(), ts, type: 'done', exitCode });
         continue;
       }
     }
+  };
 
-    // Tool results
-    if (type === 'response_item' && (payloadType === 'function_call_output' || payloadType === 'custom_tool_call_output')) {
-      const callId = readStr(payload, 'call_id', 'id');
-      pushToolResult(ts, callId, 'tool', extractText(payload!.output), readNum(payload, 'exit_code'));
-      continue;
-    }
-
-    if (type === 'event_msg' && payloadType === 'exec_command_end') {
-      const callId = readStr(payload, 'call_id', 'id');
-      const rawOutput = extractText(payload!.aggregated_output ?? payload!.output);
-      pushToolResult(ts, callId, 'exec_command', rawOutput, readNum(payload, 'exit_code'));
-      continue;
-    }
-
-    // Errors
-    if (type === 'error' || type === 'turn.failed' || type === 'run.failed'
-      || (type === 'event_msg' && payloadType === 'error')) {
-      const message = clip(
-        readStr(parsed, 'message', 'error')
-          || readStr(payload, 'message', 'error')
-          || extractText(parsed.error)
-          || extractText(payload?.content),
-        MAX_SUMMARY,
-      );
-      out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error' });
-      continue;
-    }
-
-    // Terminal
-    if (type === 'turn.completed' || (type === 'event_msg' && payloadType === 'task_complete')) {
-      const exitCode = readNum(parsed, 'exit_code') ?? readNum(payload, 'exit_code') ?? 0;
-      out.push({ seq: nextSeq(), ts, type: 'done', exitCode });
-      continue;
-    }
-  }
-
-  return out;
+  return { append, events: out };
 }

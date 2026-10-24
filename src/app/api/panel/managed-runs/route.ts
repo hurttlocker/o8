@@ -18,6 +18,7 @@ import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { withPacketManagedRunLifecycleLock } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 import { resolveManagedRunExitReceipt } from '@/lib/runtimes/managed-runs/receipt-path';
+import { admitsReviewerManagedRun } from '@/lib/lane/reviewer-managed-run';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -312,9 +313,11 @@ async function post(req: Request) {
 
   const packetId = body.packetId?.trim() ?? '';
   if (!packetId) return commitRegistration();
-  return withPacketManagedRunLifecycleLock(packetId, () => {
+  return withPacketManagedRunLifecycleLock(packetId, async () => {
     const admission = inspectPacketManagedRunAdmission(packetId);
-    if (!admission.allowed) {
+    const reviewerAllowed = !admission.allowed && principal.role === 'operator'
+      && await admitsReviewerManagedRun(packetId, body.laneId, body.cwd!);
+    if (!admission.allowed && !reviewerAllowed) {
       const hint = admission.reason === 'packet_not_found'
         ? 'Inspect the packet ID and dispatch a valid packet before retrying o8 run.'
         : admission.reason === 'packet_held'

@@ -28,6 +28,7 @@ function carriesAcceptedFinding(approval: ApprovalRecord): boolean {
     finding !== null
     && typeof finding === 'object'
     && (finding as { resolution?: unknown }).resolution === 'accepted'
+    && (finding as { severity?: unknown }).severity !== 'note'
   ));
 }
 
@@ -180,7 +181,7 @@ async function assessContractCoverage(
  * resolution merge preview uses, so the gate and the preview agree on what the
  * packet actually changed.
  */
-async function listChangedPathsForCoverage(
+export async function listChangedPathsForCoverage(
   lane: Pick<Lane, 'id' | 'baseBranch'>,
   cwd: string,
   headSha: string,
