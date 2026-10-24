@@ -5,7 +5,7 @@ import { CliError, EXIT } from '../api.js';
 /** Explicit binary + origin; this command never resolves installed-app config. */
 export async function runNext(args: string[]): Promise<number> {
   if (args.includes('--help')) {
-    process.stdout.write('o8 next --enable-next --binary /absolute/path/o8-next --server http://127.0.0.1:PORT [--offscreen]\nRead-only saved orchestrator history; build native/o8-next separately.\n');
+    process.stdout.write('o8 next --enable-next --binary /absolute/path/o8-next --server http://127.0.0.1:PORT [--offscreen]\nSaved sessions and composer; build native/o8-next separately. Set O8_NEXT_API_TOKEN for the selected server.\n');
     return 0;
   }
   const at = args.indexOf('--binary');

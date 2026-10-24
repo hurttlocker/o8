@@ -1,7 +1,11 @@
+#[path = "conversation.rs"]
+mod conversation;
 use crate::{
     client::{Client, Session},
+    composer::{Composer, Submit},
     model::Row,
     retained::{RetainedRow, RowState},
+    sidebar,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
 };
@@ -13,15 +17,24 @@ use gpui::{
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs,
     process::Command,
     rc::Rc,
     time::Instant,
 };
 
-struct Surface {
+pub(crate) struct Surface {
     client: Client,
+    composer: gpui::Entity<Composer>,
+    drafts: HashMap<String, gpui::Entity<Composer>>,
+    pending: HashMap<String, Value>,
+    routing: Option<Value>,
+    queue: Value,
+    queue_ready: bool,
+    saving: bool,
+    send_next: bool,
+    subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
     selected: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
@@ -37,7 +50,55 @@ struct Surface {
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
 }
 impl Surface {
+    pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
+        focus.focus(window);
+        Self {
+            client,
+            composer: cx.new(Composer::new),
+            drafts: HashMap::new(),
+            pending: HashMap::new(),
+            routing: None,
+            queue: Value::Null,
+            queue_ready: false,
+            saving: false,
+            send_next: false,
+            subscriptions: vec![],
+            sessions: vec![],
+            selected: None,
+            rows: Rc::new(vec![]),
+            transcript: None,
+            subscription: None,
+            list: ListState::new(0, ListAlignment::Top, px(400.)),
+            focus,
+            notice: String::new(),
+            generation: 0,
+            list_generation: 0,
+            key_revision: 0,
+            painted: Rc::new(Cell::new(u64::MAX)),
+            painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+        }
+    }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        if !self.drafts.contains_key(&id) {
+            let editor = cx.new(Composer::new);
+            self.subscriptions
+                .push(cx.subscribe(&editor, |this, _, event: &Submit, cx| {
+                    if event.0 {
+                        this.send_next = !this.send_next;
+                        cx.notify();
+                    } else {
+                        this.send(None, cx);
+                    }
+                }));
+            self.drafts.insert(id.clone(), editor);
+        }
+        self.composer = self.drafts[&id].clone();
+        self.routing = None;
+        self.queue_ready = false;
+        self.queue = Value::Null;
+        self.saving = false;
+
         self.generation += 1;
         let generation = self.generation;
         self.subscription = None;
@@ -48,9 +109,14 @@ impl Surface {
         self.notice = "Reading history…".into();
         cx.notify();
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { client.history(&id) });
+        let session = self.sessions.iter().find(|s| s.id == id).cloned();
+        let task = cx.background_executor().spawn(async move {
+            let session = session.ok_or("Selected session disappeared")?;
+            let history = client.history(&id)?;
+            let queue = client.queue(&session);
+            let routing = client.context(&session);
+            Ok::<_, String>((history, queue, routing))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -58,13 +124,24 @@ impl Surface {
                     return;
                 }
                 match result {
-                    Ok(history) => {
+                    Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
                         let transcript = Transcript::new(history);
                         this.install_rows(transcript.rows.clone());
                         this.transcript = Some(transcript);
                         this.subscription = Some(transport::subscribe(this.client.clone(), key));
-                        this.notice = "Connecting live stream · read-only".into();
+                        this.notice = "Connecting live stream".into();
+                        match (queue, routing) {
+                            (Ok(queue), Ok(routing)) => {
+                                this.queue = queue;
+                                this.routing = Some(routing);
+                                this.queue_ready = true;
+                            }
+                            (Err(error), _) | (_, Err(error)) => {
+                                this.notice =
+                                    format!("{error}. History is available; sending is disabled.")
+                            }
+                        }
                     }
                     Err(error) => this.notice = error,
                 }
@@ -123,7 +200,7 @@ impl Surface {
                     }
                 }
                 Incoming::Status(status) => {
-                    self.notice = status.into();
+                    self.notice = status.trim_end_matches(" · read-only").into();
                     cx.notify();
                 }
             }
@@ -150,12 +227,15 @@ impl Surface {
         if self.rows.is_empty() {
             "No saved messages. Select Refresh to read again.".into()
         } else if count > 100 {
-            format!("Read-only snapshot · latest 100 of {count} saved messages · Refresh to update")
+            format!("Saved history · latest 100 of {count} saved messages · Refresh to update")
         } else {
-            "Read-only snapshot · Refresh to update".into()
+            "Saved history · Refresh to update".into()
         }
     }
     fn load_sessions(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
         self.list_generation += 1;
         self.generation += 1;
         let generation = self.list_generation;
@@ -226,8 +306,53 @@ impl Render for Surface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
+                    "tab" => {
+                        if this.composer.read(cx).focus.is_focused(window) {
+                            this.focus.focus(window);
+                        } else {
+                            this.composer.read(cx).focus.focus(window);
+                        }
+                    }
+                    "up" | "down" => {
+                        let ids: Vec<_> = sidebar::tree(&this.sessions, None)
+                            .into_iter()
+                            .flat_map(|g| g.rows.into_iter().map(|r| r.id))
+                            .collect();
+                        if !ids.is_empty() {
+                            let current = ids
+                                .iter()
+                                .position(|id| Some(id) == this.selected.as_ref())
+                                .unwrap_or(0);
+                            let next = if event.keystroke.key == "up" {
+                                current.saturating_sub(1)
+                            } else {
+                                (current + 1).min(ids.len() - 1)
+                            };
+                            this.select(ids[next].clone(), cx);
+                        }
+                    }
+                    "f6" => {
+                        let id = this.queue["items"]
+                            .as_array()
+                            .and_then(|items| {
+                                items.iter().find(|item| {
+                                    item["status"] == "queued"
+                                        && item["intent"] == "send-next"
+                                        && item["admittedAt"].is_null()
+                                        && item["payload"]["afterTaskId"].is_null()
+                                        && this.queue["steerableIds"]
+                                            .as_array()
+                                            .is_some_and(|ids| ids.contains(&item["id"]))
+                                })
+                            })
+                            .and_then(|item| item["id"].as_str())
+                            .map(str::to_owned);
+                        if let Some(id) = id {
+                            this.send(Some(id), cx);
+                        }
+                    }
                     "home" => this.navigate(false, cx),
                     "end" => this.navigate(true, cx),
                     _ => return,
@@ -266,36 +391,63 @@ impl Render for Surface {
                             .flex_shrink_0()
                             .overflow_y_scroll()
                             .px(px(8.))
-                            .children(self.sessions.iter().map(|session| {
-                                let id = session.id.clone();
-                                div()
-                                    .id(gpui::ElementId::Name(id.clone().into()))
-                                    .px(px(12.))
-                                    .py(px(8.))
-                                    .rounded(px(8.))
-                                    .cursor_pointer()
-                                    .bg(rgb(if self.selected.as_ref() == Some(&id) {
-                                        0x303744
-                                    } else {
-                                        0x1a1e24
-                                    }))
-                                    .child(div().text_size(px(13.5)).child(session.title.clone()))
-                                    .child(
+                            .children(
+                                sidebar::tree(&self.sessions, self.selected.as_deref())
+                                    .into_iter()
+                                    .map(|group| {
                                         div()
-                                            .mt(px(4.))
-                                            .text_size(px(9.5))
-                                            .text_color(rgb(0x8a93a0))
-                                            .child(format!(
-                                                "{} · {} · {} messages",
-                                                session.runtime,
-                                                session.status,
-                                                session.message_count
-                                            )),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select(id.clone(), cx)
-                                    }))
-                            })),
+                                            .mt(px(16.))
+                                            .child(
+                                                div()
+                                                    .px(px(12.))
+                                                    .mb(px(6.))
+                                                    .text_size(px(10.))
+                                                    .text_color(rgb(0x8a93a0))
+                                                    .child(match group.kind {
+                                                        "working" => "Working",
+                                                        "review" => "Review",
+                                                        _ => "Recent",
+                                                    }),
+                                            )
+                                            .children(group.rows.into_iter().map(|session| {
+                                                let id = session.id.clone();
+                                                div()
+                                                    .id(gpui::ElementId::Name(id.clone().into()))
+                                                    .px(px(12.))
+                                                    .py(px(5.))
+                                                    .rounded(px(8.))
+                                                    .cursor_pointer()
+                                                    .bg(rgb(if session.selected {
+                                                        0x303744
+                                                    } else {
+                                                        0x1a1e24
+                                                    }))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(13.5))
+                                                            .child(session.title),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .mt(px(4.))
+                                                            .text_size(px(9.5))
+                                                            .text_color(rgb(0x8a93a0))
+                                                            .child(format!(
+                                                                "{} · {}",
+                                                                self.sessions
+                                                                    .iter()
+                                                                    .find(|s| s.id == session.id)
+                                                                    .map(|s| s.runtime.as_str())
+                                                                    .unwrap_or(""),
+                                                                session.status
+                                                            )),
+                                                    )
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.select(id.clone(), cx)
+                                                    }))
+                                            }))
+                                    }),
+                            ),
                     )
                     .child(
                         div()
@@ -320,8 +472,10 @@ impl Render for Surface {
                                     }
                                     .into_any_element()
                                 })
-                                .flex_1(),
-                            ),
+                                .flex_1()
+                                .min_h_0(),
+                            )
+                            .child(self.composer_panel(cx)),
                     ),
             )
             .child(
@@ -403,18 +557,21 @@ pub fn launch(
     started: Instant,
 ) {
     (if offscreen { Application::headless() } else { Application::new() }).run(move |cx: &mut App| {
-        let sessions = vec![]; let rows = vec![]; let selected = None; let row_count = 0;
         let handle = cx.open_window(WindowOptions { focus: false, show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(if offscreen { -10000. } else { 100. }), px(if offscreen { -10000. } else { 100. })), size(px(1200.), px(816.))))),
             titlebar: Some(gpui::TitlebarOptions { title: Some("o8 next".into()), ..Default::default() }),
             ..Default::default() }, |window, cx| cx.new(|cx| {
-                let focus = cx.focus_handle(); focus.focus(window);
-                let mut surface = Surface { client, sessions, selected, rows: Rc::new(rows), transcript:None, subscription:None, list: ListState::new(row_count, ListAlignment::Top, px(400.)), focus,
-                    notice: String::new(), generation: 0, list_generation: 0, key_revision: 0, painted: Rc::new(Cell::new(u64::MAX)), painted_rows: Rc::new(RefCell::new(BTreeSet::new())) };
+                let mut surface = Surface::new(client, window, cx);
                 surface.notice = surface.snapshot_label();
                 surface.load_sessions(cx);
                 surface
             })).expect("GPUI window");
+        cx.spawn(async move |cx| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
+                if handle.update(cx, |surface, _, cx| surface.reconcile(cx)).is_err() { break; }
+            }
+        }).detach();
         cx.on_window_closed(|cx| { if cx.windows().is_empty() { cx.quit(); } }).detach();
         cx.spawn(async move |cx| {
             let mut measurement=stream_benchmark.map(|(path,through)| LiveMeasurement::new(path,through));
@@ -549,3 +706,6 @@ impl LiveMeasurement {
             .expect("stream metrics file");
     }
 }
+#[cfg(test)]
+#[path = "surface_tests.rs"]
+mod tests;

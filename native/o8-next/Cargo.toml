@@ -13,6 +13,10 @@ serde = { version = "=1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "=1.0.150", features = ["preserve_order"] }
 ureq = { version = "=2.12.1", default-features = false, features = ["json"] }
 url = "=2.5.8"
+unicode-segmentation = "=1.13.2"
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }
 
 [workspace]
 
