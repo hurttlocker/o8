@@ -1,8 +1,25 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
+
+it('fails clearly before running either checker when the native package is unavailable', () => {
+  const root = mkdtempSync(join(tmpdir(), 'o8-checker-parity-missing-'));
+  try {
+    for (const script of ['typecheck-parity.mjs', 'typecheck-checker.mjs']) {
+      copyFileSync(join('scripts', script), join(root, script));
+    }
+    const result = spawnSync(process.execPath, ['typecheck-parity.mjs'], { cwd: root, encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe(
+      `tsrs has no ${process.platform}-${process.arch} build; parity requires both tsc 5.8.2 and tsrs\n`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function check(source: string) {
   const root = mkdtempSync(join(tmpdir(), 'o8-checker-parity-'));

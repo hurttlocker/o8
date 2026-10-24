@@ -18,7 +18,6 @@ function runStep(label, command, args) {
     const reason = result.error ? result.error.message : `exit code ${result.status ?? 'unknown'}`;
     console.warn(`[postinstall] ${label} failed: ${reason}`);
   }
-  return result.status === 0;
 }
 
 function nativeModuleLoads(moduleName) {

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { resolveTypecheckChecker } from './typecheck-checker.mjs';
 
 const require = createRequire(import.meta.url);
 const args = process.argv.slice(2);
@@ -12,15 +12,22 @@ if (args.length && (args.length !== 2 || args[0] !== '--project')) {
 
 // No type generation or reduced file list: the default is exactly the root
 // project used by tsc --noEmit. --project also permits small negative fixtures.
+let tsrs;
+try {
+  tsrs = resolveTypecheckChecker({ allowFallback: false });
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 const checkers = [
-  ['tsc', 'typescript', 'tsc'],
-  ['tsrs', 'tsrs', 'tsrs'],
+  ['tsc', require.resolve('typescript/bin/tsc')],
+  ['tsrs', tsrs.path],
 ];
 const results = [];
-for (const [name, packageName, binary] of checkers) {
+for (const [name, checkerPath] of checkers) {
   const start = performance.now();
   const result = spawnSync(process.execPath, [
-    join(dirname(require.resolve(`${packageName}/package.json`)), 'bin', binary),
+    checkerPath,
     '--noEmit', '--pretty', 'false', ...args,
   ], {
     encoding: 'utf8',

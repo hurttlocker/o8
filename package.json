@@ -25,7 +25,7 @@
     "start": "node scripts/start.mjs",
     "lint": "eslint . --max-warnings 54",
     "typecheck:tsc": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit",
-    "typecheck:fast": "node node_modules/tsrs/bin/tsrs --noEmit",
+    "typecheck:fast": "node scripts/typecheck-fast.mjs --noEmit",
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "typecheck": "npm run verify:routes && node scripts/typecheck.mjs",
     "verify:routes": "vitest run tests/route-coverage.test.ts -t \"route module shape\"",

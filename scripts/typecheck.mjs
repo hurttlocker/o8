@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { resolveTypecheckChecker } from './typecheck-checker.mjs';
 
 const require = createRequire(import.meta.url);
 const repoRoot = process.cwd();
@@ -33,7 +34,7 @@ try {
 
 if (typegenStatus !== 0) process.exit(typegenStatus);
 if (process.argv.includes('--typegen-only')) process.exit(0);
-const checkerPath = join(dirname(require.resolve('tsrs/package.json')), 'bin', 'tsrs');
+const checkerPath = resolveTypecheckChecker().path;
 const appStatus = runNodeModule(checkerPath, ['--noEmit']);
 if (appStatus !== 0) process.exit(appStatus);
 process.exit(runNodeModule(checkerPath, ['--noEmit', '--project', 'cli/tsconfig.chat.json']));
