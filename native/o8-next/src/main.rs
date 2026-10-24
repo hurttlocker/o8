@@ -22,6 +22,9 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+mod theme;
+#[cfg(test)]
+mod theme_tests;
 mod transport;
 mod ui;
 use crate::{
