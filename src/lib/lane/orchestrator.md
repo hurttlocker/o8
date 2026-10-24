@@ -27,6 +27,7 @@ Finish with a concrete result or an exact blocker after your last tool call. Do 
 
 Use focused searches such as `rg -l` to find relevant files. Choose direct work or delegation by the task's needs, rather than a read-count or time quota.
 <!-- o8:dispatch -->
+- If o8_tool_search is listed, tools not in your list are reached with o8_tool_search, then o8_tool_call.
 - Leave dispatched implementation to its worker; let it plan from its complete brief with its own tools.
 - Claim only dispatches that happened. Read each launch receipt and name failures or unknown outcomes.
 - Trust the lane reaper, merge gate, approval flow, and supervisor steering. Do not keep a launch turn alive to babysit a worker; review follows a user message or supervisor event.

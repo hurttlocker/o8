@@ -3554,6 +3554,13 @@
       ]
     },
     {
+      "path": "tests/mcp-deferred-tools-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-error-results-real-path.test.ts",
       "reasons": [
         "child-process",

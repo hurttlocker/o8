@@ -67,6 +67,11 @@ operations, and operator defaults. Tool definitions and handlers are registered
 once in `src/lib/mcp/operator-mcp-host.ts`; both HTTP and standalone stdio
 transports consume that registry.
 
+Full-profile owned orchestrators can discover definitions through
+`o8_tool_search` and call them with `o8_tool_call`. External client configurations
+retain the complete catalog. See [deferred tool loading](../internals/deferred-mcp-tools.md)
+for runtime boundaries, worker opt-in and the full-loading override.
+
 ## Architecture Decision
 
 The user's Claude Code and o8's internal orchestrator are **peers**, not parent-child. Both can launch agents. Both can approve merges. The internal orchestrator handles missions from the dashboard chat. The MCP bridge handles intent from the terminal. They share the same API layer.

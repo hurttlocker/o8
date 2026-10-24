@@ -47,6 +47,7 @@ vi.mock('@/lib/pi/sdk/approval', () => ({
 let api: Server;
 // #3739: how long /api/mcp holds its reply, standing in for a blocking command such as wait_for_mission_ready.
 let mcpHoldMs = 0;
+let heldReplyCount = 0;
 const saved = { NEXT_ORIGIN: process.env.NEXT_ORIGIN, O8_API_PORT: process.env.O8_API_PORT };
 beforeAll(async () => {
   buildPiWriteHelper();
@@ -69,7 +70,10 @@ beforeAll(async () => {
     const response = gate.headers.get('x-middleware-next') === '1'
       ? await handler(new Request(url, { method: req.method, headers, body }))
       : gate;
-    if (url.pathname === '/api/mcp' && mcpHoldMs > 0) await new Promise(resolve => setTimeout(resolve, mcpHoldMs));
+    if (url.pathname === '/api/mcp' && mcpHoldMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, mcpHoldMs));
+      heldReplyCount += 1;
+    }
     res.writeHead(response.status, { 'Content-Type': 'application/json' }).end(await response.text());
   });
   await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
@@ -106,7 +110,8 @@ async function fixture() {
 /** Lists a stdio MCP server's tools exactly as an MCP client would. */
 async function listTools(config: { command: string; args?: string[]; env?: Record<string, string> }, cwd: string) {
   const peer = new StdioJsonRpcPeer({ command: config.command, args: config.args ?? [], cwd,
-    env: { ...process.env, ...config.env } }, 120_000);
+    // Compare complete catalogs, including the commands deferred by Claude.
+    env: { ...process.env, ...config.env, O8_MCP_TOOL_LOADING: 'full' } }, 120_000);
   try {
     await peer.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'parity', version: '1' } });
     const result = await peer.request<{ tools: Array<{ name: string; inputSchema: unknown }> }>('tools/list', {});
@@ -205,10 +210,10 @@ describe('Pi orchestrator (#3258)', () => {
     mcpHoldMs = operatorHoldMs;
     try {
       const operator = servers.servers.find(server => server.name === 'operator')!;
-      const started = Date.now();
+      const heldBefore = heldReplyCount;
       const result = await operator.request('tools/call', { name: 'o8_list_repos', arguments: {} },
         new AbortController().signal) as { content?: Array<{ text?: string }>; isError?: boolean };
-      expect(Date.now() - started).toBeGreaterThanOrEqual(operatorHoldMs);
+      expect(heldReplyCount).toBe(heldBefore + 1);
       expect(result.isError).not.toBe(true);
       expect(JSON.parse(result.content?.[0]?.text ?? 'null')).toEqual(expect.objectContaining({ repos: expect.any(Array) }));
     } finally { mcpHoldMs = 0; await servers.close(); }

@@ -90,7 +90,15 @@ const WORKER_LAUNCH_TOOLS = new Set(['cortex_launch_agent', 'dispatch_mission', 
 
 export function launchesWorker(toolName: string, input: unknown): boolean {
   const separator = toolName.lastIndexOf('__');
-  const bare = separator === -1 ? toolName : toolName.slice(separator + 2);
+  let bare = separator === -1 ? toolName : toolName.slice(separator + 2);
+  if (bare === 'o8_tool_call') {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+    const call = input as Record<string, unknown>;
+    if (typeof call.name !== 'string' || typeof call.arguments !== 'string') return false;
+    try { input = JSON.parse(call.arguments); } catch { return false; }
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+    bare = call.name;
+  }
   if (bare === 'create_mission') {
     const dispatch = input !== null && typeof input === 'object'
       ? (input as { dispatch?: unknown }).dispatch

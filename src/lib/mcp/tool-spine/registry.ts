@@ -76,6 +76,8 @@ export interface ServerEntry {
   surfaceNames?: Partial<Record<ToolSurface, string>>;
   /** The SAME stdio|http union the DB already uses. */
   config: OrchestratorMcpServerConfig;
+  /** Owned orchestrator clients may use the portable search/call facade. */
+  deferredTools?: boolean;
   /** Undefined in Phase 1. */
   secretRefs?: SecretRef[];
 }

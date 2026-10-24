@@ -13,6 +13,7 @@
  */
 
 // MUST run before imports that initialize SQLite or create the WS token.
+import './stdio-console';
 import './orphan-exit-bootstrap';
 
 // Neutralizes the `server-only` marker so this standalone Node
@@ -51,6 +52,8 @@ import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-hand
 import { CORTEX_WORKER_TOOLS } from './cortex-worker-tools';
 import { createWorkerObservationHandlers } from './worker-observation';
 import { TRANSCRIPT_READ_TOOL } from './transcript-read-tool';
+import { deferredMcpRequest } from './deferred-tools';
+import type { McpTool, McpToolResult } from './operator-handlers/shared';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -88,17 +91,6 @@ interface JsonRpcResponse {
   id: number | string | null;
   result?: unknown;
   error?: { code: number; message: string };
-}
-
-interface McpTool {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-interface McpToolResult {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: boolean;
 }
 
 // ── Config ──
@@ -1267,6 +1259,9 @@ function send(msg: JsonRpcResponse): void {
 }
 
 async function handleMessage(msg: JsonRpcRequest): Promise<void> {
+  const projected = await deferredMcpRequest(msg, () => CORTEX_READONLY ? TOOLS.filter(tool => CORTEX_READONLY_TOOLS.has(tool.name)) : TOOLS);
+  if (projected.response) { send(projected.response); return; }
+  msg = projected.message;
   const { method, id, params } = msg;
 
   // Notifications (no id) — just acknowledge

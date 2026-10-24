@@ -233,6 +233,7 @@ export function buildToolRegistry(
     name: 'operator',
     source: 'builtin',
     label: 'o8 Operator',
+    deferredTools: (options?.profile ?? 'full') === 'full' && process.env.O8_MCP_TOOL_LOADING !== 'full',
     surfaces: ['claude-orchestrator', 'codex-orchestrator', 'claude-desktop', 'openclaw', 'gemini', 'opencode'],
     surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8', opencode: 'o8' },
     config: {
@@ -241,6 +242,7 @@ export function buildToolRegistry(
       args: operatorProxy.args,
       env: {
         O8_API_BASE: apiBase,
+        O8_MCP_TOOL_LOADING: 'full',
         O8_DATA_DIR: getDataDir(),
         O8_VISUALIZATION_REPO_PATH: repoPath,
         ...(options?.threadId ? { O8_VISUALIZATION_THREAD_ID: options.threadId } : {}),
@@ -255,6 +257,7 @@ export function buildToolRegistry(
     name: 'cortex',
     source: 'builtin',
     label: 'Cortex Memory',
+    deferredTools: (options?.profile ?? 'full') === 'full' && process.env.O8_MCP_TOOL_LOADING !== 'full',
     surfaces: ['claude-orchestrator', 'codex-orchestrator'],
     config: {
       type: 'stdio',
@@ -262,6 +265,7 @@ export function buildToolRegistry(
       args: cortexServer.args,
       env: {
         CORTEX_API_BASE: apiBase,
+        O8_MCP_TOOL_LOADING: 'full',
         O8_DATA_DIR: getDataDir(),
         ...ownedCodexEnv,
         CORTEX_REPO_PATH: repoPath,
