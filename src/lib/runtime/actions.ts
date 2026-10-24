@@ -1,4 +1,5 @@
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
+import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
 import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -285,10 +286,13 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
         laneId: payload.existingLaneId,
         storageAdmissionReservationId: payload.storageAdmissionReservationId,
       });
+      const cancelled = retireCancelledPreRunWorktree(repoPath, launchWorktree?.worktree);
+      if (cancelled) await cancelled;
       if (launchWorktree?.worktree) {
         recordFetchUnreachableRecoverySuccess(repoPath);
       }
     } catch (err) {
+      assertPreRunAdmission();
       if (err instanceof DependencyMaterializationIncompleteError) throw err;
       // Known failures keep their existing operator-facing escalation details.
       if (err instanceof WorktreeRebaseConflictError) {
@@ -419,6 +423,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     }
   }
   await assertReviewerPrCheckout(payload.packetId, cwd);
+  assertPreRunAdmission();
   const result = await runtime.launch({
     cwd,
     sourceRepoPath: repoPath,

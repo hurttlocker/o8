@@ -67,6 +67,7 @@ export async function resetPacketViaLaneFallback(
 
   const cleanupTargets: ResetCleanupTarget[] = [];
   for (const lane of bound) {
+    if (input.pendingProvisioningLaneIds?.includes(lane.id) && !lane.worktreePath) continue;
     cleanupTargets.push({
       id: lane.id,
       repoPath: lane.repoPath,
@@ -108,7 +109,7 @@ export async function resetPacketViaLaneFallback(
   }
 
   if (input.clearWorktree) {
-    if (!input.scope) try {
+    if (!input.scope && !input.pendingProvisioningLaneIds?.length) try {
       const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');
       for (const repoPath of new Set(allBound.map((lane) => lane.repoPath))) {

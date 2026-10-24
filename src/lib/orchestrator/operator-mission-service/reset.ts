@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { cancelPreRunPacketLaunches, preRunCancellationMatches } from '@/lib/lane/pre-run-cancellation';
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import {
   resetFailureReceipt,
@@ -503,7 +504,7 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
       if (!terminal && !worktreePath && lane.worktreePath) {
         worktreePath = lane.worktreePath;
       }
-      if (!terminal) {
+      if (!terminal && !(input.pendingProvisioningLaneIds?.includes(lane.id) && !lane.worktreePath)) {
         cleanupTargets.push({
           id: lane.id,
           repoPath: lane.repoPath,
@@ -617,7 +618,7 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
     // Scoped (backgrounded-stop) resets skip the glob — it would rm -rf a
     // re-dispatched packet's live worktree (same prefix). The captured
     // cleanupTargets above already pruned this stop's own worktrees.
-    if (!retryScopedInput.scope) try {
+    if (!retryScopedInput.scope && !input.pendingProvisioningLaneIds?.length) try {
       const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');
       for (const baseDir of resolveWorktreeRootLayout(repoPath).bases) {
@@ -707,11 +708,17 @@ function journalResetCompletion(input: ResetPacketInput, receipt: ResetReceipt, 
 }
 
 export async function resetPacket(input: ResetPacketInput) {
+  let cancelledEvents: Record<string, string> = {};
+  if (!input.scope) {
+    const cancelled = cancelPreRunPacketLaunches([input.packetId], 'reset');
+    cancelledEvents = cancelled.eventIds;
+    if (cancelled.laneIds.length) input = { ...input, pendingProvisioningLaneIds: cancelled.laneIds };
+  }
   return withPacketLifecycleMutationLock(input.packetId, async ({ contended }) => {
     // Minted before the hold so the journal names this request's intended
     // generation even if the process ends while the hold is being stamped.
     const plannedGeneration = randomUUID();
-    if (contended && !input.scope) {
+    if (contended && !input.scope && !preRunCancellationMatches(input.packetId, cancelledEvents)) {
       const result = {
         reset: false,
         salvaged: false,

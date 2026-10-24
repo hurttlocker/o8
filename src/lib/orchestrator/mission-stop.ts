@@ -23,6 +23,7 @@ import {
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { createMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
+import { cancelPreRunPacketLaunches, preRunCancellationMatches } from '@/lib/lane/pre-run-cancellation';
 
 const missionStopChains = new Map<string, Promise<unknown>>();
 const missionStopDepth = new Map<string, number>();
@@ -31,6 +32,7 @@ export type StopMissionPacketStatus = 'stopped' | 'already-terminal' | 'stop-fai
 
 export interface StopMissionPacketResult {
   packetId: string;
+  stoppedFrom?: string;
   status: StopMissionPacketStatus;
   laneId: string | null;
   note: string;
@@ -92,7 +94,8 @@ async function settleTerminalPacketManagedRuns(
   };
 }
 
-async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<StopMissionPacketResult> {
+async function stopPacketViaLaneCommand(packet: OrchestratorPacket, cancelledEvents: Record<string, string> = {}): Promise<StopMissionPacketResult> {
+  const preRunCancelled = Object.keys(cancelledEvents).length > 0;
   if (isPacketTerminal(packet)) {
     return settleTerminalPacketManagedRuns(
       packet,
@@ -121,7 +124,7 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
   }
 
   return withPacketLifecycleMutationLock(packet.id, async ({ contended }) => {
-    if (contended) {
+    if (contended && !preRunCancellationMatches(packet.id, cancelledEvents)) {
       return {
         packetId: packet.id,
         status: 'stop-failed',
@@ -129,7 +132,7 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
         note: 'Packet changed while another lifecycle action was in progress; mission stop was not applied.',
       };
     }
-    if (!laneId) {
+    if (!laneId || (preRunCancelled && lane?.status === 'paused' && !sessionKey)) {
       if ((packet.status === 'failed' || packet.status === 'awaiting_review') && !sessionKey) {
         return settleTerminalPacketManagedRuns(
           packet,
@@ -137,13 +140,13 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
           `Packet is already terminal (${packet.status}).`,
         );
       }
-      if (packet.queueState === 'queued' && !packet.lane) {
+      if (preRunCancelled || (!sessionKey && !packet.lane)) {
         const guard = await holdPacketLifecycleMutation({ packetId: packet.id, kind: 'stop' });
         if (!guard) {
           return {
             packetId: packet.id,
             status: 'stop-failed',
-            laneId: null,
+            laneId,
             note: 'Queued packet could not be held before launch.',
           };
         }
@@ -155,15 +158,15 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
           return {
             packetId: packet.id,
             status: 'stop-failed',
-            laneId: null,
+            laneId,
             note: 'Queued packet changed before its stop hold could be finalized.',
           };
         }
         return {
           packetId: packet.id,
           status: 'stopped',
-          laneId: null,
-          note: 'Queued packet held before any lane launched.',
+          laneId,
+          note: preRunCancelled ? 'Packet held before its worker launched.' : 'Queued packet held before any lane launched.',
         };
       }
       return {
@@ -224,7 +227,7 @@ function applyStopResults(
   });
 }
 
-async function stopMissionSnapshot(state: OrchestratorMissionState): Promise<{
+async function stopMissionSnapshot(state: OrchestratorMissionState, cancelled = new Map<string, Record<string, string>>()): Promise<{
   stoppedAt: string;
   result: StopMissionResult;
 }> {
@@ -233,7 +236,7 @@ async function stopMissionSnapshot(state: OrchestratorMissionState): Promise<{
   const stoppedAt = new Date().toISOString();
   const packets: StopMissionPacketResult[] = [];
   for (const packet of state.packets) {
-    packets.push(await stopPacketViaLaneCommand(packet));
+    packets.push({ ...await stopPacketViaLaneCommand(packet, cancelled.get(packet.id)), stoppedFrom: packet.status });
   }
   return {
     stoppedAt,
@@ -335,13 +338,22 @@ async function releaseMissionStopAdmission(missionId: string, admissionSource: s
 }
 
 async function stopMissionUnlocked(normalizedId: string): Promise<StopMissionResult> {
+  const before = (readOrchestratorControlPlaneState().missionId ?? '').trim() === normalizedId
+    ? readOrchestratorControlPlaneState()
+    : readMissionRegistryEntry(normalizedId, { includeArchived: true })?.mission;
+  const { stoppedFrom: cancelled, packetEvents } = cancelPreRunPacketLaunches(before?.packets.map(packet => packet.id) ?? [], 'stop');
   const admissionSource = `mission_stop:${randomUUID()}`;
   const held = await holdMissionStopAdmission(
     normalizedId,
     createMissionLifecycleHold(admissionSource),
   );
   try {
-    const stopped = await stopMissionSnapshot(held);
+    const stopped = await stopMissionSnapshot(held, packetEvents);
+    for (const packet of stopped.result.packets) {
+      packet.stoppedFrom = cancelled.get(packet.packetId)
+        ?? before?.packets.find(candidate => candidate.id === packet.packetId)?.status
+        ?? packet.stoppedFrom;
+    }
     return await finalizeMissionStop(normalizedId, held, stopped, admissionSource);
   } catch (error) {
     await releaseMissionStopAdmission(normalizedId, admissionSource);
@@ -366,6 +378,7 @@ export async function stopMission(missionId: string): Promise<StopMissionResult>
         event: { type: 'mission_stop', recordedAt: new Date().toISOString() },
         packets: current.packets.map((packet) => ({
           packetId: packet.id,
+          stoppedFrom: packet.status,
           status: 'stop-failed',
           laneId: packet.lane?.laneId ?? null,
           note: 'Mission changed while another lifecycle action was in progress; this stop was not applied.',

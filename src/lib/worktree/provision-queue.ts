@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertPreRunAdmission } from '@/lib/lane/pre-run-cancellation';
 
 import { getSqlite } from '@/lib/db';
 import {
@@ -56,6 +57,7 @@ export async function withWorktreeProvisionQueue<T>(
   };
   try {
     for (;;) {
+      assertPreRunAdmission();
       const predecessors = sqlite.prepare(`
         SELECT sequence, reservation_id, owner_pid, owner_identity_json FROM workspace_provision_queue
         WHERE root_key = ? AND sequence < ? ORDER BY sequence
@@ -84,6 +86,7 @@ export async function withWorktreeProvisionQueue<T>(
           sqlite.prepare('UPDATE workspace_provision_queue SET lease_reservation_id = ? WHERE reservation_id = ?')
             .run(lease.reservationId, reservationId);
           report(0);
+          assertPreRunAdmission();
           return await materialize();
         }
       }

@@ -1826,6 +1826,11 @@ export class WorktreeManager {
   private async cleanupOwned(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
     const meta = await readWorktreeMetaSnapshot(this.repoRoot);
     const entry = meta[worktreeId];
+    if (opts?.expectedCreation) {
+      const expected = opts.expectedCreation;
+      if (!entry || entry.createdAt !== expected.createdAt || entry.branchName !== expected.branch
+        || path.resolve(await this.resolveManagedWorktreePath(worktreeId)) !== path.resolve(expected.path)) return false;
+    }
 
     if (entry?.claudeManaged) {
       // Claude-managed: just remove our metadata; Claude handles its own cleanup

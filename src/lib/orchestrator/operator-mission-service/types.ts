@@ -157,6 +157,8 @@ export interface PickComparisonWinnerInput {
 
 export interface ResetPacketInput {
   packetId: string;
+  /** Internal: an unbound cancelled creator retains its exact rollback authority. */
+  pendingProvisioningLaneIds?: string[];
   reason?: string;
   clearWorktree?: boolean;
   /**

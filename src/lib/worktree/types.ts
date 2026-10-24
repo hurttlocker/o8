@@ -123,6 +123,8 @@ export interface CreateWorktreeOptions {
  * Options for cleaning up a worktree.
  */
 export interface CleanupOptions {
+  /** A delayed creator may retire only the generation it actually returned. */
+  expectedCreation?: Pick<WorktreeInfo, 'createdAt' | 'path' | 'branch'>;
   /** Force removal even with uncommitted changes */
   force?: boolean;
   /** Also delete the branch */
