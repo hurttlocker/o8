@@ -3870,6 +3870,16 @@
       ]
     },
     {
+      "path": "tests/npm-release-age-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/o8-model-pi-real-path.test.ts",
       "reasons": [
         "child-process",
