@@ -50,6 +50,9 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
+    // Load routes on request. Eagerly importing every API and page competes
+    // with native boot's identity probe and first dashboard render (#4436).
+    preloadEntriesOnStart: false,
     // Runtime response caches must not mutate the signed standalone app.
     // Compiled responses remain readable and the in-memory cache stays enabled.
     isrFlushToDisk: false,

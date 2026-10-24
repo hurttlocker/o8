@@ -1,0 +1,524 @@
+{
+  "schema": "o8/native-composer-startup/v1",
+  "issue": 4436,
+  "baseline_commit": "64f95f6916db7740bbec22a78440f2ef70f5f808",
+  "platform": {
+    "os": "darwin",
+    "arch": "x64",
+    "node": "22.23.2"
+  },
+  "method": {
+    "launch_order": [
+      "before-1",
+      "after-1",
+      "before-2",
+      "after-2",
+      "before-3",
+      "after-3"
+    ],
+    "app_identifier": "ai.o8.startup-4436",
+    "fresh_home_and_data_per_launch": true,
+    "owned_process_groups_only": true,
+    "installed_app_controlled": false,
+    "signed": false,
+    "notarized": false,
+    "installed": false,
+    "os_synthetic_input": false,
+    "provider_turns": 0,
+    "fixture_completed_sessions": 4,
+    "integer_ms_rounding": true,
+    "health_probe_timeout_ms": 20000,
+    "connection_refusal_retry_ms": 20,
+    "task_builds_or_tests_during_measurement": false,
+    "host_activity_and_os_cache_controlled": false,
+    "cpu_power_observations": {
+      "during_cohort_speed_limit": 45,
+      "after_cohort_speed_limit": 60,
+      "later_transient_speed_limit": 100,
+      "recovery_gate_minimum": 95,
+      "recovery_gate_timeout_ms": 180000,
+      "recovery_readings": [
+        90,
+        76,
+        74,
+        78,
+        76,
+        86
+      ],
+      "recovery_cohort_samples_counted": 0,
+      "recovery_error": "CPU speed did not recover to 95 before launch"
+    }
+  },
+  "phase_definitions": {
+    "native_boot_ms": "process spawn to native Next spawn; includes shell and node preflight",
+    "server_and_identity_ms": "native Next spawn to verified loader navigation",
+    "dashboard_document_ms": "dashboard navigation start to HTML response end",
+    "frontend_hydration_ms": "HTML response end to dashboard hydration marker",
+    "workspace_restore_and_input_ms": "dashboard hydration marker to unobscured controlled composer input accepted through two frames",
+    "tab_request_relative_to_hydration_ms": "saved tab-state fetch start minus dashboard hydration; negative means overlapped",
+    "first_paint_ms": "loader WebKit first-contentful-paint; overlaps other phases",
+    "next_health_ms": "complete Next health response since process spawn; overlaps other phases",
+    "ws_health_ms": "complete WS health response since process spawn; overlaps other phases"
+  },
+  "summary": {
+    "first_paint_ms": {
+      "before": {
+        "samples": [
+          1878,
+          1666,
+          1557
+        ],
+        "median": 1666,
+        "worst": 1878
+      },
+      "after": {
+        "samples": [
+          1659,
+          1417,
+          1569
+        ],
+        "median": 1569,
+        "worst": 1659
+      }
+    },
+    "interactive_ms": {
+      "before": {
+        "samples": [
+          13274,
+          11774,
+          11620
+        ],
+        "median": 11774,
+        "worst": 13274
+      },
+      "after": {
+        "samples": [
+          8916,
+          8022,
+          8635
+        ],
+        "median": 8635,
+        "worst": 8916
+      }
+    },
+    "native_boot_ms": {
+      "before": {
+        "samples": [
+          1340,
+          1169,
+          1089
+        ],
+        "median": 1169,
+        "worst": 1340
+      },
+      "after": {
+        "samples": [
+          1150,
+          936,
+          1071
+        ],
+        "median": 1071,
+        "worst": 1150
+      }
+    },
+    "server_and_identity_ms": {
+      "before": {
+        "samples": [
+          6069,
+          2538,
+          5054
+        ],
+        "median": 5054,
+        "worst": 6069
+      },
+      "after": {
+        "samples": [
+          2138,
+          3123,
+          2362
+        ],
+        "median": 2362,
+        "worst": 3123
+      }
+    },
+    "dashboard_document_ms": {
+      "before": {
+        "samples": [
+          1509,
+          3789,
+          1679
+        ],
+        "median": 1679,
+        "worst": 3789
+      },
+      "after": {
+        "samples": [
+          2195,
+          1060,
+          1933
+        ],
+        "median": 1933,
+        "worst": 2195
+      }
+    },
+    "frontend_hydration_ms": {
+      "before": {
+        "samples": [
+          1327,
+          1571,
+          1245
+        ],
+        "median": 1327,
+        "worst": 1571
+      },
+      "after": {
+        "samples": [
+          1285,
+          915,
+          1465
+        ],
+        "median": 1285,
+        "worst": 1465
+      }
+    },
+    "workspace_restore_and_input_ms": {
+      "before": {
+        "samples": [
+          3029,
+          2707,
+          2553
+        ],
+        "median": 2707,
+        "worst": 3029
+      },
+      "after": {
+        "samples": [
+          2148,
+          1988,
+          1804
+        ],
+        "median": 1988,
+        "worst": 2148
+      }
+    },
+    "tab_request_relative_to_hydration_ms": {
+      "before": {
+        "samples": [
+          2139,
+          1678,
+          1775
+        ],
+        "median": 1775,
+        "worst": 2139
+      },
+      "after": {
+        "samples": [
+          -91,
+          -74,
+          -83
+        ],
+        "median": -83,
+        "worst": -74
+      }
+    },
+    "input_probe_to_paint_ms": {
+      "before": {
+        "samples": [
+          439,
+          516,
+          290
+        ],
+        "median": 439,
+        "worst": 516
+      },
+      "after": {
+        "samples": [
+          380,
+          304,
+          314
+        ],
+        "median": 314,
+        "worst": 380
+      }
+    },
+    "next_health_ms": {
+      "before": {
+        "samples": [
+          4098,
+          3496,
+          3171
+        ],
+        "median": 3496,
+        "worst": 4098
+      },
+      "after": {
+        "samples": [
+          3088,
+          2491,
+          3219
+        ],
+        "median": 3088,
+        "worst": 3219
+      }
+    },
+    "ws_health_ms": {
+      "before": {
+        "samples": [
+          3765,
+          3451,
+          3114
+        ],
+        "median": 3451,
+        "worst": 3765
+      },
+      "after": {
+        "samples": [
+          3557,
+          3018,
+          3597
+        ],
+        "median": 3557,
+        "worst": 3597
+      }
+    },
+    "context_generation_ms": {
+      "before": {
+        "samples": [
+          27,
+          20,
+          21
+        ],
+        "median": 21,
+        "worst": 27
+      },
+      "after": {
+        "samples": [
+          25,
+          20,
+          18
+        ],
+        "median": 20,
+        "worst": 25
+      }
+    }
+  },
+  "arms": {
+    "before": {
+      "native_binary_sha256": "794952240fcfd8554d3ac98b8ecc8ad076914361e22e02bc6ac9233fa1fce07a",
+      "server_tree_sha256": "a2f22b53d5ef1bc291eee69c1013b393ecd2d3565f1943aa58336b63da9dd700",
+      "samples": [
+        {
+          "sample": 1,
+          "first_paint_ms": 1878,
+          "interactive_ms": 13274,
+          "native_boot_ms": 1340,
+          "server_and_identity_ms": 6069,
+          "dashboard_document_ms": 1509,
+          "frontend_hydration_ms": 1327,
+          "workspace_restore_and_input_ms": 3029,
+          "context_generation_ms": 27,
+          "window_created_ms": 1056,
+          "login_shell_ready_ms": 1096,
+          "node_preflight_ready_ms": 1179,
+          "next_health_ms": 4098,
+          "ws_health_ms": 3765,
+          "dashboard_navigation_start_ms": 7409,
+          "dashboard_response_start_ms": 8670,
+          "dashboard_response_end_ms": 8918,
+          "dashboard_hydrated_ms": 10245,
+          "saved_tab_request_start_ms": 12384,
+          "tab_request_relative_to_hydration_ms": 2139,
+          "input_probe_start_ms": 12835,
+          "input_probe_to_paint_ms": 439,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        },
+        {
+          "sample": 2,
+          "first_paint_ms": 1666,
+          "interactive_ms": 11774,
+          "native_boot_ms": 1169,
+          "server_and_identity_ms": 2538,
+          "dashboard_document_ms": 3789,
+          "frontend_hydration_ms": 1571,
+          "workspace_restore_and_input_ms": 2707,
+          "context_generation_ms": 20,
+          "window_created_ms": 896,
+          "login_shell_ready_ms": 930,
+          "node_preflight_ready_ms": 1013,
+          "next_health_ms": 3496,
+          "ws_health_ms": 3451,
+          "dashboard_navigation_start_ms": 3707,
+          "dashboard_response_start_ms": 6936,
+          "dashboard_response_end_ms": 7496,
+          "dashboard_hydrated_ms": 9067,
+          "saved_tab_request_start_ms": 10745,
+          "tab_request_relative_to_hydration_ms": 1678,
+          "input_probe_start_ms": 11258,
+          "input_probe_to_paint_ms": 516,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        },
+        {
+          "sample": 3,
+          "first_paint_ms": 1557,
+          "interactive_ms": 11620,
+          "native_boot_ms": 1089,
+          "server_and_identity_ms": 5054,
+          "dashboard_document_ms": 1679,
+          "frontend_hydration_ms": 1245,
+          "workspace_restore_and_input_ms": 2553,
+          "context_generation_ms": 21,
+          "window_created_ms": 840,
+          "login_shell_ready_ms": 872,
+          "node_preflight_ready_ms": 950,
+          "next_health_ms": 3171,
+          "ws_health_ms": 3114,
+          "dashboard_navigation_start_ms": 6143,
+          "dashboard_response_start_ms": 7619,
+          "dashboard_response_end_ms": 7822,
+          "dashboard_hydrated_ms": 9067,
+          "saved_tab_request_start_ms": 10842,
+          "tab_request_relative_to_hydration_ms": 1775,
+          "input_probe_start_ms": 11330,
+          "input_probe_to_paint_ms": 290,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        }
+      ]
+    },
+    "after": {
+      "native_binary_sha256": "794952240fcfd8554d3ac98b8ecc8ad076914361e22e02bc6ac9233fa1fce07a",
+      "server_tree_sha256": "79f06733b3620090e7a7a5fab584ac5409c4859287be99b1a18abb8cb13e8e53",
+      "samples": [
+        {
+          "sample": 1,
+          "first_paint_ms": 1659,
+          "interactive_ms": 8916,
+          "native_boot_ms": 1150,
+          "server_and_identity_ms": 2138,
+          "dashboard_document_ms": 2195,
+          "frontend_hydration_ms": 1285,
+          "workspace_restore_and_input_ms": 2148,
+          "context_generation_ms": 25,
+          "window_created_ms": 901,
+          "login_shell_ready_ms": 936,
+          "node_preflight_ready_ms": 1019,
+          "next_health_ms": 3088,
+          "ws_health_ms": 3557,
+          "dashboard_navigation_start_ms": 3288,
+          "dashboard_response_start_ms": 5095,
+          "dashboard_response_end_ms": 5483,
+          "dashboard_hydrated_ms": 6768,
+          "saved_tab_request_start_ms": 6677,
+          "tab_request_relative_to_hydration_ms": -91,
+          "input_probe_start_ms": 8536,
+          "input_probe_to_paint_ms": 380,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        },
+        {
+          "sample": 2,
+          "first_paint_ms": 1417,
+          "interactive_ms": 8022,
+          "native_boot_ms": 936,
+          "server_and_identity_ms": 3123,
+          "dashboard_document_ms": 1060,
+          "frontend_hydration_ms": 915,
+          "workspace_restore_and_input_ms": 1988,
+          "context_generation_ms": 20,
+          "window_created_ms": 713,
+          "login_shell_ready_ms": 741,
+          "node_preflight_ready_ms": 810,
+          "next_health_ms": 2491,
+          "ws_health_ms": 3018,
+          "dashboard_navigation_start_ms": 4059,
+          "dashboard_response_start_ms": 4818,
+          "dashboard_response_end_ms": 5119,
+          "dashboard_hydrated_ms": 6034,
+          "saved_tab_request_start_ms": 5960,
+          "tab_request_relative_to_hydration_ms": -74,
+          "input_probe_start_ms": 7718,
+          "input_probe_to_paint_ms": 304,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        },
+        {
+          "sample": 3,
+          "first_paint_ms": 1569,
+          "interactive_ms": 8635,
+          "native_boot_ms": 1071,
+          "server_and_identity_ms": 2362,
+          "dashboard_document_ms": 1933,
+          "frontend_hydration_ms": 1465,
+          "workspace_restore_and_input_ms": 1804,
+          "context_generation_ms": 18,
+          "window_created_ms": 821,
+          "login_shell_ready_ms": 852,
+          "node_preflight_ready_ms": 928,
+          "next_health_ms": 3219,
+          "ws_health_ms": 3597,
+          "dashboard_navigation_start_ms": 3433,
+          "dashboard_response_start_ms": 4990,
+          "dashboard_response_end_ms": 5366,
+          "dashboard_hydrated_ms": 6831,
+          "saved_tab_request_start_ms": 6748,
+          "tab_request_relative_to_hydration_ms": -83,
+          "input_probe_start_ms": 8321,
+          "input_probe_to_paint_ms": 314,
+          "proof": {
+            "focused": true,
+            "controlledSendEnabled": true,
+            "accepted": true,
+            "unobscured": true,
+            "draft_cleared": true,
+            "send_disabled_after_clear": true
+          }
+        }
+      ]
+    }
+  },
+  "targets": {
+    "first_paint_ms": 1000,
+    "interactive_ms": 3000
+  },
+  "trace_assertions": {
+    "unobscured_controlled_input_and_clear_all_samples": true,
+    "tab_request_relative_to_hydration_median_under_1000_ms": true
+  },
+  "budget_status": {
+    "first_paint_under_1000_ms": false,
+    "interactive_under_3000_ms": false,
+    "note": "Both targets remain unmet in the measured CPU-limited conditions; unthrottled reference-host acceptance remains open."
+  }
+}

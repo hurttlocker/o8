@@ -3733,6 +3733,15 @@
       ]
     },
     {
+      "path": "tests/next-startup-route-loading-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-model-pi-real-path.test.ts",
       "reasons": [
         "child-process",

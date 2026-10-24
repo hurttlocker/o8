@@ -7,7 +7,7 @@ import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
 import { LegacyPreviewRecovery } from '@/components/desktop/LegacyPreviewRecovery';
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
-import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
+import { WorkspaceTerminal, type TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { RemoteTerminalDetails, TerminalTab, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
@@ -41,7 +41,8 @@ import {
 } from './utils';
 import { waitForWorkspaceTerminalHandle } from './hooks/workspace-terminal-readiness';
 
-const LazyWorkspaceTerminal = retryingLazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })), { label: 'Workspace terminal' });
+// The primary workspace is needed at boot. Fetch its code with the dashboard
+// instead of starting another chunk waterfall after hydration (#4436).
 const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })), { label: 'Canvas' });
 
 const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
@@ -362,7 +363,7 @@ export function createTileRegistry({
 
         return (
           <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--t-bg)', color: 'var(--t-text-faint)', fontSize: 13 }} />}>
-          <LazyWorkspaceTerminal
+          <WorkspaceTerminal
             key={`workspace-terminal:${tileId}:${workspaceTerminalResetNonceByTileId[tileId] ?? 0}`}
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
