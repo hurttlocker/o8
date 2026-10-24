@@ -18,12 +18,13 @@ const entryAttribute = workspace ? 'data-o8-message-id' : 'data-outside-transcri
 const output = path.resolve(option('output', 'tests/bench/latest/outside-transcript-background.json'));
 const forceForeground = process.argv.includes('--force-foreground');
 const baselinePresentation = process.argv.includes('--baseline-presentation');
+const hiddenDocument = process.argv.includes('--hidden-document');
 if (!['chromium', 'webkit'].includes(engine)) throw new Error('Use --engine=chromium|webkit.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const baselineRef = baselinePresentation ? execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: root, encoding: 'utf8' }).trim() : null;
-const receipt = { engine, surface: workspace ? 'workspace' : 'outside', forceForeground, baselineRef, observations: [], errors: [], passed: false,
+const receipt = { engine, surface: workspace ? 'workspace' : 'outside', forceForeground, hiddenDocument, baselineRef, observations: [], errors: [], passed: false,
   workload: { sessions: 4, entriesPerSession: 80, sourceCadenceMs: 50, samples: 3, sampleMs: 3000 },
-  limits: 'Production data hook, transcript renderers and shared store with fixture cache writes. Workspace fixture uses the production draft/scroll hooks; surrounding application chrome is omitted. Existing interaction browser ownership/statistics. Not full dashboard, native, provider or power-saving proof. WebKit TaskDuration unavailable.' };
+  limits: 'Production data hook, transcript renderers and shared store with fixture cache writes. Document visibility input is controlled; browser timer throttling and native minimization are not measured. Workspace fixture uses the production draft/scroll hooks; surrounding application chrome is omitted. Existing interaction browser ownership/statistics. Not full dashboard, native, provider or power-saving proof. WebKit TaskDuration unavailable.' };
 let browser; let measured;
 try {
   const built = await build({ absWorkingDir: root, bundle: true, write: false, minify: true, format: 'iife',
@@ -39,6 +40,10 @@ try {
       import { createRoot } from 'react-dom/client';
       import { OutsideConversationPane } from './src/components/desktop/workspace-terminal/OutsideConversationPane';
       import { transcriptStore } from './src/lib/transcripts/store';
+      ${hiddenDocument ? `let hidden = false;
+      Object.defineProperty(document, 'hidden', {configurable: true, get: () => ${forceForeground} ? false : hidden});
+      Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => hidden ? 'hidden' : 'visible'});
+      window.__setDocumentHidden = value => { hidden = value; document.dispatchEvent(new Event('visibilitychange')); };` : ''}
       ${workspace ? `import { useWorkspaceChatPane } from './src/components/desktop/workspace-terminal/useWorkspaceChatPane';
       import { WorkspaceTranscript } from './src/components/desktop/workspace-terminal/WorkspaceTranscript';
       const callbacks = {onUpdateMessages: () => {}, onUpdateSessionKey: () => {}, onSelectModel: () => {}, onConsumeDraftInjection: () => {}};
@@ -111,6 +116,7 @@ try {
   });
   const selection = await page.evaluate(() => String(window.getSelection()));
   const cdp = engine === 'chromium' ? await page.context().newCDPSession(page) : null;
+  if (hiddenDocument) await page.evaluate(() => window.__setDocumentHidden(true));
   if (cdp) await cdp.send('Performance.enable');
   const taskTime = async () => cdp ? (await cdp.send('Performance.getMetrics')).metrics.find(value => value.name === 'TaskDuration').value : null;
   for (let sample = 0; sample < 3; sample++) {
@@ -144,6 +150,12 @@ try {
       scrollPreserved: Math.abs(await scroller.evaluate(element => element.scrollTop) - scrollTop) <= 1 });
   }
   await page.evaluate(() => window.__stop()); await page.waitForTimeout(300);
+  if (hiddenDocument) {
+    receipt.documentWasHidden = await page.evaluate(() => document.hidden && document.visibilityState === 'hidden');
+    await page.evaluate(() => window.__setDocumentHidden(false));
+    await page.waitForFunction(attribute => document.querySelector('[' + attribute + '="s0-e79"]')?.textContent.includes('Live ' + window.__tick), entryAttribute);
+    receipt.windowCatchUp = true;
+  }
   await page.getByRole('button', { name: 'Session 3', exact: true }).click();
   receipt.catchUp = await page.locator(`[${entryAttribute}="s3-e79"]`).evaluate(
     (element, tick) => element.textContent.includes(`Live ${tick}`), await page.evaluate(() => window.__tick));
@@ -157,7 +169,8 @@ try {
   if (option('screenshot', '')) await page.screenshot({ path: path.resolve(option('screenshot', '')) });
   receipt.medianTaskMs = percentile(receipt.observations.map(row => row.taskMs), 0.5);
   receipt.passed = !receipt.errors.length && receipt.draftRetained && receipt.draftSelectionRetained && receipt.transcriptHealthy && receipt.catchUp && receipt.retained && receipt.scrollPreserved && receipt.selectionPreserved
-    && receipt.observations.every(row => row.scrollPreserved && row.visibleBatches >= 8 && row.hiddenBatches.every(count => count > 0 && count <= 4));
+    && (!hiddenDocument || receipt.documentWasHidden && receipt.windowCatchUp)
+    && receipt.observations.every(row => row.scrollPreserved && (hiddenDocument ? row.visibleBatches > 0 && row.visibleBatches <= 4 : row.visibleBatches >= 8) && row.hiddenBatches.every(count => count > 0 && count <= 4));
 } catch (error) { receipt.error = String(error); }
 finally {
   if (measured) await closeMeasuredBrowser(measured); else await browser?.close();
