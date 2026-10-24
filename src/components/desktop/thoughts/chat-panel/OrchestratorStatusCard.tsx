@@ -96,7 +96,7 @@ export function OrchestratorStatusCard({
   const { title, detail, tone } = statusEventSummary(displayEvent);
   const palette = TONE[tone];
   const isMerge = displayEvent.kind === 'merge';
-  const statusLabel = isMerge ? 'Merged' : title;
+  const statusLabel = isMerge ? 'Merged' : displayEvent.kind === 'packet-complete' ? detail : title;
   const detailText = isMerge ? mergeEvidenceLine(displayEvent) : detail;
 
   return (

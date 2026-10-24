@@ -14,6 +14,8 @@
  *    into a merge / heal status event, client-side (see useOrchestratorStatusFeed).
  */
 
+import type { LaneOutcome } from '@/lib/lane/types';
+
 /** Lightweight per-packet identity carried on a mission-complete event, so the
  *  detail modal can lazily fetch each packet's ledger summary (kept small —
  *  the heavy session_outcomes lookup + AI prose happen server-side on click). */
@@ -53,6 +55,7 @@ export type OrchestratorStatusEventData =
       diff?: PacketDiffEvidence | null;
       focus?: PacketFocusTarget | null;
     }
+  | { kind: 'packet-complete'; packetTitle: string; closed: boolean }
   | { kind: 'heal'; outcome: 'recovered' | 'needs-human'; packetTitle?: string | null; previousStatus?: string | null };
 
 export type OrchestratorStatusDetection = OrchestratorStatusEventData | { kind: 'suppress' };
@@ -110,6 +113,8 @@ export interface LaneLifecyclePayload {
   previousStatus?: string | null;
   branch?: string | null;
   runtime?: string | null;
+  label?: string | null;
+  outcome?: LaneOutcome | null;
 }
 
 /** The lane status off a lifecycle payload, tolerant of both field names. */
@@ -130,11 +135,17 @@ export function deriveLaneStatusEvent(
   const previous = data.previousStatus ?? '';
   const packet = resolvePacket(data);
 
-  // A packet merged: its lane settled to `completed`.
-  if (status === 'completed') {
+  const packetTitle = packet?.title ?? data.label?.trim() ?? null;
+  const closed = data.outcome === 'closed_unmerged' || data.outcome === 'discarded';
+  if (status === 'completed' || (status === 'archived' && closed)) {
+    // Completion also covers read-only work and zero-diff operations. Only a
+    // stamped merge outcome can claim that changes reached the base branch.
+    if (data.outcome !== 'merged') {
+      return { kind: 'packet-complete', packetTitle: packetTitle || 'Packet completed', closed };
+    }
     return {
       kind: 'merge',
-      packetTitle: packet?.title ?? 'A packet',
+      packetTitle: packetTitle || 'Packet merged',
       branch: data.branch ?? null,
       runtime: data.runtime ?? null,
       repoLabel: packet?.repoLabel ?? null,
@@ -197,6 +208,8 @@ export function statusEventSummary(event: OrchestratorStatusEventData): { title:
           : 'Archived · ready for the next mission',
         tone: 'success',
       };
+    case 'packet-complete':
+      return { title: event.packetTitle, detail: event.closed ? 'Closed' : 'Completed', tone: 'success' };
     case 'merge':
       return {
         title: event.packetTitle,

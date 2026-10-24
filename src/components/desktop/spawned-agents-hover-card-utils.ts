@@ -1,6 +1,6 @@
 import { laneStatusToStateKey, packetStateColorScheme, type PacketStateKey } from '@/lib/packet-state-colors';
 import { packetStatusFromLaneStatus, type CanonicalPacketStatus } from '@/lib/orchestrator/packet-state';
-import type { LaneStatus as CanonicalLaneStatus } from '@/lib/lane/types';
+import type { LaneOutcome, LaneStatus as CanonicalLaneStatus } from '@/lib/lane/types';
 import type { LaneStatus, VisualStatus } from './AgentPanelExtraAgentRow';
 
 export interface SpawnedAgentState {
@@ -14,7 +14,7 @@ export function deriveSpawnedAgentState(
   laneStatus: LaneStatus | null | undefined,
   visualStatus: VisualStatus,
   lastEventLabel: string | null | undefined,
-  outcome?: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null,
+  outcome?: LaneOutcome | null,
 ): SpawnedAgentState {
   const canonical = laneStatus === 'awaiting_human'
     ? 'blocked'
@@ -31,12 +31,17 @@ export function deriveSpawnedAgentState(
   if (canonical === 'awaiting_review') label = lastEventLabel === 'pr_created' ? 'PR open' : 'Review ready';
   if (canonical === 'blocked') label = laneStatus === 'awaiting_input' ? 'Needs input' : 'Blocked';
   if (canonical === 'recovering') label = 'Recovering';
-  if (canonical === 'released') label = 'Merged';
+  if (canonical === 'released') label = outcome === 'merged' ? 'Merged' : 'Completed';
   if (canonical === 'archived' && !outcome) label = 'Archived';
   if (canonical === 'idle') label = 'Idle';
   if (!canonical && visualStatus === 'waiting') label = 'Review ready';
   if (!canonical && visualStatus === 'error') label = 'Failed';
   if (!canonical && visualStatus === 'running') label = 'Running';
+
+  // Resolved outcomes remain authoritative after completion or archival.
+  if (outcome === 'no_changes') label = 'Finished — no changes';
+  if (outcome === 'discarded') label = 'Discarded';
+  if (outcome === 'closed_unmerged') label = 'Closed';
 
   return {
     canonical,

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import { hasCanonicalReleaseEvidence } from '@/lib/orchestrator/packet-release-truth';
 import { hasMissionBeenCarded, markMissionCarded } from '@/lib/orchestrator/store';
 import {
   laneStatusOf,
@@ -34,6 +35,7 @@ interface MissionTracker {
   completedAt: number | null;
   packetIds: Set<string>;
   done: Set<string>;
+  merged: Set<string>;
   meta: Map<string, TrackedPacketMeta>;
 }
 
@@ -103,7 +105,7 @@ function recordPendingMissionCard(tracker: MissionTracker) {
   });
   const statusEvent: OrchestratorStatusEventData = {
     kind: 'mission-complete',
-    mergedCount: packets.length,
+    mergedCount: tracker.merged.size,
     archivedCount: packets.length,
     summary: tracker.summary || undefined,
     repoPath: tracker.repoPath,
@@ -198,7 +200,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
     }
     // Skip when this mission's packet/release snapshot is unchanged — the effect
     // re-runs on every render (missionState is a fresh ref each time).
-    const sig = missionState.packets.map((p) => `${p.id}:${p.releaseState}:${p.archivedAt ? 1 : 0}`).join('|');
+    const sig = missionState.packets.map((p) => `${p.id}:${p.releaseState}:${p.archivedAt ? 1 : 0}:${p.releaseStatePayload?.source}:${p.releaseStatePayload?.mergeCommit}`).join('|');
     if (lastCaptureSig.get(id) === sig) return;
     lastCaptureSig.set(id, sig);
     const existing = trackers.get(id);
@@ -210,6 +212,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
       completedAt: null,
       packetIds: new Set<string>(),
       done: new Set<string>(),
+      merged: new Set<string>(),
       meta: new Map<string, TrackedPacketMeta>(),
     };
     tracker.summary = missionState.summary || tracker.summary;
@@ -227,6 +230,8 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
         sessionKey: packet.lane?.sessionKey ?? null,
       });
       if (packetIsTerminal(packet)) tracker.done.add(packet.id);
+      if (packet.releaseState === 'released' && hasCanonicalReleaseEvidence(packet)
+        && packet.releaseStatePayload?.source !== 'read_only_completed') tracker.merged.add(packet.id);
     }
     trackers.set(id, tracker);
     checkTrackerComplete(id);
@@ -251,6 +256,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
         }
         if (packetId) {
           tracker.done.add(packetId);
+          if (data.outcome === 'merged') tracker.merged.add(packetId);
           checkTrackerComplete(missionId);
           break;
         }

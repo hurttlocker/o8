@@ -1,6 +1,6 @@
 import type { BrowserAttachmentSummary, BrowserInventorySnapshot } from '@/lib/browser/types';
 import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
-import type { LaneStatus } from '@/lib/lane/types';
+import type { LaneOutcome, LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { MobileInboxDelta } from '@/lib/mobile/inbox-delta';
 import type { OrchestratorPacketStatus, WorkerLaunchContext } from '@/lib/orchestrator/types';
@@ -53,6 +53,9 @@ export interface LaneLifecycleEventPayload {
   status: LaneStatus;
   packetStatus?: OrchestratorPacketStatus;
   previousStatus: LaneStatus | null;
+  label?: string;
+  outcome?: LaneOutcome | null;
+  runtime?: string;
   sessionKey: string | null;
   branch: string;
   repoPath: string;
@@ -69,6 +72,7 @@ export interface RealtimeMutationRecord {
   sessionKey?: string;
   laneId?: string;
   laneLabel?: string;
+  laneOutcome?: LaneOutcome | null;
   packetId?: string;
   packetTitle?: string;
   packetReferenceLabel?: string;
