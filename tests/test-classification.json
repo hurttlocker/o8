@@ -5971,6 +5971,12 @@
       ]
     },
     {
+      "path": "tests/worker-pane-scroll-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-start-mode-real-path.test.ts",
       "reasons": [
         "real-path"

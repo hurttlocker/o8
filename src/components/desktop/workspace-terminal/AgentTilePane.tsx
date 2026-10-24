@@ -189,6 +189,7 @@ function useAgentTileStickToBottom(active: boolean, changeKey: string, hasConten
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const pinToBottom = useCallback(() => {
     const container = scrollRef.current;
@@ -198,6 +199,7 @@ function useAgentTileStickToBottom(active: boolean, changeKey: string, hasConten
 
   const handleScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
     stickToBottomRef.current = isNearBottom(event.currentTarget);
+    setShowJumpToLatest(!stickToBottomRef.current);
   }, []);
 
   useEffect(() => {
@@ -232,7 +234,13 @@ function useAgentTileStickToBottom(active: boolean, changeKey: string, hasConten
     };
   }, [active, pinToBottom]);
 
-  return { contentRef, handleScroll, scrollRef };
+  const jumpToLatest = useCallback(() => {
+    stickToBottomRef.current = true;
+    setShowJumpToLatest(false);
+    pinToBottom();
+  }, [pinToBottom]);
+
+  return { contentRef, handleScroll, scrollRef, showJumpToLatest, jumpToLatest };
 }
 
 export function canSteerAgentState(
@@ -322,7 +330,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     ? `${displayEntries[displayEntries.length - 1]?.id}:${entryContent(displayEntries[displayEntries.length - 1]!)}`
     : '';
   const lastPeerKey = peerExchange.messages[0]?.id ?? '';
-  const { contentRef, handleScroll, scrollRef } = useAgentTileStickToBottom(
+  const { contentRef, handleScroll, scrollRef, showJumpToLatest, jumpToLatest } = useAgentTileStickToBottom(
     status === 'running',
     `${lastEntryKey}:${lastPeerKey}`,
     displayEntries.length > 0 || peerExchange.messages.length > 0,
@@ -534,6 +542,15 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </div>
         )}
       </div>
+
+      {showJumpToLatest ? <div style={{ position: 'relative', height: 0, flexShrink: 0 }}>
+        <button type="button" onClick={jumpToLatest}
+          style={{ position: 'absolute', right: 12, bottom: 8, border: '1px solid var(--t-border)', borderRadius: 8,
+            paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, background: 'var(--t-panel)',
+            color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer' }}>
+          New messages · Jump to latest
+        </button>
+      </div> : null}
 
       {canSteer || attention || steerReceipt === 'unknown' ? (
         <form onSubmit={handleFormSubmit} style={{ flexShrink: 0, background: 'transparent' }}>
