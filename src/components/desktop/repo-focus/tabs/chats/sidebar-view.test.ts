@@ -3,6 +3,7 @@ import { act, createElement, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentPanelExtraAgents, type LaneSummary } from '../../../AgentPanelExtraAgents';
+import { ExtraAgentRowView } from '../../../AgentPanelExtraAgentRow';
 import { ChatsTab } from '../ChatsTab';
 import { SidebarHeaderActions } from '../../../shell/SidebarHeaderActions';
 import { CHAT_GROUP_BY_KEY, staysInWorkingView } from './sidebar-view';
@@ -67,6 +68,42 @@ describe('compact sidebar view through the chat panel', () => {
   afterEach(async () => {
     await act(async () => root.unmount()); container.remove();
     vi.useRealTimers(); vi.unstubAllGlobals();
+  });
+  it.each([false, true])('moves closed and archived workers out of recent date groups, older=%s', async older => {
+    window.localStorage.setItem(CHAT_GROUP_BY_KEY, 'chronological');
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ conversations: [], lanes: [] }));
+    const entries = (['running', 'completed', 'archived'] as const).map((status, index): SidebarAgentEntry => {
+      const row: SidebarAgentEntry['row'] = { ...workerEntry.row, key: `lane:state-${index}`, laneId: `state-${index}`,
+        name: ['Live worker', 'Closed worker', 'Archived worker'][index], sessionKey: `state-session-${index}`,
+        laneStatus: status, status: status === 'running' ? 'running' : status === 'archived' ? 'archived' : 'idle', lastActivityAt: fixtureNow - (older ? index * 4 * 24 * 60 * 60_000 : 0) };
+      return { row, active: false, pinned: index === 2, attention: { status },
+        render: () => createElement(ExtraAgentRowView, { row, active: false, busy: false, band: 'neutral',
+          showPreview: false, onFocusRow: () => onOpen(row.sessionKey!) }) };
+    });
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).includes('chat-history/list')
+      ? { conversations: [] } : { lanes: [{ id: 'state-2', label: 'Archived worker', status: 'archived',
+        sessionKey: 'state-session-2', repoPath: repo.localPath, updatedAt: new Date(fixtureNow).toISOString() }] }));
+    await act(async () => root.render(createElement(ChatsTab, {
+      repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
+      agentEntries: entries, onOpenHistoryChat: onOpen,
+    })));
+    const recents = container.querySelector('[aria-label="Recents conversations"]')!;
+    expect(recents.textContent).toContain('Live worker');
+    expect(recents.textContent).not.toContain('Closed worker');
+    expect(recents.textContent).not.toContain('Archived worker');
+    expect(container.querySelector('[aria-label="Previous 7 days conversations"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Previous 30 days conversations"]')).toBeNull();
+    const archiveToggle = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')]
+      .find(button => button.textContent?.trim() === 'Archived');
+    expect(archiveToggle).toBeDefined();
+    await act(async () => archiveToggle!.click());
+    expect(container.textContent).toContain('Closed worker');
+    expect(container.textContent?.match(/Archived worker/g)).toHaveLength(1);
+    expect(container.querySelector('[aria-label="Pinned conversations"]')).toBeNull();
+    const archived = [...container.querySelectorAll<HTMLElement>('[data-o8-agent-row]')]
+      .find(row => row.textContent?.includes('Archived worker'))!;
+    await act(async () => archived.click());
+    expect(onOpen).toHaveBeenCalledWith('state-session-2');
   });
   it('shows creation actions only after confirmed empty history and recovers an unavailable read', async () => {
     const createOrchestrator = vi.fn(); const createTerminal = vi.fn();
