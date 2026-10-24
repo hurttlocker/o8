@@ -1,0 +1,271 @@
+[
+  {
+    "name": "partial window discards older server entries",
+    "current": [
+      {
+        "id": "a",
+        "timestamp": 1,
+        "role": "assistant",
+        "text": "a"
+      },
+      {
+        "id": "b",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "b"
+      },
+      {
+        "id": "c",
+        "timestamp": 3,
+        "role": "assistant",
+        "text": "c"
+      }
+    ],
+    "incoming": [
+      {
+        "id": "b",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "b"
+      }
+    ],
+    "expected": [
+      {
+        "id": "b",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "b"
+      },
+      {
+        "id": "c",
+        "timestamp": 3,
+        "role": "assistant",
+        "text": "c"
+      }
+    ]
+  },
+  {
+    "name": "trailing optimistic entries survive and sort by timestamp",
+    "current": [
+      {
+        "id": "msg-a",
+        "timestamp": 0,
+        "role": "assistant",
+        "text": "local"
+      },
+      {
+        "id": "stream:a",
+        "timestamp": 0,
+        "role": "assistant",
+        "text": "stream"
+      },
+      {
+        "id": "old",
+        "timestamp": 1,
+        "role": "assistant",
+        "text": "old"
+      },
+      {
+        "id": "newer",
+        "timestamp": 8,
+        "role": "assistant",
+        "text": "newer"
+      }
+    ],
+    "incoming": [
+      {
+        "id": "remote",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "remote"
+      }
+    ],
+    "expected": [
+      {
+        "id": "remote",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "remote"
+      },
+      {
+        "id": "msg-a",
+        "timestamp": 0,
+        "role": "assistant",
+        "text": "local"
+      },
+      {
+        "id": "stream:a",
+        "timestamp": 0,
+        "role": "assistant",
+        "text": "stream"
+      },
+      {
+        "id": "newer",
+        "timestamp": 8,
+        "role": "assistant",
+        "text": "newer"
+      }
+    ]
+  },
+  {
+    "name": "trim and numeric tool signatures preserve supported metadata",
+    "current": [
+      {
+        "id": "old",
+        "timestamp": 1,
+        "role": "assistant",
+        "text": " ready ",
+        "model": "fixture",
+        "tokens": {
+          "input": 1,
+          "output": 2
+        },
+        "sources": [
+          "fixture"
+        ],
+        "toolCalls": [
+          {
+            "id": "read",
+            "name": "Read",
+            "args": {
+              "count": 1
+            },
+            "status": "running"
+          }
+        ]
+      }
+    ],
+    "incoming": [
+      {
+        "id": "new",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "ready",
+        "toolCalls": [
+          {
+            "id": "read",
+            "name": "Read",
+            "args": {
+              "count": 1
+            },
+            "status": "done"
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "id": "new",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "ready",
+        "toolCalls": [
+          {
+            "id": "read",
+            "name": "Read",
+            "args": {
+              "count": 1
+            },
+            "status": "done"
+          }
+        ],
+        "model": "fixture",
+        "tokens": {
+          "input": 1,
+          "output": 2
+        },
+        "sources": [
+          "fixture"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "argument insertion order changes signature",
+    "current": [
+      {
+        "id": "old",
+        "timestamp": 1,
+        "role": "assistant",
+        "text": "same",
+        "model": "must-not-carry",
+        "toolCalls": [
+          {
+            "name": "Read",
+            "args": {
+              "a": 1,
+              "b": 2
+            }
+          }
+        ]
+      }
+    ],
+    "incoming": [
+      {
+        "id": "new",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "same",
+        "toolCalls": [
+          {
+            "name": "Read",
+            "args": {
+              "b": 2,
+              "a": 1
+            }
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "id": "new",
+        "timestamp": 2,
+        "role": "assistant",
+        "text": "same",
+        "toolCalls": [
+          {
+            "name": "Read",
+            "args": {
+              "b": 2,
+              "a": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "duplicate ids retain web snapshot ordering",
+    "current": [
+      {
+        "id": "same",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "old"
+      }
+    ],
+    "incoming": [
+      {
+        "id": "same",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "updated"
+      }
+    ],
+    "expected": [
+      {
+        "id": "same",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "updated"
+      },
+      {
+        "id": "same",
+        "timestamp": 5,
+        "role": "assistant",
+        "text": "old"
+      }
+    ]
+  }
+]

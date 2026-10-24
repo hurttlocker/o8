@@ -1,8 +1,12 @@
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod client;
+mod merge;
 mod model;
+mod retained;
+mod stream;
 mod text;
+mod transport;
 mod ui;
 use crate::{
     client::Client,
@@ -20,6 +24,17 @@ fn run() -> Result<(), String> {
         );
         return Ok(());
     }
+    if args.first().is_some_and(|s| s == "--replay-tree") && args.len() == 2 {
+        let replay: stream::Replay =
+            serde_json::from_slice(&fs::read(&args[1]).map_err(|_| "Cannot read replay")?)
+                .map_err(|_| "Invalid replay")?;
+        let mut transcript = stream::Transcript::new(replay.initial);
+        for message in replay.frames {
+            transcript.apply(&message);
+        }
+        println!("{}", serde_json::to_string(&transcript.rows).unwrap());
+        return Ok(());
+    }
     if args.first().is_some_and(|s| s == "--render-tree") && args.len() == 2 {
         let history: History =
             serde_json::from_slice(&fs::read(&args[1]).map_err(|_| "Cannot read recording")?)
@@ -35,19 +50,29 @@ fn run() -> Result<(), String> {
     let mut enabled = false;
     let mut benchmark = None;
     let mut unattended = false;
+    let mut stream_output = None;
+    let mut stream_through = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--enable-next" => enabled = true,
             "--offscreen" => offscreen = true,
             "--unattended-on-screen" => unattended = true,
-            "--server" | "--benchmark" => {
+            "--server" | "--benchmark" | "--stream-benchmark" | "--stream-through" => {
                 i += 1;
                 let value = args.get(i).ok_or("Missing flag value")?.clone();
                 if args[i - 1] == "--server" {
                     server = Some(value);
-                } else {
+                } else if args[i - 1] == "--benchmark" {
                     benchmark = Some(value);
+                } else if args[i - 1] == "--stream-benchmark" {
+                    stream_output = Some(value);
+                } else {
+                    stream_through = Some(
+                        value
+                            .parse::<u64>()
+                            .map_err(|_| "Invalid stream sequence")?,
+                    );
                 }
             }
             _ => return Err("Unknown argument; use --help".into()),
@@ -57,14 +82,30 @@ fn run() -> Result<(), String> {
     if !enabled {
         return Err("This surface is opt-in; pass --enable-next".into());
     }
-    if benchmark.is_some() && !offscreen {
+    if (benchmark.is_some() || stream_output.is_some()) && !offscreen {
         return Err("Automated benchmarks require --offscreen".into());
     }
+    let stream_benchmark = match (stream_output, stream_through) {
+        (Some(path), Some(seq)) if seq > 0 && benchmark.is_none() => Some((path, seq)),
+        (None, None) => None,
+        _ => {
+            return Err(
+                "Use --stream-benchmark FILE with --stream-through SEQ, without --benchmark".into(),
+            );
+        }
+    };
     let client =
         Client::new(&server.ok_or("Pass --server with an explicit disposable server origin")?)?;
     // The real session list and history reads are also exercised without a window
     // by the parity/protocol runner. Interactive reads happen off the UI thread.
-    ui::launch(client, offscreen, unattended, benchmark, started);
+    ui::launch(
+        client,
+        offscreen,
+        unattended,
+        benchmark,
+        stream_benchmark,
+        started,
+    );
     Ok(())
 }
 fn main() -> ExitCode {
