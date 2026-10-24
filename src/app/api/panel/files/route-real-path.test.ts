@@ -15,6 +15,31 @@ describe('workspace explorer through a real Git directory', () => {
   afterEach(async () => { await rm(workspace, { recursive: true, force: true }); });
   const read = (root: string, options: Record<string, string>) => GET(new Request(`http://localhost/api/panel/files?${new URLSearchParams({ workspace: root, ...options })}`));
 
+  it('evicts old workspace trees instead of retaining every visited workspace', async () => {
+    const roots = Array.from({ length: 33 }, (_, index) => join(workspace, `repo-${index}`));
+    for (const root of roots) {
+      await mkdir(root);
+      await writeFile(join(root, 'before.txt'), 'fixture');
+      expect((await read(root, {})).status).toBe(200);
+    }
+    await writeFile(join(roots[0], 'after.txt'), 'fixture');
+    const result = await (await read(roots[0], {})).json();
+    expect(result.tree).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'after.txt' })]));
+  });
+
+  it('bounds the total retained tree bytes even below the workspace count limit', async () => {
+    const roots = Array.from({ length: 9 }, (_, index) => join(workspace, `large-${index}`));
+    for (const root of roots) {
+      await mkdir(root);
+      await Promise.all(Array.from({ length: 1024 }, (_, index) =>
+        writeFile(join(root, `${String(index).padStart(4, '0')}-${'x'.repeat(230)}.txt`), '')));
+      expect((await read(root, {})).status).toBe(200);
+    }
+    await writeFile(join(roots[0], 'after.txt'), 'fixture');
+    const result = await (await read(roots[0], {})).json();
+    expect(result.tree).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'after.txt' })]));
+  });
+
   it('keeps dotfiles and project folders while annotating actual ignore rules', async () => {
     await mkdir(join(workspace, '.claude-worktrees')); await mkdir(join(workspace, '.vercel'));
     await writeFile(join(workspace, '.env.local'), 'fixture only');

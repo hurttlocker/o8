@@ -1,0 +1,4440 @@
+{
+  "issue": 4421,
+  "baselineCommit": "2af6df632",
+  "scope": "Linux Node 22 standalone server, dashboard SSR and six local API read routes, 50 disposable Git repositories",
+  "limitations": [
+    "Each traffic run is 15 minutes rather than one hour, as permitted by the task.",
+    "The Linux fixture baseline does not reproduce the reported 2.8 GB operator footprint.",
+    "No desktop shell, operator data, provider traffic, or real accounts are represented.",
+    "RSS checkpoints use forced GC; natural traffic samples and explicit growth tolerances are retained below."
+  ],
+  "mechanic": {
+    "eagerEntries": "Next preloadEntriesOnStart loaded unused route modules; disable it so routes load on demand.",
+    "backfill": "Load worker adapters only when persisted transcript candidates exist.",
+    "fileTrees": {
+      "maxEntries": 32,
+      "maxRetainedUtf16Bytes": 4194304,
+      "ownership": "Cache serialized responses; release the per-read tree graph. Sweep expired entries on insertion and evict least-recently-used entries."
+    }
+  },
+  "verification": {
+    "red": [
+      {
+        "file": "src/app/api/panel/files/route-real-path.test.ts",
+        "tail": "Test Files  1 failed (1)\nTests  2 failed | 5 passed (7)"
+      },
+      {
+        "file": "tests/search-backfill-loading.test.ts",
+        "tail": "Test Files  1 failed (1)\nTests  1 failed | 1 passed (2)"
+      },
+      {
+        "entry": "standalone-memory.mjs --check",
+        "failure": "Startup eagerly loaded unused routes"
+      }
+    ],
+    "green": {
+      "files": [
+        "src/app/api/panel/files/route-real-path.test.ts",
+        "src/app/api/panel/files/route.test.ts",
+        "tests/search-backfill-loading.test.ts",
+        "tests/standalone-cache-immutability.test.ts",
+        "tests/cold-start-instrumentation.test.ts",
+        "tests/startup-stage-diagnostics.test.ts",
+        "tests/real-path-seams.test.ts"
+      ],
+      "focusedTail": "Test Files  7 passed (7)\nTests  80 passed (80)",
+      "fullCommand": "npm test",
+      "fullTail": "Test Files  1198 passed | 3 skipped (1201)\nTests  8466 passed | 4 skipped (8470)",
+      "typecheck": "NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0",
+      "eslint": "All seven touched TypeScript/JavaScript files: exit 0",
+      "ruleCheck": "npm run rule-check -- --base=HEAD: scanned 3 source files, zero violations",
+      "classification": "npm run test:classification:check: manifest matches",
+      "dominatorFixture": "Shared-owner graph: PASS"
+    }
+  },
+  "before": {
+    "schema": "o8/standalone-memory/v1",
+    "node": "v22.23.4",
+    "platform": "linux",
+    "build": "npm run build (registered next build --webpack), .next/standalone/server.js",
+    "fixture": {
+      "repoCount": 50,
+      "digest": "ae2e27323fe3f8c6"
+    },
+    "durationSeconds": 900,
+    "counts": {
+      "/api/panel/status": 886,
+      "/api/panel/repos": 886,
+      "/api/panel/projects": 886,
+      "/api/panel/files": 886,
+      "/api/panel/git/log": 886,
+      "/api/v2/chat-history/list": 886
+    },
+    "idle": {
+      "label": "idle",
+      "elapsedSeconds": 35,
+      "rssMiB": 165.44,
+      "heapUsedMiB": 99.91,
+      "heapTotalMiB": 105.91,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13,
+      "modules": {
+        "total": 1125,
+        "routeEntries": 461,
+        "previewEntries": 20,
+        "clientManifests": 0
+      },
+      "heap": {
+        "totalShallowBytes": 106761322,
+        "top": [
+          {
+            "name": "string",
+            "bytes": 64583104,
+            "count": 93135
+          },
+          {
+            "name": "code",
+            "bytes": 21580336,
+            "count": 241129
+          },
+          {
+            "name": "array",
+            "bytes": 5032384,
+            "count": 17699
+          },
+          {
+            "name": "closure",
+            "bytes": 4161264,
+            "count": 73329
+          },
+          {
+            "name": "object shape",
+            "bytes": 3617304,
+            "count": 38450
+          },
+          {
+            "name": "concatenated string",
+            "bytes": 2036256,
+            "count": 63633
+          },
+          {
+            "name": "hidden",
+            "bytes": 1448584,
+            "count": 44809
+          },
+          {
+            "name": "Object",
+            "bytes": 1223056,
+            "count": 24432
+          },
+          {
+            "name": "object",
+            "bytes": 844096,
+            "count": 11337
+          },
+          {
+            "name": "Array",
+            "bytes": 402488,
+            "count": 12485
+          },
+          {
+            "name": "native",
+            "bytes": 350474,
+            "count": 476
+          },
+          {
+            "name": "sliced string",
+            "bytes": 337472,
+            "count": 10546
+          },
+          {
+            "name": "Module",
+            "bytes": 178320,
+            "count": 1705
+          },
+          {
+            "name": "h",
+            "bytes": 175344,
+            "count": 1003
+          },
+          {
+            "name": "regexp",
+            "bytes": 83440,
+            "count": 1490
+          },
+          {
+            "name": "_TstNode",
+            "bytes": 60096,
+            "count": 939
+          },
+          {
+            "name": "rQ",
+            "bytes": 58480,
+            "count": 430
+          },
+          {
+            "name": "ZodOptional",
+            "bytes": 54752,
+            "count": 236
+          },
+          {
+            "name": "k",
+            "bytes": 44200,
+            "count": 253
+          },
+          {
+            "name": "LRUNode",
+            "bytes": 29824,
+            "count": 466
+          }
+        ]
+      },
+      "owners": {
+        "method": "Shortest strong retaining path from snapshot root, not dominator retained size",
+        "targets": [
+          {
+            "bytes": 1812544,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "c3",
+                "via": "__zod_globalRegistry"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__proto__"
+              },
+              {
+                "type": "closure",
+                "name": "c3",
+                "via": "constructor"
+              },
+              {
+                "type": "code",
+                "name": "c3",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1403024,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1385464,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "cp",
+                "via": "get cp"
+              },
+              {
+                "type": "code",
+                "name": "cp",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345160,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1007176,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 947016,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Timeout",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "_onTimeout"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 852832,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 729424,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "f"
+              },
+              {
+                "type": "closure",
+                "name": "Oj",
+                "via": "get Oj"
+              },
+              {
+                "type": "code",
+                "name": "Oj",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 695616,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 625520,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 581040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          }
+        ]
+      },
+      "retained": {
+        "method": "Immediate dominators over reachable non-weak snapshot edges",
+        "passes": 5,
+        "reachableNodes": 645686,
+        "requestObjects": {
+          "Request": 5,
+          "NextRequest": 1,
+          "Response": 4,
+          "NextResponse": 0
+        },
+        "owners": [
+          {
+            "type": "code",
+            "name": ".next/server/app/dashboard/page.js",
+            "retainedBytes": 1858416,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1812544,
+            "shallowBytes": 1812544,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/dashboard/page.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 1779928,
+            "shallowBytes": 56,
+            "dominators": []
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/29291.js",
+            "retainedBytes": 1442048,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "code",
+            "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
+            "retainedBytes": 1432880,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1403024,
+            "shallowBytes": 1403024,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/50707.js",
+            "retainedBytes": 1398896,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1385464,
+            "shallowBytes": 1385464,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/29291.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/70295.js",
+            "retainedBytes": 1377600,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345160,
+            "shallowBytes": 1345160,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/50707.js"
+              }
+            ]
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345040,
+            "shallowBytes": 1345040,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/70295.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 1216520,
+            "shallowBytes": 56,
+            "dominators": []
+          },
+          {
+            "type": "object",
+            "name": "object",
+            "retainedBytes": 1175016,
+            "shallowBytes": 112,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": "code",
+            "retainedBytes": 1036104,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1007176,
+            "shallowBytes": 1007176,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "code"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/86886.js",
+            "retainedBytes": 968248,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 947016,
+            "shallowBytes": 947016,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/86886.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/app/preview/canvas-glass/page.js",
+            "retainedBytes": 874544,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 852832,
+            "shallowBytes": 852832,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/preview/canvas-glass/page.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 804168,
+            "shallowBytes": 24,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              },
+              {
+                "type": "object",
+                "name": "object"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "trafficIdle": {
+      "label": "traffic-idle",
+      "elapsedSeconds": 78,
+      "rssMiB": 165.6,
+      "heapUsedMiB": 99.63,
+      "heapTotalMiB": 104.91,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13
+    },
+    "warm": {
+      "label": "warm",
+      "elapsedSeconds": 82,
+      "rssMiB": 170.5,
+      "heapUsedMiB": 103.41,
+      "heapTotalMiB": 108.12,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13
+    },
+    "after": {
+      "label": "after",
+      "elapsedSeconds": 983,
+      "rssMiB": 178.66,
+      "heapUsedMiB": 100.83,
+      "heapTotalMiB": 107.62,
+      "externalMiB": 3.7,
+      "arrayBuffersMiB": 0.08,
+      "modules": {
+        "total": 1125,
+        "routeEntries": 461,
+        "previewEntries": 20,
+        "clientManifests": 0
+      },
+      "heap": {
+        "totalShallowBytes": 107324840,
+        "top": [
+          {
+            "name": "string",
+            "bytes": 63936816,
+            "count": 90299
+          },
+          {
+            "name": "code",
+            "bytes": 21882864,
+            "count": 216460
+          },
+          {
+            "name": "array",
+            "bytes": 5248832,
+            "count": 19093
+          },
+          {
+            "name": "closure",
+            "bytes": 4574872,
+            "count": 80490
+          },
+          {
+            "name": "object shape",
+            "bytes": 3770008,
+            "count": 40774
+          },
+          {
+            "name": "concatenated string",
+            "bytes": 2032480,
+            "count": 63515
+          },
+          {
+            "name": "hidden",
+            "bytes": 1527432,
+            "count": 40480
+          },
+          {
+            "name": "Object",
+            "bytes": 1270640,
+            "count": 25483
+          },
+          {
+            "name": "object",
+            "bytes": 889680,
+            "count": 11811
+          },
+          {
+            "name": "Array",
+            "bytes": 403504,
+            "count": 12507
+          },
+          {
+            "name": "sliced string",
+            "bytes": 338560,
+            "count": 10580
+          },
+          {
+            "name": "native",
+            "bytes": 293440,
+            "count": 468
+          },
+          {
+            "name": "Module",
+            "bytes": 179136,
+            "count": 1731
+          },
+          {
+            "name": "h",
+            "bytes": 174752,
+            "count": 1001
+          },
+          {
+            "name": "regexp",
+            "bytes": 87696,
+            "count": 1566
+          },
+          {
+            "name": "_TstNode",
+            "bytes": 60096,
+            "count": 939
+          },
+          {
+            "name": "rQ",
+            "bytes": 58480,
+            "count": 430
+          },
+          {
+            "name": "ZodOptional",
+            "bytes": 54752,
+            "count": 236
+          },
+          {
+            "name": "k",
+            "bytes": 43832,
+            "count": 252
+          },
+          {
+            "name": "LRUNode",
+            "bytes": 30144,
+            "count": 471
+          }
+        ]
+      },
+      "owners": {
+        "method": "Shortest strong retaining path from snapshot root, not dominator retained size",
+        "targets": [
+          {
+            "bytes": 1812544,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "c3",
+                "via": "__zod_globalRegistry"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__proto__"
+              },
+              {
+                "type": "closure",
+                "name": "c3",
+                "via": "constructor"
+              },
+              {
+                "type": "code",
+                "name": "c3",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1403024,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1385464,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "cp",
+                "via": "get cp"
+              },
+              {
+                "type": "code",
+                "name": "cp",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345160,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1007176,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 947016,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Timeout",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "_onTimeout"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 852832,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 729424,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "f"
+              },
+              {
+                "type": "closure",
+                "name": "Oj",
+                "via": "get Oj"
+              },
+              {
+                "type": "code",
+                "name": "Oj",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 695616,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 625520,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 581040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          }
+        ]
+      },
+      "retained": {
+        "method": "Immediate dominators over reachable non-weak snapshot edges",
+        "passes": 5,
+        "reachableNodes": 626432,
+        "requestObjects": {
+          "Request": 5,
+          "NextRequest": 1,
+          "Response": 4,
+          "NextResponse": 0
+        },
+        "owners": [
+          {
+            "type": "code",
+            "name": ".next/server/app/dashboard/page.js",
+            "retainedBytes": 1858416,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1812544,
+            "shallowBytes": 1812544,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/dashboard/page.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/29291.js",
+            "retainedBytes": 1442048,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "code",
+            "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
+            "retainedBytes": 1432880,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1403024,
+            "shallowBytes": 1403024,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/50707.js",
+            "retainedBytes": 1398896,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1385464,
+            "shallowBytes": 1385464,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/29291.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/70295.js",
+            "retainedBytes": 1377600,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345160,
+            "shallowBytes": 1345160,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/50707.js"
+              }
+            ]
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345040,
+            "shallowBytes": 1345040,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/70295.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 1216888,
+            "shallowBytes": 56,
+            "dominators": []
+          },
+          {
+            "type": "object",
+            "name": "object",
+            "retainedBytes": 1175384,
+            "shallowBytes": 112,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": "code",
+            "retainedBytes": 1036104,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1007176,
+            "shallowBytes": 1007176,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "code"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/86886.js",
+            "retainedBytes": 968248,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 947016,
+            "shallowBytes": 947016,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/86886.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/app/preview/canvas-glass/page.js",
+            "retainedBytes": 874544,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 852832,
+            "shallowBytes": 852832,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/preview/canvas-glass/page.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 804168,
+            "shallowBytes": 24,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              },
+              {
+                "type": "object",
+                "name": "object"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "NextServer",
+            "retainedBytes": 795328,
+            "shallowBytes": 24,
+            "dominators": []
+          }
+        ]
+      }
+    },
+    "samples": [
+      {
+        "label": "traffic",
+        "elapsedSeconds": 82,
+        "rssMiB": 173.5,
+        "heapUsedMiB": 104.64,
+        "heapTotalMiB": 111.37,
+        "externalMiB": 3.76,
+        "arrayBuffersMiB": 0.13
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 112,
+        "rssMiB": 187.13,
+        "heapUsedMiB": 106.02,
+        "heapTotalMiB": 125.87,
+        "externalMiB": 3.82,
+        "arrayBuffersMiB": 0.2
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 143,
+        "rssMiB": 199.9,
+        "heapUsedMiB": 108.69,
+        "heapTotalMiB": 142.12,
+        "externalMiB": 3.91,
+        "arrayBuffersMiB": 0.28
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 173,
+        "rssMiB": 203.98,
+        "heapUsedMiB": 108.16,
+        "heapTotalMiB": 145.37,
+        "externalMiB": 4.04,
+        "arrayBuffersMiB": 0.41
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 203,
+        "rssMiB": 204.61,
+        "heapUsedMiB": 110.07,
+        "heapTotalMiB": 145.37,
+        "externalMiB": 3.91,
+        "arrayBuffersMiB": 0.29
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 234,
+        "rssMiB": 205.11,
+        "heapUsedMiB": 111.51,
+        "heapTotalMiB": 145.37,
+        "externalMiB": 4.12,
+        "arrayBuffersMiB": 0.49
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 264,
+        "rssMiB": 205.73,
+        "heapUsedMiB": 102.65,
+        "heapTotalMiB": 145.62,
+        "externalMiB": 3.89,
+        "arrayBuffersMiB": 0.27
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 295,
+        "rssMiB": 205.61,
+        "heapUsedMiB": 114.94,
+        "heapTotalMiB": 145.62,
+        "externalMiB": 4.17,
+        "arrayBuffersMiB": 0.55
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 325,
+        "rssMiB": 206.02,
+        "heapUsedMiB": 105.05,
+        "heapTotalMiB": 146.12,
+        "externalMiB": 3.92,
+        "arrayBuffersMiB": 0.29
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 355,
+        "rssMiB": 207.52,
+        "heapUsedMiB": 106.78,
+        "heapTotalMiB": 143.62,
+        "externalMiB": 4.02,
+        "arrayBuffersMiB": 0.4
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 386,
+        "rssMiB": 205.64,
+        "heapUsedMiB": 115.94,
+        "heapTotalMiB": 143.62,
+        "externalMiB": 4.21,
+        "arrayBuffersMiB": 0.59
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 416,
+        "rssMiB": 205.89,
+        "heapUsedMiB": 110.92,
+        "heapTotalMiB": 145.62,
+        "externalMiB": 4.04,
+        "arrayBuffersMiB": 0.41
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 448,
+        "rssMiB": 206.52,
+        "heapUsedMiB": 120.18,
+        "heapTotalMiB": 145.62,
+        "externalMiB": 4.21,
+        "arrayBuffersMiB": 0.59
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 478,
+        "rssMiB": 209.14,
+        "heapUsedMiB": 115,
+        "heapTotalMiB": 147.37,
+        "externalMiB": 4.2,
+        "arrayBuffersMiB": 0.57
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 509,
+        "rssMiB": 209.52,
+        "heapUsedMiB": 111.71,
+        "heapTotalMiB": 147.37,
+        "externalMiB": 3.79,
+        "arrayBuffersMiB": 0.17
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 540,
+        "rssMiB": 212.77,
+        "heapUsedMiB": 116.04,
+        "heapTotalMiB": 147.62,
+        "externalMiB": 4.21,
+        "arrayBuffersMiB": 0.58
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 570,
+        "rssMiB": 212.91,
+        "heapUsedMiB": 104.45,
+        "heapTotalMiB": 146.37,
+        "externalMiB": 3.86,
+        "arrayBuffersMiB": 0.24
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 601,
+        "rssMiB": 213.76,
+        "heapUsedMiB": 111.93,
+        "heapTotalMiB": 146.62,
+        "externalMiB": 3.91,
+        "arrayBuffersMiB": 0.29
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 632,
+        "rssMiB": 214.63,
+        "heapUsedMiB": 108.01,
+        "heapTotalMiB": 147.12,
+        "externalMiB": 3.97,
+        "arrayBuffersMiB": 0.34
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 662,
+        "rssMiB": 215.13,
+        "heapUsedMiB": 118.3,
+        "heapTotalMiB": 147.12,
+        "externalMiB": 4.18,
+        "arrayBuffersMiB": 0.56
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 693,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 111.44,
+        "heapTotalMiB": 148.37,
+        "externalMiB": 4.04,
+        "arrayBuffersMiB": 0.42
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 724,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 118.78,
+        "heapTotalMiB": 148.62,
+        "externalMiB": 4.14,
+        "arrayBuffersMiB": 0.51
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 754,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 116.59,
+        "heapTotalMiB": 147.62,
+        "externalMiB": 4.18,
+        "arrayBuffersMiB": 0.55
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 784,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 123.59,
+        "heapTotalMiB": 147.62,
+        "externalMiB": 4.28,
+        "arrayBuffersMiB": 0.66
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 815,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 109.9,
+        "heapTotalMiB": 148.62,
+        "externalMiB": 3.83,
+        "arrayBuffersMiB": 0.21
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 846,
+        "rssMiB": 217.13,
+        "heapUsedMiB": 109.54,
+        "heapTotalMiB": 148.62,
+        "externalMiB": 4.11,
+        "arrayBuffersMiB": 0.49
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 877,
+        "rssMiB": 217.38,
+        "heapUsedMiB": 112.12,
+        "heapTotalMiB": 148.62,
+        "externalMiB": 3.87,
+        "arrayBuffersMiB": 0.25
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 907,
+        "rssMiB": 217.63,
+        "heapUsedMiB": 109.34,
+        "heapTotalMiB": 148.87,
+        "externalMiB": 3.96,
+        "arrayBuffersMiB": 0.34
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 937,
+        "rssMiB": 217.63,
+        "heapUsedMiB": 119.04,
+        "heapTotalMiB": 148.87,
+        "externalMiB": 4.15,
+        "arrayBuffersMiB": 0.53
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 967,
+        "rssMiB": 217.63,
+        "heapUsedMiB": 109.89,
+        "heapTotalMiB": 148.37,
+        "externalMiB": 3.85,
+        "arrayBuffersMiB": 0.23
+      }
+    ],
+    "growthMiB": {
+      "rss": 8.16,
+      "heap": -2.58
+    },
+    "budgets": {
+      "idleRssMiB": 600,
+      "retainedHeapGrowthMiB": 10,
+      "settledRssGrowthMiB": 20
+    },
+    "note": "Post-GC checkpoints; RSS sampled before snapshots. Idle snapshot uses a separate process so snapshot allocations cannot mask soak growth. Strong-edge dominators and shortest retaining paths are reported separately. Raw snapshots and logs are private."
+  },
+  "after": {
+    "schema": "o8/standalone-memory/v1",
+    "node": "v22.23.4",
+    "platform": "linux",
+    "build": "npm run build (registered next build --webpack), .next/standalone/server.js",
+    "fixture": {
+      "repoCount": 50,
+      "digest": "ae2e27323fe3f8c6"
+    },
+    "durationSeconds": 900,
+    "counts": {
+      "/api/panel/status": 891,
+      "/api/panel/repos": 891,
+      "/api/panel/projects": 891,
+      "/api/panel/files": 891,
+      "/api/panel/git/log": 891,
+      "/api/v2/chat-history/list": 891
+    },
+    "idle": {
+      "label": "idle",
+      "elapsedSeconds": 32,
+      "rssMiB": 111.49,
+      "heapUsedMiB": 53.54,
+      "heapTotalMiB": 56.48,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13,
+      "modules": {
+        "total": 545,
+        "routeEntries": 2,
+        "previewEntries": 0,
+        "clientManifests": 0
+      },
+      "heap": {
+        "totalShallowBytes": 57997522,
+        "top": [
+          {
+            "name": "string",
+            "bytes": 22843856,
+            "count": 79166
+          },
+          {
+            "name": "code",
+            "bytes": 17891000,
+            "count": 205624
+          },
+          {
+            "name": "array",
+            "bytes": 4203128,
+            "count": 14857
+          },
+          {
+            "name": "object shape",
+            "bytes": 3608696,
+            "count": 38342
+          },
+          {
+            "name": "closure",
+            "bytes": 3576680,
+            "count": 63149
+          },
+          {
+            "name": "hidden",
+            "bytes": 1251496,
+            "count": 38124
+          },
+          {
+            "name": "concatenated string",
+            "bytes": 1138016,
+            "count": 35563
+          },
+          {
+            "name": "Object",
+            "bytes": 1115496,
+            "count": 21992
+          },
+          {
+            "name": "object",
+            "bytes": 617536,
+            "count": 7891
+          },
+          {
+            "name": "native",
+            "bytes": 350474,
+            "count": 476
+          },
+          {
+            "name": "Array",
+            "bytes": 336568,
+            "count": 10425
+          },
+          {
+            "name": "h",
+            "bytes": 175344,
+            "count": 1003
+          },
+          {
+            "name": "sliced string",
+            "bytes": 128096,
+            "count": 4003
+          },
+          {
+            "name": "Module",
+            "bytes": 83760,
+            "count": 665
+          },
+          {
+            "name": "regexp",
+            "bytes": 83440,
+            "count": 1490
+          },
+          {
+            "name": "_TstNode",
+            "bytes": 60096,
+            "count": 939
+          },
+          {
+            "name": "ZodOptional",
+            "bytes": 54752,
+            "count": 236
+          },
+          {
+            "name": "k",
+            "bytes": 44200,
+            "count": 253
+          },
+          {
+            "name": "BuiltinModule",
+            "bytes": 28720,
+            "count": 359
+          },
+          {
+            "name": "ArrayBuffer",
+            "bytes": 28208,
+            "count": 322
+          }
+        ]
+      },
+      "owners": {
+        "method": "Shortest strong retaining path from snapshot root, not dominator retained size",
+        "targets": [
+          {
+            "bytes": 1812544,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "c3",
+                "via": "__zod_globalRegistry"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__proto__"
+              },
+              {
+                "type": "closure",
+                "name": "c3",
+                "via": "constructor"
+              },
+              {
+                "type": "code",
+                "name": "c3",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1403024,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1385464,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "cp",
+                "via": "get cp"
+              },
+              {
+                "type": "code",
+                "name": "cp",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345160,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1007176,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "require"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 947016,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Timeout",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "_onTimeout"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 729424,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "f"
+              },
+              {
+                "type": "closure",
+                "name": "Oj",
+                "via": "get Oj"
+              },
+              {
+                "type": "code",
+                "name": "Oj",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 434168,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "e"
+              },
+              {
+                "type": "closure",
+                "name": "F",
+                "via": "InstantValidation"
+              },
+              {
+                "type": "code",
+                "name": "F",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 424144,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_chunk_load__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "e"
+              },
+              {
+                "type": "closure",
+                "name": "H",
+                "via": "Postpone"
+              },
+              {
+                "type": "code",
+                "name": "H",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 400200,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "ae"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 382192,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "n",
+                "via": "fetch"
+              },
+              {
+                "type": "code",
+                "name": "n",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          }
+        ]
+      },
+      "retained": {
+        "method": "Immediate dominators over reachable non-weak snapshot edges",
+        "passes": 5,
+        "reachableNodes": 531351,
+        "requestObjects": {
+          "Request": 5,
+          "NextRequest": 1,
+          "Response": 4,
+          "NextResponse": 0
+        },
+        "owners": [
+          {
+            "type": "code",
+            "name": ".next/server/app/dashboard/page.js",
+            "retainedBytes": 1858416,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1812544,
+            "shallowBytes": 1812544,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/dashboard/page.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/29291.js",
+            "retainedBytes": 1442048,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "code",
+            "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
+            "retainedBytes": 1432880,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1403024,
+            "shallowBytes": 1403024,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/50707.js",
+            "retainedBytes": 1398896,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1385464,
+            "shallowBytes": 1385464,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/29291.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/70295.js",
+            "retainedBytes": 1377600,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345160,
+            "shallowBytes": 1345160,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/50707.js"
+              }
+            ]
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345040,
+            "shallowBytes": 1345040,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/70295.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 1216520,
+            "shallowBytes": 56,
+            "dominators": []
+          },
+          {
+            "type": "object",
+            "name": "object",
+            "retainedBytes": 1175016,
+            "shallowBytes": 112,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": "code",
+            "retainedBytes": 1036104,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1007176,
+            "shallowBytes": 1007176,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "code"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/86886.js",
+            "retainedBytes": 968248,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 947016,
+            "shallowBytes": 947016,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/86886.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 804168,
+            "shallowBytes": 24,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              },
+              {
+                "type": "object",
+                "name": "object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/75163.js",
+            "retainedBytes": 748024,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 729424,
+            "shallowBytes": 729424,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/75163.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "NextServer",
+            "retainedBytes": 658192,
+            "shallowBytes": 24,
+            "dominators": []
+          }
+        ]
+      }
+    },
+    "trafficIdle": {
+      "label": "traffic-idle",
+      "elapsedSeconds": 72,
+      "rssMiB": 110.17,
+      "heapUsedMiB": 53.4,
+      "heapTotalMiB": 57.23,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13
+    },
+    "warm": {
+      "label": "warm",
+      "elapsedSeconds": 76,
+      "rssMiB": 118.15,
+      "heapUsedMiB": 59.87,
+      "heapTotalMiB": 63.67,
+      "externalMiB": 3.76,
+      "arrayBuffersMiB": 0.13
+    },
+    "after": {
+      "label": "after",
+      "elapsedSeconds": 977,
+      "rssMiB": 119.22,
+      "heapUsedMiB": 58.52,
+      "heapTotalMiB": 63.92,
+      "externalMiB": 3.7,
+      "arrayBuffersMiB": 0.08,
+      "modules": {
+        "total": 577,
+        "routeEntries": 7,
+        "previewEntries": 0,
+        "clientManifests": 0
+      },
+      "heap": {
+        "totalShallowBytes": 62824664,
+        "top": [
+          {
+            "name": "string",
+            "bytes": 24786144,
+            "count": 77195
+          },
+          {
+            "name": "code",
+            "bytes": 19689432,
+            "count": 190717
+          },
+          {
+            "name": "array",
+            "bytes": 4437536,
+            "count": 16410
+          },
+          {
+            "name": "closure",
+            "bytes": 4009560,
+            "count": 70651
+          },
+          {
+            "name": "object shape",
+            "bytes": 3767616,
+            "count": 40747
+          },
+          {
+            "name": "hidden",
+            "bytes": 1412928,
+            "count": 35909
+          },
+          {
+            "name": "concatenated string",
+            "bytes": 1171776,
+            "count": 36618
+          },
+          {
+            "name": "Object",
+            "bytes": 1161368,
+            "count": 22990
+          },
+          {
+            "name": "object",
+            "bytes": 665144,
+            "count": 8390
+          },
+          {
+            "name": "Array",
+            "bytes": 340048,
+            "count": 10524
+          },
+          {
+            "name": "native",
+            "bytes": 293440,
+            "count": 468
+          },
+          {
+            "name": "h",
+            "bytes": 174752,
+            "count": 1001
+          },
+          {
+            "name": "sliced string",
+            "bytes": 135872,
+            "count": 4246
+          },
+          {
+            "name": "Module",
+            "bytes": 89304,
+            "count": 728
+          },
+          {
+            "name": "regexp",
+            "bytes": 87696,
+            "count": 1566
+          },
+          {
+            "name": "_TstNode",
+            "bytes": 60096,
+            "count": 939
+          },
+          {
+            "name": "ZodOptional",
+            "bytes": 54752,
+            "count": 236
+          },
+          {
+            "name": "k",
+            "bytes": 43832,
+            "count": 252
+          },
+          {
+            "name": "BuiltinModule",
+            "bytes": 28720,
+            "count": 359
+          },
+          {
+            "name": "ZodBoolean",
+            "bytes": 28072,
+            "count": 121
+          }
+        ]
+      },
+      "owners": {
+        "method": "Shortest strong retaining path from snapshot root, not dominator retained size",
+        "targets": [
+          {
+            "bytes": 1812544,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "c3",
+                "via": "__zod_globalRegistry"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__proto__"
+              },
+              {
+                "type": "closure",
+                "name": "c3",
+                "via": "constructor"
+              },
+              {
+                "type": "code",
+                "name": "c3",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1403024,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1385464,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "n"
+              },
+              {
+                "type": "closure",
+                "name": "cp",
+                "via": "get cp"
+              },
+              {
+                "type": "code",
+                "name": "cp",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345160,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1345040,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 1007176,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 947016,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Timeout",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "_onTimeout"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 729424,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "f"
+              },
+              {
+                "type": "closure",
+                "name": "Oj",
+                "via": "get Oj"
+              },
+              {
+                "type": "code",
+                "name": "Oj",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 565192,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "k",
+                "via": "c"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "m"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "element"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 434168,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "__next_require__"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "e"
+              },
+              {
+                "type": "closure",
+                "name": "F",
+                "via": "InstantValidation"
+              },
+              {
+                "type": "code",
+                "name": "F",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 424144,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "key"
+              },
+              {
+                "type": "hidden",
+                "name": "key",
+                "via": "proxiedClientReferenceManifest"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "(GC roots)"
+              },
+              {
+                "type": "closure",
+                "name": "get",
+                "via": "get"
+              },
+              {
+                "type": "code",
+                "name": "get",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          },
+          {
+            "bytes": 400200,
+            "type": "string",
+            "name": "string",
+            "path": [
+              {
+                "type": "object",
+                "name": "key",
+                "via": "key"
+              },
+              {
+                "type": "object",
+                "name": "Object",
+                "via": "__o8ReviewQueueDrain"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "stop"
+              },
+              {
+                "type": "object",
+                "name": "key",
+                "via": "context"
+              },
+              {
+                "type": "closure",
+                "name": "key",
+                "via": "ae"
+              },
+              {
+                "type": "code",
+                "name": "(shared function info)",
+                "via": "shared"
+              },
+              {
+                "type": "code",
+                "name": "key",
+                "via": "script"
+              },
+              {
+                "type": "string",
+                "name": "string",
+                "via": "source"
+              }
+            ],
+            "reachable": true
+          }
+        ]
+      },
+      "retained": {
+        "method": "Immediate dominators over reachable non-weak snapshot edges",
+        "passes": 5,
+        "reachableNodes": 526883,
+        "requestObjects": {
+          "Request": 5,
+          "NextRequest": 1,
+          "Response": 4,
+          "NextResponse": 0
+        },
+        "owners": [
+          {
+            "type": "code",
+            "name": ".next/server/app/dashboard/page.js",
+            "retainedBytes": 1858416,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1812544,
+            "shallowBytes": 1812544,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/app/dashboard/page.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/29291.js",
+            "retainedBytes": 1442048,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "code",
+            "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js",
+            "retainedBytes": 1432880,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1403024,
+            "shallowBytes": 1403024,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/50707.js",
+            "retainedBytes": 1398896,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1385464,
+            "shallowBytes": 1385464,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/29291.js"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/70295.js",
+            "retainedBytes": 1377600,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345160,
+            "shallowBytes": 1345160,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/50707.js"
+              }
+            ]
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1345040,
+            "shallowBytes": 1345040,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/70295.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 1216888,
+            "shallowBytes": 56,
+            "dominators": []
+          },
+          {
+            "type": "object",
+            "name": "object",
+            "retainedBytes": 1175384,
+            "shallowBytes": 112,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": "code",
+            "retainedBytes": 1036104,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 1007176,
+            "shallowBytes": 1007176,
+            "dominators": [
+              {
+                "type": "code",
+                "name": "code"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/86886.js",
+            "retainedBytes": 968248,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 947016,
+            "shallowBytes": 947016,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/86886.js"
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "name": "Object",
+            "retainedBytes": 804168,
+            "shallowBytes": 24,
+            "dominators": [
+              {
+                "type": "object",
+                "name": "Object"
+              },
+              {
+                "type": "object",
+                "name": "object"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "name": ".next/server/chunks/75163.js",
+            "retainedBytes": 748024,
+            "shallowBytes": 144,
+            "dominators": []
+          },
+          {
+            "type": "object",
+            "name": "object",
+            "retainedBytes": 735656,
+            "shallowBytes": 120,
+            "dominators": []
+          },
+          {
+            "type": "string",
+            "name": "string",
+            "retainedBytes": 729424,
+            "shallowBytes": 729424,
+            "dominators": [
+              {
+                "type": "code",
+                "name": ".next/server/chunks/75163.js"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "samples": [
+      {
+        "label": "traffic",
+        "elapsedSeconds": 76,
+        "rssMiB": 121.03,
+        "heapUsedMiB": 61.23,
+        "heapTotalMiB": 66.92,
+        "externalMiB": 3.76,
+        "arrayBuffersMiB": 0.13
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 107,
+        "rssMiB": 136.03,
+        "heapUsedMiB": 62.17,
+        "heapTotalMiB": 82.17,
+        "externalMiB": 3.97,
+        "arrayBuffersMiB": 0.35
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 137,
+        "rssMiB": 147.6,
+        "heapUsedMiB": 64.86,
+        "heapTotalMiB": 96.67,
+        "externalMiB": 3.9,
+        "arrayBuffersMiB": 0.27
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 167,
+        "rssMiB": 151.48,
+        "heapUsedMiB": 62.63,
+        "heapTotalMiB": 100.17,
+        "externalMiB": 3.92,
+        "arrayBuffersMiB": 0.3
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 198,
+        "rssMiB": 151.48,
+        "heapUsedMiB": 72.81,
+        "heapTotalMiB": 100.17,
+        "externalMiB": 4.1,
+        "arrayBuffersMiB": 0.48
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 228,
+        "rssMiB": 152.23,
+        "heapUsedMiB": 66.21,
+        "heapTotalMiB": 100.42,
+        "externalMiB": 3.99,
+        "arrayBuffersMiB": 0.37
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 259,
+        "rssMiB": 153.1,
+        "heapUsedMiB": 67.06,
+        "heapTotalMiB": 100.42,
+        "externalMiB": 4.08,
+        "arrayBuffersMiB": 0.46
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 290,
+        "rssMiB": 152.87,
+        "heapUsedMiB": 67.97,
+        "heapTotalMiB": 100.17,
+        "externalMiB": 4.24,
+        "arrayBuffersMiB": 0.62
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 321,
+        "rssMiB": 153.04,
+        "heapUsedMiB": 65.87,
+        "heapTotalMiB": 100.17,
+        "externalMiB": 3.88,
+        "arrayBuffersMiB": 0.26
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 352,
+        "rssMiB": 154.41,
+        "heapUsedMiB": 69.11,
+        "heapTotalMiB": 100.42,
+        "externalMiB": 4.11,
+        "arrayBuffersMiB": 0.49
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 383,
+        "rssMiB": 156.04,
+        "heapUsedMiB": 67.8,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 4.16,
+        "arrayBuffersMiB": 0.53
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 413,
+        "rssMiB": 156.04,
+        "heapUsedMiB": 75.98,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 4.22,
+        "arrayBuffersMiB": 0.6
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 443,
+        "rssMiB": 156.66,
+        "heapUsedMiB": 65.85,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 3.83,
+        "arrayBuffersMiB": 0.21
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 473,
+        "rssMiB": 156.79,
+        "heapUsedMiB": 61.8,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 3.72,
+        "arrayBuffersMiB": 0.09
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 504,
+        "rssMiB": 154.79,
+        "heapUsedMiB": 67.42,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 4.09,
+        "arrayBuffersMiB": 0.47
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 534,
+        "rssMiB": 134.61,
+        "heapUsedMiB": 59.8,
+        "heapTotalMiB": 78.42,
+        "externalMiB": 3.82,
+        "arrayBuffersMiB": 0.2
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 564,
+        "rssMiB": 149.24,
+        "heapUsedMiB": 60.49,
+        "heapTotalMiB": 95.92,
+        "externalMiB": 4.3,
+        "arrayBuffersMiB": 0.45
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 595,
+        "rssMiB": 156.29,
+        "heapUsedMiB": 64.26,
+        "heapTotalMiB": 99.42,
+        "externalMiB": 3.9,
+        "arrayBuffersMiB": 0.28
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 625,
+        "rssMiB": 158.41,
+        "heapUsedMiB": 63.02,
+        "heapTotalMiB": 100.92,
+        "externalMiB": 3.92,
+        "arrayBuffersMiB": 0.3
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 656,
+        "rssMiB": 158.91,
+        "heapUsedMiB": 76.58,
+        "heapTotalMiB": 100.92,
+        "externalMiB": 4.3,
+        "arrayBuffersMiB": 0.68
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 686,
+        "rssMiB": 159.54,
+        "heapUsedMiB": 68.56,
+        "heapTotalMiB": 101.17,
+        "externalMiB": 3.98,
+        "arrayBuffersMiB": 0.36
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 716,
+        "rssMiB": 161.41,
+        "heapUsedMiB": 69.21,
+        "heapTotalMiB": 101.67,
+        "externalMiB": 4.13,
+        "arrayBuffersMiB": 0.5
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 747,
+        "rssMiB": 161.54,
+        "heapUsedMiB": 71.43,
+        "heapTotalMiB": 101.67,
+        "externalMiB": 3.88,
+        "arrayBuffersMiB": 0.26
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 778,
+        "rssMiB": 158.73,
+        "heapUsedMiB": 75.53,
+        "heapTotalMiB": 101.67,
+        "externalMiB": 4.26,
+        "arrayBuffersMiB": 0.64
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 809,
+        "rssMiB": 159.1,
+        "heapUsedMiB": 66.95,
+        "heapTotalMiB": 101.42,
+        "externalMiB": 3.97,
+        "arrayBuffersMiB": 0.34
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 840,
+        "rssMiB": 159.98,
+        "heapUsedMiB": 65.9,
+        "heapTotalMiB": 102.42,
+        "externalMiB": 4,
+        "arrayBuffersMiB": 0.37
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 871,
+        "rssMiB": 160.6,
+        "heapUsedMiB": 67.4,
+        "heapTotalMiB": 102.67,
+        "externalMiB": 3.73,
+        "arrayBuffersMiB": 0.1
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 901,
+        "rssMiB": 163.23,
+        "heapUsedMiB": 68.31,
+        "heapTotalMiB": 100.92,
+        "externalMiB": 3.88,
+        "arrayBuffersMiB": 0.26
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 932,
+        "rssMiB": 158.41,
+        "heapUsedMiB": 69.05,
+        "heapTotalMiB": 101.42,
+        "externalMiB": 4.03,
+        "arrayBuffersMiB": 0.41
+      },
+      {
+        "label": "traffic",
+        "elapsedSeconds": 962,
+        "rssMiB": 158.41,
+        "heapUsedMiB": 65.26,
+        "heapTotalMiB": 98.92,
+        "externalMiB": 3.84,
+        "arrayBuffersMiB": 0.22
+      }
+    ],
+    "growthMiB": {
+      "rss": 1.07,
+      "heap": -1.35
+    },
+    "budgets": {
+      "idleRssMiB": 600,
+      "retainedHeapGrowthMiB": 10,
+      "settledRssGrowthMiB": 20
+    },
+    "note": "Post-GC checkpoints; RSS sampled before snapshots. Idle snapshot uses a separate process so snapshot allocations cannot mask soak growth. Strong-edge dominators and shortest retaining paths are reported separately. Raw snapshots and logs are private."
+  }
+}
