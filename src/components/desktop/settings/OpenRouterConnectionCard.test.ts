@@ -78,6 +78,41 @@ it('shows an error instead of failing when the o8 work summary is unreadable', a
   }
 });
 
+it('marks retained work figures stale after refresh fails and clears the warning on recovery', async () => {
+  let mode: 'loaded' | 'failed' | 'recovered' = 'loaded';
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (!url.startsWith('/api/v2/keys/openrouter/work')) {
+      return { ok: true, status: 200, json: async () => ({ providers: [{ id: 'openrouter', connection: connected }] }) };
+    }
+    return { ok: mode !== 'failed', status: mode === 'failed' ? 503 : 200,
+      json: async () => mode === 'recovered'
+        ? { ...work, totals: { ...work.totals, calls: 41, reportedUsd: 0.035 } }
+        : work };
+  }));
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(OpenRouterProviderPanel)); });
+    const summary = () => container.querySelector('section[aria-label="Work run by o8"]')!;
+    expect(summary().textContent).toContain('across 39 calls');
+    expect(summary().querySelector('[role="alert"]')).toBeNull();
+    mode = 'failed';
+    await act(async () => { window.dispatchEvent(new Event('o8:openrouter-connection-changed')); });
+    expect(summary().textContent).toContain('across 39 calls');
+    const alert = summary().querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert?.textContent).toContain("Could not read o8's OpenRouter usage.");
+    expect(alert?.textContent).toContain('stale');
+    mode = 'recovered';
+    await act(async () => { window.dispatchEvent(new Event('o8:openrouter-connection-changed')); });
+    expect(summary().textContent).toContain('$0.0350 reported by OpenRouter across 41 calls');
+    expect(summary().textContent).not.toContain('across 39 calls');
+    expect(summary().querySelector('[role="alert"]')).toBeNull();
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
 it('keeps the models picker out of a disconnected OpenRouter panel', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ providers: [{ id: 'openrouter', connection: { ...connected, state: 'disconnected', details: null } }] }) })));
   const container = document.createElement('div');
