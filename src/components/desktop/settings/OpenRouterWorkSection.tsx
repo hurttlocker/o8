@@ -74,6 +74,9 @@ export function OpenRouterWorkSection() {
 
   return <section aria-label="Work run by o8" style={{ marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
     <span style={{ fontSize: 13, color: 'var(--t-text)', fontWeight: 300 }}>Work run by o8</span>
+    {error ? <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+      {error} These figures are stale.
+    </p> : null}
     {work.totals.calls === 0
       ? <p style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>o8 made no OpenRouter calls in the last {work.days} days.</p>
       : <>
