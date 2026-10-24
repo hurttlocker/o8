@@ -1,4 +1,4 @@
-import { execFile, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { once } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { WebSocket } from 'ws';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSymonTextTurnEval } from '@/lib/mobile/symon-text-eval';
 
 const testState = vi.hoisted(() => ({
@@ -89,6 +89,14 @@ let apiServer: Server;
 let wsProcess: ChildProcess;
 let apiPort = 0;
 let wsPort = 0;
+const sockets = new Set<WebSocket>();
+
+async function connectTextSocket(): Promise<WebSocket> {
+  const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+  sockets.add(socket);
+  await once(socket, 'open');
+  return socket;
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -103,24 +111,36 @@ function freePort(): Promise<number> {
   });
 }
 
-async function waitForHealth(port: number): Promise<void> {
+async function waitForServerReady(port: number): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`);
-      if (response.ok) return;
+      if (response.ok) {
+        // Health reports listener liveness before startup settles. Other routes,
+        // including this unhandled path, await the same gate as text messages.
+        const ready = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1_000) });
+        if (ready.status === 404) return;
+      }
     } catch {
       // The real ws-server is still booting.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('ws-server did not become healthy');
+  throw new Error('ws-server did not finish startup');
 }
 
 beforeAll(async () => {
   process.env.CORTEX_IDE_DATA_DIR = dataDir;
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
+  // Startup maintenance must inspect a disposable repository, not the checkout
+  // that supplies the real server entry point.
+  const reviewRepo = join(dataDir, 'review-repo');
+  mkdirSync(reviewRepo, { mode: 0o700 });
+  execFileSync('git', ['init', '-q', reviewRepo]);
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '--allow-empty', '-qm', 'fixture'], { cwd: reviewRepo });
   apiPort = await freePort();
   wsPort = await freePort();
 
@@ -174,12 +194,13 @@ beforeAll(async () => {
     env: {
       ...process.env,
       CORTEX_IDE_DATA_DIR: dataDir,
+      CORTEX_IDE_REVIEW_REPO_ROOT: reviewRepo,
       O8_API_PORT: String(apiPort),
       O8_WS_PORT: String(wsPort),
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
     },
   });
-  await waitForHealth(wsPort);
+  await waitForServerReady(wsPort);
 }, 30_000);
 
 afterAll(async () => {
@@ -190,6 +211,23 @@ afterAll(async () => {
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   rmSync(dataDir, { recursive: true, force: true });
   delete process.env.CORTEX_IDE_DATA_DIR;
+});
+
+afterEach(async () => {
+  if (sockets.size === 0) return;
+  for (const socket of sockets) {
+    if (socket.readyState === WebSocket.CLOSED) continue;
+    const closed = once(socket, 'close');
+    socket.close();
+    await closed;
+  }
+  // Server disconnect cleanup persists session removal. Let it finish before
+  // the next case mints a session into the same cross-process JSON store.
+  await expect.poll(async () => {
+    const response = await fetch(`http://127.0.0.1:${wsPort}/health`);
+    return (await response.json() as { clients: number }).clients;
+  }, { timeout: 2_000 }).toBe(0);
+  sockets.clear();
 });
 
 beforeEach(() => {
@@ -229,11 +267,10 @@ describe('Symon text-first say loop wire', () => {
     const { response, body: minted } = await mint('codex-sol-xhigh');
     expect(response.status).toBe(200);
     expect(minted.session).toMatchObject({ model: 'gpt-6.1-sol', effort: 'xhigh', engine: 'codex' });
-    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
+    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This computer' });
     testState.evalCalls.length = 0;
 
-    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
-    await once(socket, 'open');
+    const socket = await connectTextSocket();
     const frames: Array<Record<string, unknown>> = [];
     const done = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`missing text done: ${JSON.stringify(frames)}`)), 10_000);
@@ -283,7 +320,7 @@ describe('Symon text-first say loop wire', () => {
     }));
     expect(frames[0]).toEqual(expect.objectContaining({
       type: 'symon-text-status',
-      activeMachine: { id: 'local', displayName: 'This Mac' },
+      activeMachine: { id: 'local', displayName: 'This computer' },
     }));
     const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
     expect(spawnEval).toContain('"engine":"codex"');
@@ -319,8 +356,7 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
   testState.automatic = true;
   testState.terminal = status;
   const { body: minted } = await mint();
-  const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
-  await once(socket, 'open');
+  const socket = await connectTextSocket();
   const sendTurn = (turnId: string) => new Promise<Record<string, unknown>>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('missing terminal frame')), 10_000);
     const receive = (raw: Buffer) => {
@@ -336,7 +372,7 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
   });
   try {
     expect(await sendTurn('terminal-first')).toMatchObject({
-      status: status === 'error' ? 'failed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
+      status: status === 'error' ? 'unconfirmed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
       ...(status === 'error' ? { detail: 'fixture terminal failure' } : {}),
     });
     testState.terminal = null;
@@ -370,8 +406,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
   const sessionId = minted.session.sessionId;
   const sessionOnDisk = () => (JSON.parse(readFileSync(join(dataDir, 'symon-text-sessions.json'), 'utf8')) as Array<Record<string, unknown>>)
     .find((session) => session.sessionId === sessionId);
-  const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
-  await once(socket, 'open');
+  const socket = await connectTextSocket();
   const frames: Array<Record<string, unknown>> = [];
   socket.on('message', (raw) => { frames.push(JSON.parse(String(raw))); });
   const send = (type: string, turnId: string) => socket.send(JSON.stringify({ channel: 'symon', type, sessionId, turnId, text: 'Hello' }));
@@ -399,7 +434,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await new Promise((resolve) => setTimeout(resolve, 200));
     if (deadlineExpired) {
       await waitFor(() => terminal().length >= 1);
-      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'failed' });
+      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'unconfirmed' });
       expect(terminal()[0].model, 'an unresolved native result has no verified effective model').toBeUndefined();
     } else {
       expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
@@ -410,7 +445,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await waitFor(() => terminal().length === 2);
     expect(terminal().map(({ turnId, status, model, effort }) => ({ turnId, status, model, effort }))).toEqual([
       deadlineExpired
-        ? { turnId: 'stop-first', status: 'failed', model: undefined, effort: undefined }
+        ? { turnId: 'stop-first', status: 'unconfirmed', model: undefined, effort: undefined }
         : { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
       { turnId: 'stop-next', status: 'done', model: 'gpt-5.6-sol', effort: 'high' },
     ]);
