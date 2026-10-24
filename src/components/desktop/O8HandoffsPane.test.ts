@@ -302,6 +302,59 @@ describe('O8HandoffsPane', () => {
     expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')).not.toBeNull();
   });
 
+  it.each([
+    { outcome: 'success', returnToOriginal: false },
+    { outcome: 'failure', returnToOriginal: false },
+    { outcome: 'success', returnToOriginal: true },
+    { outcome: 'failure', returnToOriginal: true },
+  ])('ignores an old reply $outcome after repository navigation (return=$returnToOriginal)', async ({ outcome, returnToOriginal }) => {
+    const otherRepo = { ...repo, id: 'repo-other', name: 'other', localPath: '/workspace/other' };
+    let finishReply!: (response: Response) => void;
+    const pendingReply = new Promise<Response>((resolve) => { finishReply = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/agents/message' && init?.method === 'POST') return pendingReply;
+      const scope = new URL(url, 'http://fixture.test').searchParams.get('repo');
+      if (url.startsWith('/api/agents/presence?')) return jsonResponse({ agents: [{ ...agent, repo: scope }] });
+      if (url.startsWith('/api/agents/message?')) return jsonResponse({ messages: [{ ...incoming, repo: scope }] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const renderScope = async (repoPath: string) => {
+      await act(async () => root.render(createElement(O8HandoffsPane, {
+        active: true, repoPath, registeredRepos: [repo, otherRepo], allRepos: false,
+      })));
+      await vi.waitFor(() => expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')).not.toBeNull());
+    };
+    await renderScope(repo.localPath);
+    await openReply(host);
+    await act(async () => enterMessage(host, 'Original pending reply.'));
+    await act(async () => Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Send reply')?.click());
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String(posts[0][1]?.body))).toMatchObject({
+      repo: repo.localPath, to: 'Keen', replyToId: incoming.id,
+      text: 'Original pending reply.', requestId: expect.any(String),
+    });
+    await renderScope(otherRepo.localPath);
+    if (returnToOriginal) await renderScope(repo.localPath);
+    await openReply(host);
+    const currentComposer = host.querySelector<HTMLTextAreaElement>('#o8-handoff-message');
+    expect(currentComposer).not.toBeNull();
+    expect(currentComposer?.disabled).toBe(true);
+    expect(currentComposer?.value).toBe('');
+    await act(async () => finishReply(outcome === 'success'
+      ? jsonResponse({ message: { ...message, id: 'old-reply', text: 'Old reply completion.' } }, 201)
+      : jsonResponse({ error: { message: 'Old reply failed.' } }, 409)));
+    expect(host.querySelector('#o8-handoff-message')).toBe(currentComposer);
+    expect(currentComposer?.disabled).toBe(false);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).not.toContain('Old reply completion.');
+    await act(async () => enterMessage(host, 'Reply in the current visit.'));
+    expect(currentComposer?.value).toBe('Reply in the current visit.');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
   it('restores a selected exchange after remount and reopens an exact transcript link', async () => {
     const linked: AgentMessage = {
       ...message,
