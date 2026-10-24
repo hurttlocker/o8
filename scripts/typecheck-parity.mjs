@@ -14,7 +14,6 @@ if (args.length && (args.length !== 2 || args[0] !== '--project')) {
 // project used by tsc --noEmit. --project also permits small negative fixtures.
 const checkers = [
   ['tsc', 'typescript', 'tsc'],
-  ['native', 'typescript-native', 'tsc'],
   ['tsrs', 'tsrs', 'tsrs'],
 ];
 const results = [];

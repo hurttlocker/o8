@@ -24,7 +24,7 @@
     "workspace:output": "node scripts/generated-output.mjs",
     "start": "node scripts/start.mjs",
     "lint": "eslint . --max-warnings 54",
-    "typecheck:native": "node node_modules/typescript-native/bin/tsc --noEmit",
+    "typecheck:tsc": "node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit",
     "typecheck:fast": "node node_modules/tsrs/bin/tsrs --noEmit",
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "typecheck": "npm run verify:routes && node scripts/typecheck.mjs",
@@ -213,7 +213,6 @@
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsx": "^4.21.0",
     "typescript": "5.8.2",
-    "typescript-native": "npm:typescript@7.0.2",
     "vitest": "^4.1.11"
   },
   "overrides": {

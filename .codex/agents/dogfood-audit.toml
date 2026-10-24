@@ -121,7 +121,7 @@ Check these areas visually (take screenshots of each):
 
 **Goal:** Quick code health verification.
 
-1. Run `npx tsc --noEmit` — verify zero errors
+1. Run `npm run typecheck:fast` — verify zero errors. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 2. Run `npm run lint` — check for critical lint issues
 3. Grep for remaining `lucide-react` imports in desktop components (should be replaced with raw SVGs): `grep -r "from 'lucide-react'" src/components/desktop/ | grep -v node_modules`
 4. Grep for hardcoded `#ffffff` backgrounds in desktop components: `grep -rn "'#ffffff'" src/components/desktop/`

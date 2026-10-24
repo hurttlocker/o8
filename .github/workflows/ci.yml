@@ -71,6 +71,24 @@ jobs:
           path: tsconfig.tsbuildinfo
           key: ${{ steps.typecheck-cache.outputs.cache-primary-key }}
 
+  typecheck-parity:
+    name: Weekly Type Checker Parity
+    if: github.event.schedule == '17 5 * * 0' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --prefer-offline
+      - run: npm run typecheck -- --typegen-only
+      - run: npm run typecheck:parity
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
   # Lint restored to the PR lane 2026-07-18 (#1547): the error debt is burned
   # to zero on main (the old 398 baseline was mostly a stale nested worktree
   # being linted). Warnings don't fail the job; errors do.

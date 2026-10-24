@@ -20,11 +20,11 @@ function check(source: string) {
   }
 }
 
-it('runs all pinned checkers on a clean project', () => {
+it('runs only tsc 5.8.2 and tsrs on a clean project', () => {
   const result = check('export const value: number = 1;');
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).toContain('tsc: 0 diagnostics, exit 0');
-  expect(result.stdout).toContain('native: 0 diagnostics, exit 0');
+  expect(result.stdout).not.toContain('native:');
   expect(result.stdout).toContain('tsrs: 0 diagnostics, exit 0');
   expect(result.stdout).toContain('PASS: diagnostic sets match (0 diagnostics).');
 });
@@ -33,7 +33,7 @@ it('compares diagnostics independently of differing failure exit codes', () => {
   const result = check('export const value: number = "wrong";');
   expect(result.status).toBe(1);
   expect(result.stdout).toContain('PASS: diagnostic sets match (1 diagnostics).');
-  expect(result.stdout.match(/1 diagnostics, exit [12]/g)).toHaveLength(3);
+  expect(result.stdout.match(/1 diagnostics, exit [12]/g)).toHaveLength(2);
 });
 
 it('rejects an actual library diagnostic difference between compiler versions', () => {

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const repoRoot = process.cwd();
@@ -33,6 +33,7 @@ try {
 
 if (typegenStatus !== 0) process.exit(typegenStatus);
 if (process.argv.includes('--typegen-only')) process.exit(0);
-const appStatus = runNodeModule('typescript/bin/tsc', ['--noEmit']);
+const checkerPath = join(dirname(require.resolve('tsrs/package.json')), 'bin', 'tsrs');
+const appStatus = runNodeModule(checkerPath, ['--noEmit']);
 if (appStatus !== 0) process.exit(appStatus);
-process.exit(runNodeModule('typescript/bin/tsc', ['--noEmit', '--project', 'cli/tsconfig.chat.json']));
+process.exit(runNodeModule(checkerPath, ['--noEmit', '--project', 'cli/tsconfig.chat.json']));

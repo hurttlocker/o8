@@ -33,7 +33,7 @@ Before reporting completion, all of these must pass:
 
 1. `{{targetFile}}` drops under {{ceiling}} lines (run `wc -l {{targetFile}}`).
 2. Every new file you created is also under {{ceiling}} lines.
-3. `npx tsc --noEmit` passes with zero errors.
+3. `npm run typecheck:fast` passes with zero errors. Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 4. `npm run rule-check` passes with zero violations.
 5. No behavioural changes — every externally-observable UI, API, or store outcome is identical before and after. If you cannot rule this out by reading, keep the diff surgical and flag it in the commit body.
 

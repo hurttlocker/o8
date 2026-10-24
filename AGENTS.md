@@ -21,7 +21,7 @@ that apply to the current task once. Load scoped references only when their trig
 
 ## Verification and skills
 
-For code changes, run `npx tsc --noEmit` and the required completion gates; use focused checks while iterating.
+For code changes, run `npm run typecheck:fast` and the required completion gates; use focused checks while iterating.
 Read only matching skills before the relevant work:
 
 - [Code](.agents/skills/o8-code/SKILL.md), [UI/TSX](.agents/skills/o8-ui/SKILL.md), [checks](.agents/skills/o8-checks/SKILL.md).

@@ -4,13 +4,6 @@ import path from 'node:path';
 
 const root = process.cwd();
 
-// Both compiler packages export `tsc`; npm initially links the native alias.
-// Relink only the baseline package so Next and existing npx tooling stay on TS 5.
-// npm rebuild also creates the correct Windows command shims.
-if (!runStep('baseline TypeScript entry points', 'npm', ['rebuild', 'typescript', '--ignore-scripts'])) {
-  process.exit(1);
-}
-
 function runStep(label, command, args) {
   const result = spawnSync(command, args, {
     cwd: root,

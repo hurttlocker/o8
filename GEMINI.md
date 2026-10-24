@@ -63,7 +63,8 @@ Address or escalate an adjacent finding only when it blocks the packet or makes 
 ## How to verify your diff before committing
 
 ```bash
-npx tsc --noEmit             # must pass, always — the one blocking gate
+npm run typecheck:fast             # must pass, always — the one blocking gate
+# Slower TypeScript 5.8.2 cross-check: npm run typecheck:tsc
 npx eslint <changed files>   # advisory, CHANGED FILES ONLY — never repo-wide `npm run lint` (slow; blocks nothing)
 git diff main...HEAD         # self-review gate before the <self-review> block
 ```

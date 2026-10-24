@@ -5,9 +5,11 @@ description: Choose or run verification for code, process seams, authorization, 
 
 # Verification
 
-- Every code change runs `npx tsc --noEmit` and the hermetic `npm test` completion gate. Run the
-  smallest relevant tests while iterating, and use integration or Rust tests when the changed
-  boundary requires them. Docs-only changes validate links and the affected documentation checks.
+- Every code change runs `npm run typecheck:fast` and the hermetic `npm test` completion gate.
+  `typecheck:fast` falls back to tsc 5.8 on Intel Macs and Windows.
+  Use `npm run typecheck:tsc` for the slower cross-check. Run the smallest relevant tests while
+  iterating, and use integration or Rust tests when the changed boundary requires them. Docs-only
+  changes validate links and the affected documentation checks.
 
 - New cross-process seams, prompt-taught arguments, persistence paths, and principal or authorization
   changes need a test through the real entry point and persisted state. Helper-only tests are not

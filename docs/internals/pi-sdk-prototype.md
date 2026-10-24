@@ -303,7 +303,8 @@ repository dependency setup, run:
 ```sh
 npx vitest run tests/pi-sdk-worker-real-path.test.ts --maxWorkers=1
 npm run test:integration -- tests/pi-sdk-worker-real-path.test.ts
-npx tsc --noEmit
+npm run typecheck:fast
+# Slower TypeScript 5.8.2 cross-check: npm run typecheck:tsc
 npm test
 ```
 

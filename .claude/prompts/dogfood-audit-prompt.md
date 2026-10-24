@@ -39,7 +39,7 @@ Spawn an agent to take dev-browser screenshots and check:
 
 ## Area 5: Code Health
 Spawn an agent to run:
-- `npx tsc --noEmit` (should be zero errors)
+- `npm run typecheck:fast` (should be zero errors). Use `npm run typecheck:tsc` for the slower TypeScript 5.8.2 cross-check.
 - `grep -r "from 'lucide-react'" src/components/desktop/` (find remaining lucide imports)
 - `grep -rn "'#ffffff'" src/components/desktop/` (find hardcoded white backgrounds)
 - Check repos.json exists: `cat ~/.cortex-ide/repos.json`
