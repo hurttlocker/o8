@@ -143,7 +143,7 @@ export function useWorkspaceChatPane({
   }, []);
   const disableClaudeBypassPermissions = useCallback(() => setClaudeBypassPermissions(false), []);
 
-  const transcriptSlice = useTranscript(normalizedSessionKey, { live: active });
+  const transcriptSlice = useTranscript(normalizedSessionKey, { live: active, visible: active });
   const fallbackMessages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const messages = useMemo(() => {
     if (normalizedSessionKey && transcriptSlice.status !== 'idle') {
