@@ -10,11 +10,13 @@
  * `[ws-health]` and keeps rolling counters queryable in-process (exposed on the
  * existing `/health` HTTP endpoint).
  *
- * Cost: one unref'd interval + a couple of arithmetic ops per sample. Zero
- * allocation, zero overhead when the loop is healthy.
+ * Opt-in CPU sampling (O8_WS_CPU_EVIDENCE=1) rotates every 15 seconds; only
+ * bounded repository call-site summaries are retained when lag is observed.
+ * Raw profiles are discarded. Lag and wedge detection always remain active.
  */
 
 import { performance } from 'node:perf_hooks';
+import { WsCpuSampler, type WsCpuEvidence } from './cpu-evidence';
 
 export interface WsHealthStats {
   /** Wall-clock time the watchdog started sampling (epoch ms). */
@@ -38,6 +40,8 @@ export interface WsHealthStats {
   intervalMs: number;
   thresholdMs: number;
   sustainedSamples: number;
+  /** Last lag capture; sampled overlap is diagnostic evidence, not causality. */
+  cpuEvidence: WsCpuEvidence;
 }
 
 export interface WsWatchdogOptions {
@@ -57,6 +61,8 @@ export interface WsWatchdogOptions {
   cancelScheduler?: (handle: unknown) => void;
   /** Log sink. Default console.log. */
   log?: (msg: string) => void;
+  /** Override the sampler; otherwise profiling requires O8_WS_CPU_EVIDENCE=1. */
+  cpuSampler?: Pick<WsCpuSampler, 'start' | 'stop' | 'capture' | 'getEvidence'> | false;
 }
 
 export class WsWatchdog {
@@ -68,6 +74,8 @@ export class WsWatchdog {
   private readonly scheduler: (cb: () => void, ms: number) => { unref?: () => void };
   private readonly cancelScheduler: (handle: unknown) => void;
   private readonly log: (msg: string) => void;
+  private readonly cpuSampler: WsWatchdogOptions['cpuSampler'];
+  private capturePending = false;
 
   private timer: { unref?: () => void } | null = null;
   private expected = 0;
@@ -83,6 +91,7 @@ export class WsWatchdog {
     this.scheduler = opts.scheduler ?? ((cb, ms) => setInterval(cb, ms));
     this.cancelScheduler = opts.cancelScheduler ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
     this.log = opts.log ?? ((m) => console.log(m));
+    this.cpuSampler = opts.cpuSampler ?? (process.env.O8_WS_CPU_EVIDENCE === '1' ? new WsCpuSampler() : false);
 
     this.stats = {
       startedAt: this.wallClock(),
@@ -97,11 +106,13 @@ export class WsWatchdog {
       intervalMs: this.intervalMs,
       thresholdMs: this.thresholdMs,
       sustainedSamples: this.sustainedSamples,
+      cpuEvidence: { status: this.cpuSampler ? 'sampling' : 'unavailable', frames: [] },
     };
   }
 
   start(): void {
     if (this.timer) return;
+    if (this.cpuSampler) this.cpuSampler.start();
     this.stats.startedAt = this.wallClock();
     this.expected = this.nowMs() + this.intervalMs;
     this.timer = this.scheduler(() => this.tick(), this.intervalMs);
@@ -113,10 +124,11 @@ export class WsWatchdog {
     if (!this.timer) return;
     this.cancelScheduler(this.timer);
     this.timer = null;
+    if (this.cpuSampler) void this.cpuSampler.stop();
   }
 
   getStats(): WsHealthStats {
-    return { ...this.stats };
+    return { ...this.stats, cpuEvidence: this.cpuSampler ? this.cpuSampler.getEvidence() : this.stats.cpuEvidence };
   }
 
   /**
@@ -136,6 +148,14 @@ export class WsWatchdog {
     if (lag > s.maxLagMs) s.maxLagMs = lag;
 
     if (lag > this.thresholdMs) {
+      // Capture the first delayed gap too: one long blocking call need not
+      // produce three consecutive late timers. Wedge classification is unchanged.
+      if (this.cpuSampler && !this.capturePending) {
+        this.capturePending = true;
+        void this.cpuSampler.capture(this.wallClock() - lag).then((evidence) => {
+          if (this.timer) this.log(`[ws-health] lag sample cpuEvidence=${JSON.stringify(evidence)}`);
+        }).catch(() => {}).finally(() => { this.capturePending = false; });
+      }
       s.consecutiveHighSamples += 1;
       if (s.consecutiveHighSamples >= this.sustainedSamples && !s.wedged) {
         // Wedge onset — log once per episode, not per sample.

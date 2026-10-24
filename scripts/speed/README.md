@@ -139,8 +139,33 @@ measures the heap profiler's own RSS perturbation in three disposable servers.
 it omits string contents and does not claim dominator-retained sizes.
 `summarize.mjs` combines explicitly selected receipts into JSON distributions.
 
+On macOS, `ws-cpu-idle.mjs` measures the CPU sampler's idle cost in six disposable standalone
+WS servers, three with sampling on and three with `cpuSampler: false`. It builds
+one implementation bundle using the standalone esbuild settings and injects only
+the sampler selection for the two arms. All six runs overlap, sharing host
+contention. Each has a private home, data directory and empty repository, with
+loopback-only networking, no Next sibling and no clients. After a 60-second
+warmup, it records process CPU-time deltas and RSS every five seconds for ten
+minutes. CPU percentages use one core as 100%; settled RSS is the median of the
+last five minutes. No external inspector, heap snapshot or forced GC perturbs
+the measurement. Use a fresh output directory and keep raw logs private:
+
+```sh
+node scripts/speed/ws-cpu-idle.mjs --output=tmp/speed-evidence/ws-cpu-idle
+```
+
+The receipt includes all observations, per-run median CPU, whole-window mean
+CPU, settled RSS, the executing bundle hash and the median-of-runs differences.
+The idle budget permits default-on sampling only below 0.5 CPU percentage points
+and 5 MiB added RSS. Its `complete` field requires all six ten-minute runs.
+Do not run builds or tests during collection.
+
+Normal servers keep CPU profiling off. Set `O8_WS_CPU_EVIDENCE=1` before starting
+the WS server to enable sampled lag call-site evidence. Timer-based lag and
+wedge counters remain active with profiling off.
+
 Review the JSON's failures, sample counts, calibration, and workload limitations
-before comparing medians or worst cases. `complete` requires three full soaks;
+before comparing medians or worst cases. The main baseline's `complete` requires three full soaks;
 it does not assert that every original #2887 acceptance criterion is complete.
 
 ## WS replay memory

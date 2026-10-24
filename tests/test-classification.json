@@ -6283,6 +6283,15 @@
       ]
     },
     {
+      "path": "tests/ws-lag-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-parity-real-path.test.ts",
       "reasons": [
         "child-process",
