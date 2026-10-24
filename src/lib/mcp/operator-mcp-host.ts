@@ -468,6 +468,23 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requ
   // A transport may narrow the server's own profile, never expand it.
   const activeTools = operatorToolsForProfile().filter(tool => !allowedNames || allowedNames.has(tool.name));
   if (method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: activeTools } };
+  // The opt-in Rust transport shares the existing gate, profiles and bounded
+  // status snapshot. Rust projects the raw model into the public tool result.
+  if (method === 'o8d/read-context' && process.env.O8D_MCP_READS === '1') {
+    const requests = Array.isArray(params?.statusRequests) ? params.statusRequests : [];
+    const statusSources = activeTools.some((tool) => tool.name === 'o8_status')
+      ? await Promise.all(requests.map(async (entry: { index?: unknown; arguments?: Record<string, unknown> }) => {
+        const args = entry?.arguments ?? {};
+        if (args.fresh !== undefined && typeof args.fresh !== 'boolean') return { index: entry.index };
+        try {
+          const { readStatusSnapshot } = await import('@/lib/mcp/operator-handlers/status-snapshot');
+          return { index: entry.index, source: await readStatusSnapshot(args.sessionKey as string | undefined, args.fresh === true) };
+        } catch { return { index: entry.index }; }
+      })) : [];
+    return { jsonrpc: '2.0', id, result: {
+      tools: activeTools, statusSources, profile: process.env.O8_OPERATOR_MCP_PROFILE?.trim() || 'full',
+    } };
+  }
   if (method === 'tools/call') {
     const toolName = (params as Record<string, unknown> | undefined)?.name as string;
     const toolArgs = expandToolPathArgs(
