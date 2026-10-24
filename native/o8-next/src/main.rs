@@ -5,6 +5,7 @@ mod composer;
 mod merge;
 mod model;
 mod retained;
+mod rich;
 mod sidebar;
 mod stream;
 mod text;
@@ -150,7 +151,7 @@ mod tests {
     use super::*;
     #[test]
     fn recorded_web_parity() {
-        for case in ["review", "tools", "long"] {
+        for case in ["review", "tools", "long", "rich"] {
             let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
             let history: History = serde_json::from_slice(
                 &fs::read(base.join(format!("{case}.history.json"))).unwrap(),

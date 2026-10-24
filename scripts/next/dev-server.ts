@@ -8,6 +8,8 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { NextRequest } from 'next/server';
 import { attachReplaySocket } from './replay-socket';
+import { isolateTranscriptDiscovery, seedTranscriptFixtures } from './transcript-fixtures';
+import { attachTranscriptSocket } from './transcript-socket';
 
 async function main() {
   const root = mkdtempSync(join(tmpdir(), 'o8-next-dev-'));
@@ -16,7 +18,7 @@ async function main() {
   mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
   mkdirSync(repo);
   execFileSync('git', ['init', '-q', repo]);
-  Object.assign(process.env, { O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir, CORTEX_IDE_DB_PATH: join(dataDir, 'fixture.db'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex') });
+  Object.assign(process.env, { O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir, CORTEX_IDE_DB_PATH: join(dataDir, 'fixture.db'), O8_OWNED_OPENCODE_ROOT: join(dataDir, 'owned-opencode'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex') });
   for (const key of ['O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_SPECTATOR_TOKEN', 'O8_PACKAGED_APP']) delete process.env[key];
   const fixtureToken = process.env.O8_NEXT_API_TOKEN || randomBytes(32).toString('hex');
   writeFileSync(join(dataDir, 'ws-token'), fixtureToken, { mode: 0o600 });
@@ -43,6 +45,8 @@ async function main() {
       savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true }));
   }
   const composer = process.argv.includes('--composer');
+  const transcriptFixtures = process.argv.includes('--transcript');
+  if (transcriptFixtures) seeds.push(...seedTranscriptFixtures(dataDir, repo));
   if (composer) {
     for (const id of ['thoughts-composer-first', 'thoughts-composer-second', 'thoughts-composer-legacy']) {
       seeds.push({ id, title: id, messages: [] });
@@ -59,6 +63,8 @@ async function main() {
   const { getOrCreateWsToken } = await import('../../src/lib/ws-auth');
   const { GET: context } = await import('../../src/app/api/v2/chat-history/route');
   const { GET: state } = await import('../../src/app/api/orchestrator/state/route');
+  await isolateTranscriptDiscovery(transcriptFixtures);
+  const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
   const queue = await import('../../src/app/api/orchestrator/composer-queue/route');
   const { panelGateMiddleware } = await import('../../src/middleware');
   // Fixture admission is the same injectable native boundary as the existing
@@ -74,6 +80,7 @@ async function main() {
     '/api/mobile/orchestrator/threads': sessions, '/api/mobile/history': history,
     '/api/v2/chat-history': context, '/api/orchestrator/state': state,
     '/api/orchestrator/composer-queue': queue.GET, '/api/panel/ws-info': wsInfo,
+    '/api/runtime/inventory': inventory,
   };
   const requests: string[] = [];
   let responseLost = false;
@@ -86,7 +93,8 @@ async function main() {
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : null : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
-      if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))) { res.writeHead(404).end(); return; }
+      if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
+        && !(transcriptFixtures && url.searchParams.get('sessionKey') === 'opencode-owned:next-worker')) { res.writeHead(404).end(); return; }
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
@@ -114,7 +122,7 @@ async function main() {
       res.end(Buffer.from(await response.arrayBuffer()));
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
-  const closeSockets = attachReplaySocket(server, getOrCreateWsToken(), requests);
+  const closeSockets = (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, getOrCreateWsToken(), requests);
   server.listen(0, '127.0.0.1', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');

@@ -1,7 +1,7 @@
 //! Presentation of the existing MobileHistoryResponse. No server state is written.
 use crate::{
     activity::{Step, activity},
-    text::{Node, markdown},
+    text::Node,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,11 +23,26 @@ pub struct History {
     #[serde(rename = "sessionKey")]
     pub session_key: String,
     pub transcript: Vec<Entry>,
+    #[serde(default)]
+    pub page: Option<Page>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Page {
+    pub has_more: bool,
+    pub before_cursor: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Row {
+    PacketHeader {
+        id: String,
+        prompt: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
+    },
     Message {
         id: String,
         role: String,
@@ -42,7 +57,9 @@ pub enum Row {
 impl Row {
     pub fn id(&self) -> &str {
         match self {
-            Self::Message { id, .. } | Self::Activity { id, .. } => id,
+            Self::Message { id, .. }
+            | Self::Activity { id, .. }
+            | Self::PacketHeader { id, .. } => id,
         }
     }
 }
@@ -71,7 +88,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
     };
     // Retain step indices until all result-only updates have arrived.
     let mut blocks = Vec::<(usize, Vec<usize>)>::new();
-    for entry in entries {
+    for (entry_index, entry) in entries.iter().enumerate() {
         for (index, tool) in entry.tools.as_deref().unwrap_or(&[]).iter().enumerate() {
             let id = tool["id"]
                 .as_str()
@@ -99,7 +116,12 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 .and_then(Value::as_array)
                 .is_some_and(|v| !v.is_empty())
         });
-        if entry.role != "tool" && (!entry.text.trim().is_empty() || extras) {
+        let receipt = entry
+            .extra
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "handoff" || kind == "compaction");
+        if entry.role != "tool" && (!entry.text.trim().is_empty() || extras || receipt) {
             if !pending.is_empty() {
                 blocks.push((rows.len(), pending.clone()));
             }
@@ -110,13 +132,34 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 rows.push((*row).clone());
                 continue;
             }
+            if entry_index == 0
+                && entry.role == "user"
+                && (crate::rich::packet_prompt(&entry.text)
+                    || entry
+                        .extra
+                        .get("packetHeader")
+                        .is_some_and(|header| header["enabled"] == true))
+            {
+                rows.push(Row::PacketHeader {
+                    id: entry.id.clone(),
+                    prompt: entry.text.clone(),
+                    details: entry.extra.get("packetHeader").cloned(),
+                });
+                continue;
+            }
             let special = entry
                 .extra
                 .get("type")
                 .and_then(Value::as_str)
                 .is_some_and(|t| t != "message");
-            let mut nodes = markdown(&entry.text);
-            if special || extras {
+            let mut nodes = crate::rich::nodes(entry);
+            if (special && !receipt)
+                || entry
+                    .extra
+                    .get("claudeCodeEvents")
+                    .and_then(Value::as_array)
+                    .is_some_and(|v| !v.is_empty())
+            {
                 // Never silently discard unsupported receipts/media in this slice.
                 nodes.push(Node::notice(
                     "Additional event or media details are available in the web transcript.",

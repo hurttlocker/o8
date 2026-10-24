@@ -3,6 +3,8 @@ import review from '../native/o8-next/fixtures/review.history.json';
 import reviewTree from '../native/o8-next/fixtures/review.tree.json';
 import tools from '../native/o8-next/fixtures/tools.history.json';
 import toolsTree from '../native/o8-next/fixtures/tools.tree.json';
+import rich from '../native/o8-next/fixtures/rich.history.json';
+import richTree from '../native/o8-next/fixtures/rich.tree.json';
 import long from '../native/o8-next/fixtures/long.history.json';
 import longTree from '../native/o8-next/fixtures/long.tree.json';
 import { webTree } from '../scripts/next/web-tree';
@@ -13,7 +15,7 @@ import { sidebarTree } from '../scripts/next/sidebar-tree';
 // Rust tests consume these same trees. This side calls the production web
 // renderer, so a web behavior change cannot silently leave the Rust oracle stale.
 describe('native recorded render-tree parity with the web transcript', () => {
-  for (const [name, history, tree] of [['review', review, reviewTree], ['tools', tools, toolsTree], ['long', long, longTree]] as const) {
+  for (const [name, history, tree] of [['review', review, reviewTree], ['tools', tools, toolsTree], ['long', long, longTree], ['rich', rich, richTree]] as const) {
     it(`${name}: preserves content, roles, blocks, order, code bytes, inline styles and tool groups`, () => {
       expect(webTree(history.transcript as MobileTranscriptEntry[])).toEqual(tree);
     });

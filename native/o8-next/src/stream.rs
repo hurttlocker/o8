@@ -14,6 +14,8 @@ pub struct Transcript {
     pub entries: Vec<Entry>,
     pub rows: Vec<Row>,
     pub seq: u64,
+    pub page: Option<crate::model::Page>,
+    backfilled: bool,
     boot: Option<String>,
 }
 impl Transcript {
@@ -55,23 +57,53 @@ impl Transcript {
             entries: vec![],
             rows: vec![],
             seq: 0,
+            page: history.page,
+            backfilled: false,
             boot: None,
         };
         this.merge(history.transcript, true);
         this
     }
     fn merge(&mut self, incoming: Vec<Entry>, replace: bool) -> bool {
+        let prefix = if self.backfilled && !replace {
+            incoming
+                .first()
+                .and_then(|first| self.entries.iter().position(|entry| entry.id == first.id))
+                .map(|index| self.entries[..index].to_vec())
+                .unwrap_or_else(|| self.entries.clone())
+        } else {
+            vec![]
+        };
         let mut next = if replace {
             incoming
         } else {
             crate::merge::entries(&self.entries, incoming)
         };
-        if next.len() > 200 {
+        if self.backfilled && !replace {
+            let mut retained = prefix;
+            retained.retain(|entry| !next.iter().any(|current| current.id == entry.id));
+            retained.extend(next);
+            next = retained;
+        } else if !self.backfilled && next.len() > 200 {
             next.drain(..next.len() - 200);
         }
         if next == self.entries {
             return false;
         }
+        let rows = render_tree_cached(&next, &self.entries, &self.rows);
+        self.entries = next;
+        self.rows = rows;
+        true
+    }
+    pub fn prepend(&mut self, history: History) -> bool {
+        if history.session_key != self.key {
+            return false;
+        }
+        self.page = history.page;
+        let mut next = history.transcript;
+        next.retain(|entry| !self.entries.iter().any(|current| current.id == entry.id));
+        next.extend(self.entries.clone());
+        self.backfilled = true;
         let rows = render_tree_cached(&next, &self.entries, &self.rows);
         self.entries = next;
         self.rows = rows;
@@ -85,10 +117,19 @@ impl Transcript {
             return false;
         };
         let replace = payload["replace"].as_bool().unwrap_or(false);
+        let overlaps = entries
+            .iter()
+            .any(|entry| self.entries.iter().any(|current| current.id == entry.id));
+        if replace && !overlaps {
+            self.backfilled = false;
+            self.page = None;
+        }
         if entries.is_empty() && !replace {
             return false;
         }
-        self.merge(entries, replace)
+        // A bootstrap/reconnect checkpoint replaces its live window. Earlier
+        // explicitly loaded pages remain outside that window while ids overlap.
+        self.merge(entries, replace && !(self.backfilled && overlaps))
     }
     pub fn apply(&mut self, message: &Value) -> bool {
         let data = &message["data"];
@@ -163,6 +204,7 @@ mod tests {
         let mut transcript = Transcript::new(History {
             session_key: "llm-chat:test".into(),
             transcript: vec![],
+            page: None,
         });
         let entries: Vec<Entry> = (0..205)
             .map(|i| {

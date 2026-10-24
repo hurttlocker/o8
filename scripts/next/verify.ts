@@ -18,7 +18,8 @@ async function main() {
   const requests = join(directory, 'requests.json');
   const token = randomBytes(32).toString('hex');
   const headers = { Authorization: `Bearer ${token}` };
-  const server = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'scripts/next/dev-server.ts'], {
+  const rich = process.argv.includes('--transcript');
+  const server = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'scripts/next/dev-server.ts', ...(rich ? ['--transcript'] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, O8_NEXT_API_TOKEN: token, WS_TOKEN: 'fixture-inherited-token-must-not-reuse', TZ: 'UTC', CORTEX_IDE_DB_PATH: join(directory, 'must-not-open.db'), O8_NEXT_REQUEST_LOG: requests },
   });
   let errors = '';
@@ -45,13 +46,14 @@ async function main() {
     assert.equal(spawnSync(binary, ['--render-tree', invalid], { encoding: 'utf8', timeout: 8000 }).status, 1);
     // Every native network request goes to this freshly bound owned server.
     const list = await (await fetch(`${origin}/api/mobile/orchestrator/threads?limit=500`, { headers })).json() as { threads: Array<{ id: string; messageCount: number }> };
-    assert.equal(list.threads.length, 3);
+    assert.equal(list.threads.length, rich ? 5 : 3);
     const nativeSidebar = JSON.parse(execFileSync(binary, ['--sidebar-tree',
       resolve('native/o8-next/fixtures/sidebar.json'), 'thoughts-recent'], { encoding: 'utf8', timeout: 8000 }));
     assert.deepEqual(nativeSidebar, sidebarTree(sidebar, 'thoughts-recent'));
     console.log('[o8-next]', 'sidebar: 10 sessions, 3 groups match production web rules');
 
     for (const session of list.threads) {
+      if (session.id === 'thoughts-pagination') continue; // Full cursor walk has its own real-path test.
       const name = session.id.replace('thoughts-', '');
       const response = await fetch(`${origin}/api/mobile/history?sessionKey=${encodeURIComponent(`llm-chat:${session.id}`)}&limit=100`, { headers });
       assert.equal(response.status, 200);
@@ -123,7 +125,7 @@ async function main() {
     const calls = JSON.parse(readFileSync(requests, 'utf8')) as string[];
     assert.ok(calls.length > 0);
     assert.ok(calls.every(call => ['GET /api/mobile/orchestrator/threads', 'GET /api/mobile/history',
-      'GET /api/panel/ws-info', 'WS /ws', 'WS realtime-subscribe', 'WS ping', 'GET /api/v2/chat-history', 'GET /api/orchestrator/state', 'GET /api/orchestrator/composer-queue'].includes(call)));
+      'GET /api/panel/ws-info', 'WS /ws', 'WS realtime-subscribe', 'WS ping', 'GET /api/v2/chat-history', 'GET /api/orchestrator/state', 'GET /api/orchestrator/composer-queue', 'GET /api/runtime/inventory'].includes(call)));
     console.log('[o8-next]', `${calls.length} requests; only existing GET contracts used`);
     rmSync(directory, { recursive: true, force: true });
   }

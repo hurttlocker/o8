@@ -1,0 +1,118 @@
+{
+  "sessionKey": "llm-chat:thoughts-rich",
+  "transcript": [
+    {
+      "id": "packet",
+      "role": "user",
+      "text": "Packet: native-transcript\nSummary: Render the same server events\n## Project Brief\nComplete the transcript slice using the existing server payloads. Keep order, content and grouping across older history, worker sessions and streaming revisions. Preserve completed row layouts during streaming and scrolling. Verify the packet header, handoff, compaction receipt, table, diff card and each media placeholder through production handlers and headless GPUI rendering. This is an authored fixture.",
+      "type": "message",
+      "timestampLabel": ""
+    },
+    {
+      "id": "handoff",
+      "role": "system",
+      "text": "Runtime handoff",
+      "type": "handoff",
+      "timestampLabel": "",
+      "handoff": {
+        "handoffId": "fixture-handoff",
+        "from": {
+          "backend": "claude",
+          "model": "source-model"
+        },
+        "to": {
+          "backend": "codex",
+          "model": "destination-model"
+        },
+        "lossless": false,
+        "carries": {
+          "narrative": "summary",
+          "intent": "full",
+          "workspace": "full",
+          "governance": "full",
+          "provenance": "omitted"
+        },
+        "packet": {
+          "workspace": {
+            "branch": "fixture/transcript",
+            "dirty": true
+          },
+          "governance": {
+            "packets": [
+              {}
+            ],
+            "approvals": []
+          },
+          "narrative": {
+            "compactedBy": {
+              "backend": "claude",
+              "model": "summary-model"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "compaction",
+      "role": "system",
+      "text": "Compacted context",
+      "type": "compaction",
+      "timestampLabel": "",
+      "compaction": {
+        "timestamp": 1790812802000,
+        "tokensBefore": 100000,
+        "tokensAfter": 12000,
+        "trigger": "auto",
+        "source": "explicit",
+        "summary": "Retained decisions and next steps.",
+        "compactedBy": {
+          "backend": "claude",
+          "model": "summary-model",
+          "reasoningEffort": "medium"
+        },
+        "archiveRef": "fixture-archive"
+      }
+    },
+    {
+      "id": "table",
+      "role": "assistant",
+      "text": "| Mechanic | Result |\n| :--- | ---: |\n| **History** | 2000 |\n| Worker | `ready` |",
+      "type": "message",
+      "timestampLabel": ""
+    },
+    {
+      "id": "diff",
+      "role": "assistant",
+      "text": "```DIFF\ndiff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n```",
+      "type": "message",
+      "timestampLabel": ""
+    },
+    {
+      "id": "media",
+      "role": "user",
+      "text": "Attached references",
+      "type": "message",
+      "media": [
+        {
+          "kind": "image",
+          "path": "fixture/image.png",
+          "name": "image.png",
+          "mimeType": "image/png"
+        },
+        {
+          "kind": "pdf",
+          "path": "fixture/brief.pdf",
+          "name": "brief.pdf",
+          "mimeType": "application/pdf"
+        },
+        {
+          "kind": "file",
+          "path": "fixture/data.csv",
+          "name": "data.csv",
+          "mimeType": "text/csv"
+        }
+      ],
+      "timestampLabel": ""
+    }
+  ]
+}

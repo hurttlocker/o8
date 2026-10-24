@@ -457,6 +457,7 @@ export interface MobileHistoryResponse {
   sessionKey: string;
   transcript: MobileTranscriptEntry[];
   groups?: MobileRuntimeTailGroup[];
+  page?: import('@/lib/llm/chat-history-pagination').ChatHistoryPageMetadata;
 }
 
 export interface MobileReviewFileResponse {

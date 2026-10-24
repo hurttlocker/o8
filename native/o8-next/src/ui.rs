@@ -2,6 +2,8 @@
 mod composer_bench;
 #[path = "conversation.rs"]
 mod conversation;
+#[path = "history.rs"]
+mod history;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -47,6 +49,7 @@ pub(crate) struct Surface {
     notice: String,
     generation: u64,
     list_generation: u64,
+    history_loading: bool,
     key_revision: u64,
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
@@ -76,6 +79,7 @@ impl Surface {
             notice: String::new(),
             generation: 0,
             list_generation: 0,
+            history_loading: false,
             key_revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
@@ -104,6 +108,7 @@ impl Surface {
         self.generation += 1;
         let generation = self.generation;
         self.subscription = None;
+        self.history_loading = false;
         self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
@@ -114,7 +119,15 @@ impl Surface {
         let session = self.sessions.iter().find(|s| s.id == id).cloned();
         let task = cx.background_executor().spawn(async move {
             let session = session.ok_or("Selected session disappeared")?;
-            let history = client.history(&id)?;
+            let mut history = client.history(&id)?;
+            session.decorate(&mut history);
+            if id.contains(':') {
+                return Ok((
+                    history,
+                    Err("Runtime worker · read-only".into()),
+                    Err("Runtime worker · read-only".into()),
+                ));
+            }
             let queue = client.queue(&session);
             let routing = client.context(&session);
             Ok::<_, String>((history, queue, routing))
@@ -167,8 +180,18 @@ impl Surface {
             .take_while(|(a, b)| a.borrow().row == **b)
             .count();
         let mut states = Vec::with_capacity(next.len());
+        let mut indexed: HashMap<String, Vec<_>> = HashMap::new();
+        for state in old.iter() {
+            indexed
+                .entry(state.borrow().row.id().to_owned())
+                .or_default()
+                .push(state.clone());
+        }
         for row in next {
-            let retained = old.iter().find(|state| state.borrow().row == row).cloned();
+            let retained = indexed
+                .get(row.id())
+                .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
+                .cloned();
             states.push(retained.unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row)))));
         }
         self.list
@@ -229,7 +252,7 @@ impl Surface {
         if self.rows.is_empty() {
             "No saved messages. Select Refresh to read again.".into()
         } else if count > 100 {
-            format!("Saved history · latest 100 of {count} saved messages · Refresh to update")
+            format!("Saved history · {count} saved messages · Load older to read earlier turns")
         } else {
             "Saved history · Refresh to update".into()
         }
@@ -270,7 +293,7 @@ impl Surface {
                             this.selected = None;
                             this.rows = Rc::new(vec![]);
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
-                            this.notice = "No saved orchestrator sessions.".into();
+                            this.notice = "No saved sessions.".into();
                         }
                     }
                     Err(error) => this.notice = format!("{error}. Select Refresh to retry."),
@@ -465,6 +488,7 @@ impl Render for Surface {
                                     .text_color(rgb(0x8a93a0))
                                     .child(self.notice.clone()),
                             )
+                            .child(self.history_control(cx))
                             .child(
                                 list(self.list.clone(), move |index, _, _| {
                                     RetainedRow {
@@ -715,3 +739,6 @@ impl LiveMeasurement {
 #[cfg(test)]
 #[path = "surface_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "transcript_tests.rs"]
+mod transcript_tests;

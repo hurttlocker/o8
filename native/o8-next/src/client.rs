@@ -27,10 +27,28 @@ pub struct Session {
     pub rejected: bool,
     #[serde(default)]
     pub unread: bool,
+    #[serde(default)]
+    pub packet_header: Option<Value>,
 }
 #[derive(Deserialize)]
 struct Sessions {
     threads: Vec<Session>,
+}
+impl Session {
+    pub fn key(&self) -> String {
+        if self.id.contains(':') {
+            self.id.clone()
+        } else {
+            format!("llm-chat:{}", self.id)
+        }
+    }
+    pub fn decorate(&self, history: &mut History) {
+        if let (Some(header), Some(entry)) = (&self.packet_header, history.transcript.first_mut()) {
+            if entry.role == "user" {
+                entry.extra.insert("packetHeader".into(), header.clone());
+            }
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +173,35 @@ impl Client {
                 session.outcome = subject.outcome.clone();
             }
         }
+        let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
+        for agent in inventory["agents"].as_array().into_iter().flatten() {
+            let Some(key) = agent["sessionKey"].as_str().filter(|key| key.contains(':')) else {
+                continue;
+            };
+            if sessions.iter().any(|session| session.key() == key) {
+                continue;
+            }
+            let packet_header = state["mission"]["packets"].as_array().and_then(|packets| packets.iter().find(|packet| packet["lane"]["sessionKey"] == key)).map(|packet| json!({
+                "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
+            }));
+            sessions.push(Session {
+                id: key.into(),
+                title: agent["name"].as_str().unwrap_or(key).into(),
+                runtime: agent["runtime"].as_str().unwrap_or("").into(),
+                status: agent["status"].as_str().unwrap_or("idle").into(),
+                message_count: 0,
+                last_message_at: agent["lastActivityAt"]
+                    .as_i64()
+                    .map(|time| format!("{time:020}"))
+                    .unwrap_or_default(),
+                repo_path: None,
+                backend: None,
+                outcome: None,
+                rejected: false,
+                unread: false,
+                packet_header,
+            });
+        }
         Ok(sessions)
     }
     pub fn context(&self, session: &Session) -> Result<Value, String> {
@@ -230,11 +277,23 @@ impl Client {
         })
     }
     pub fn history(&self, id: &str) -> Result<History, String> {
-        let key = format!("llm-chat:{id}");
-        let history: History = self.get(
-            "/api/mobile/history",
-            &[("sessionKey", &key), ("limit", "100")],
-        )?;
+        self.history_page(id, None)
+    }
+    pub fn history_page(&self, id: &str, before: Option<&str>) -> Result<History, String> {
+        let key = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("llm-chat:{id}")
+        };
+        let mut query = vec![
+            ("sessionKey", key.as_str()),
+            ("limit", "100"),
+            ("page", "1"),
+        ];
+        if let Some(before) = before {
+            query.push(("before", before));
+        }
+        let history: History = self.get("/api/mobile/history", &query)?;
         if history.session_key != key {
             return Err("Server returned history for a different session".into());
         }
