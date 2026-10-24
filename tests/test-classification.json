@@ -3877,6 +3877,13 @@
       ]
     },
     {
+      "path": "tests/nightly-typecheck-heap-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/npm-release-age-real-path.test.ts",
       "reasons": [
         "child-process",
