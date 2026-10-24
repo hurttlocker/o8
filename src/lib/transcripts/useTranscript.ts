@@ -40,8 +40,9 @@ export interface UseTranscriptOptions {
 
 function createTranscriptPresentation(sessionKey: string | null | undefined, visible: boolean) {
   let snapshot = transcriptStore.getPresentedSlice(sessionKey);
+  const foreground = () => visible && (typeof document === 'undefined' || !document.hidden);
   return {
-    getSnapshot: () => visible ? transcriptStore.getPresentedSlice(sessionKey) : snapshot,
+    getSnapshot: () => foreground() ? transcriptStore.getPresentedSlice(sessionKey) : snapshot,
     subscribe: (listener: () => void) => {
       if (!sessionKey) return () => {};
       let timer: ReturnType<typeof setTimeout> | null = null;
@@ -52,16 +53,20 @@ function createTranscriptPresentation(sessionKey: string | null | undefined, vis
         latest = next;
         // Reuse the store's text-only boundary so questions, receipts,
         // errors and new turns can never wait behind a background timer.
-        if (visible || !isAssistantTextEdit(snapshot, next)) {
+        if (foreground() || !isAssistantTextEdit(snapshot, next)) {
           cancel(); snapshot = next; listener();
         } else if (timer === null) {
           timer = setTimeout(() => { timer = null; snapshot = latest; listener(); }, 1000);
         }
       };
       const unsubscribe = transcriptStore.subscribe(sessionKey, update);
+      const onVisibilityChange = () => {
+        if (foreground()) update(transcriptStore.getPresentedSlice(sessionKey));
+      };
+      document.addEventListener('visibilitychange', onVisibilityChange);
       // Account for a store change between render and subscription.
       update(transcriptStore.getPresentedSlice(sessionKey));
-      return () => { cancel(); unsubscribe(); };
+      return () => { cancel(); unsubscribe(); document.removeEventListener('visibilitychange', onVisibilityChange); };
     },
   };
 }

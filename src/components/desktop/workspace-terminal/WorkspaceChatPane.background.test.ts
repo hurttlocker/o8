@@ -13,6 +13,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 const keys = ['muse-owned:background-one', 'muse-owned:background-two'];
 const callbacks = { onUpdateMessages: vi.fn(), onUpdateSessionKey: vi.fn(), onSelectModel: vi.fn(), onConsumeDraftInjection: vi.fn() };
 let root: Root; let host: HTMLDivElement; let commits = 0;
+let documentHidden = false;
 function publish(text: string, key = keys[0], extra: Partial<MobileTranscriptEntry> = {}) {
   transcriptStore.setSlice(key, { status: 'fresh', lastUpdated: 1,
     messages: [{ id: 'reply', role: 'assistant', text, timestamp: 1, ...extra }] });
@@ -30,6 +31,8 @@ async function render(active: boolean, sessionKey = keys[0]) {
 async function advance(ms: number) { await act(async () => vi.advanceTimersByTime(ms)); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  documentHidden = false;
+  vi.spyOn(document, 'hidden', 'get').mockImplementation(() => documentHidden);
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ agents: [], entries: [], transcript: [] })));
   for (const key of keys) { transcriptStore.clear(key); publish(`Initial ${key}`, key); }
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); commits = 0;
@@ -38,7 +41,7 @@ afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
   for (const key of keys) transcriptStore.clear(key);
   resetWorkspaceChatDraftStatesForTests(); resetWorkspaceSteerQueueForTests();
-  vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
+  vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();
 });
 it('coalesces hidden workspace text without stopping shared-cache delivery', async () => {
   await render(false); commits = 0;
@@ -62,19 +65,44 @@ it('keeps visible workspace text immediate', async () => {
   await render(true); await act(async () => publish('Visible text'));
   expect(host.textContent).toContain('Visible text');
 });
-it('presents hidden tool metadata immediately and cancels the older prose deadline', async () => {
-  await render(false); await act(async () => publish('Pending prose'));
+it('slows a selected workspace in an initially hidden document and resumes without replacing its draft', async () => {
+  documentHidden = true;
+  await render(true);
+  const original = host.querySelector('[data-o8-message-id="reply"]');
+  const draft = host.querySelector('textarea');
+  commits = 0;
+  for (let tick = 0; tick < 10; tick++) {
+    await act(async () => publish(`Window tick ${tick}`)); await advance(50);
+  }
+  expect(commits).toBe(0);
+  expect(transcriptStore.getSlice(keys[0]).messages[0].text).toBe('Window tick 9');
+  await advance(500);
+  expect(host.textContent).toContain('Window tick 9');
+  await act(async () => publish('Pending window tail'));
+  expect(host.textContent).not.toContain('Pending window tail');
+  documentHidden = false;
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(host.textContent).toContain('Pending window tail');
+  expect(host.querySelector('[data-o8-message-id="reply"]')).toBe(original);
+  expect(host.querySelector('textarea')).toBe(draft);
+  commits = 0; await advance(1000); expect(commits).toBe(0);
+});
+it.each([false, true])('presents hidden tool metadata immediately (selected=%s) and cancels the older prose deadline', async (active) => {
+  documentHidden = active;
+  await render(active); await act(async () => publish('Pending prose'));
   await act(async () => publish('Question text', keys[0], { toolCalls: [{ name: 'AskUserQuestion', args: { question: 'Continue?' }, status: 'running' }] }));
   expect(host.textContent).toContain('Question text'); expect(host.textContent).toContain('Work details');
   commits = 0; await advance(1000); expect(commits).toBe(0);
 });
-it('observes hidden error state immediately and cancels pending text notification', async () => {
-  await render(false); await act(async () => publish('Pending prose')); commits = 0;
+it.each([false, true])('observes hidden error state immediately (selected=%s) and cancels pending text notification', async (active) => {
+  documentHidden = active;
+  await render(active); await act(async () => publish('Pending prose')); commits = 0;
   await act(async () => transcriptStore.setStatus(keys[0], 'error', 'Fixture error'));
   expect(commits).toBeGreaterThan(0); commits = 0; await advance(1000); expect(commits).toBe(0);
 });
-it('presents new turns immediately', async () => {
-  await render(false); await act(async () => publish('Pending prose'));
+it.each([false, true])('presents new turns immediately (selected=%s)', async (active) => {
+  documentHidden = active;
+  await render(active); await act(async () => publish('Pending prose'));
   await act(async () => transcriptStore.mergeEntries(keys[0], [{ id: 'new-turn', role: 'user', text: 'New turn', timestamp: 2 }]));
   expect(host.textContent).toContain('New turn');
 });

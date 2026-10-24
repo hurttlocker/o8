@@ -11,6 +11,7 @@ const keys = ['codex-discovered:background-one', 'codex-discovered:background-tw
 let host: HTMLDivElement;
 let root: Root;
 let commits = 0;
+let documentHidden = false;
 const entry = (text: string): MobileTranscriptEntry => ({ id: 'reply', role: 'assistant', text, timestamp: 1 });
 function publish(text: string, key = keys[0], extra: Partial<MobileTranscriptEntry> = {}) {
   transcriptStore.setSlice(key, { status: 'fresh', lastUpdated: 1, messages: [{ ...entry(text), ...extra }] });
@@ -23,6 +24,8 @@ async function render(active: boolean, key = keys[0]) {
 async function advance(ms: number) { await act(async () => vi.advanceTimersByTime(ms)); }
 beforeEach(() => {
   vi.useFakeTimers();
+  documentHidden = false;
+  vi.spyOn(document, 'hidden', 'get').mockImplementation(() => documentHidden);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json({
     transcript: transcriptStore.getSlice(new URL(url, 'http://localhost').searchParams.get('sessionKey')).messages,
@@ -34,7 +37,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
   for (const key of keys) transcriptStore.clear(key);
-  vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
+  vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();
 });
 it('bounds hidden shared-cache text commits while retaining the latest output', async () => {
   await render(false); commits = 0;
@@ -64,8 +67,31 @@ it('keeps visible shared-cache updates immediate', async () => {
   await act(async () => publish('Visible output'));
   expect(host.textContent).toContain('Visible output');
 });
-it('presents a hidden question immediately and cancels older pending text', async () => {
-  await render(false);
+it('coalesces a selected pane in a hidden document and catches up on visibility without remounting', async () => {
+  await render(true);
+  const article = host.querySelector('article');
+  documentHidden = true;
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  commits = 0;
+  for (let tick = 0; tick < 10; tick++) {
+    await act(async () => publish(`Window tick ${tick}`)); await advance(50);
+  }
+  expect(commits).toBe(0);
+  expect(transcriptStore.getSlice(keys[0]).messages[0].text).toBe('Window tick 9');
+  await advance(500);
+  expect(host.textContent).toContain('Window tick 9');
+  expect(commits).toBe(1);
+  await act(async () => publish('Pending window tail'));
+  expect(host.textContent).not.toContain('Pending window tail');
+  documentHidden = false;
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(host.textContent).toContain('Pending window tail');
+  expect(host.querySelector('article')).toBe(article);
+  commits = 0; await advance(1000); expect(commits).toBe(0);
+});
+it.each([false, true])('presents a hidden question immediately (selected=%s) and cancels older pending text', async (active) => {
+  documentHidden = active;
+  await render(active);
   await act(async () => publish('Pending prose'));
   await act(async () => publish('Question output', keys[0], {
     toolCalls: [{ name: 'AskUserQuestion', args: { question: 'Continue?' }, status: 'running' }],
@@ -75,16 +101,18 @@ it('presents a hidden question immediately and cancels older pending text', asyn
   await advance(1000);
   expect(host.textContent).not.toContain('Pending prose');
 });
-it('presents hidden errors immediately without reverting after the old deadline', async () => {
-  await render(false);
+it.each([false, true])('presents hidden errors immediately (selected=%s) without reverting after the old deadline', async (active) => {
+  documentHidden = active;
+  await render(active);
   await act(async () => publish('Pending prose'));
   await act(async () => transcriptStore.setStatus(keys[0], 'error', 'Fixture error'));
   expect(host.textContent).toContain('Transcript unavailable');
   await advance(1000);
   expect(host.textContent).toContain('Transcript unavailable');
 });
-it('presents a new hidden turn immediately instead of delaying it with earlier prose', async () => {
-  await render(false);
+it.each([false, true])('presents a new hidden turn immediately (selected=%s) instead of delaying it with earlier prose', async (active) => {
+  documentHidden = active;
+  await render(active);
   await act(async () => publish('Pending prose'));
   await act(async () => transcriptStore.mergeEntries(keys[0], [{ ...entry('New turn'), id: 'new-turn' }]));
   expect(host.textContent).toContain('Pending prose');
