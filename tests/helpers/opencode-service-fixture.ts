@@ -77,6 +77,14 @@ import { appendFileSync, readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const state = JSON.parse(readFileSync(${JSON.stringify(statePath)}, 'utf8'));
 appendFileSync(${JSON.stringify(logPath)}, \`lsof \${args.join(' ')}\\n\`);
+// Close projects cwd and descriptor checks from the same complete native
+// snapshot. Even after release, retain an unrelated process row: an empty or
+// truncated listing is uncertainty, not evidence that the workspace is idle.
+if (args.includes('-Fpcftn')) {
+  process.stdout.write('p' + process.pid + ${JSON.stringify(`\nclsof-fixture\nfcwd\ntDIR\nn${root}\n`)});
+  if (state.cached) process.stdout.write(${JSON.stringify(`p${holderPid}\ncopencode\nfcwd\ntDIR\nn${worktreePath}\nf3\ntREG\nn${worktreePath}/held\n`)});
+  process.exit(0);
+}
 // #1853 replaced the per-directory probes with one machine-wide snapshot:
 // \`lsof -nP -d cwd -F pcn\`. Real lsof exits 0 and emits p/c/n records; a tree
 // with nothing open is a SUCCESSFUL probe that matches no rows. Exiting
