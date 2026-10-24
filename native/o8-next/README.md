@@ -206,3 +206,54 @@ On Linux without a display, run `verify.ts --protocol-only` plus
 GPUI TestAppContext, production HTTP handlers and persisted queue/history,
 replacing only native runtime admission with a fixture acknowledgement. See
 [sidebar/composer evidence](evidence/sidebar-composer.md).
+
+## Pane grid (#4530)
+
+The independent grid root is opt-in. The normal single-session surface and the
+shipped Tauri app keep their existing behavior. The dedicated disposable fixture
+host reuses the `dev-server.ts` pattern and prints an `origin` and a `workspace`:
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/grid-dev-server.ts
+node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --server ORIGIN --pane-grid 6 --workspace WORKSPACE --pane-layout "$PWD/work/pane-layout.json"
+```
+
+Create the `work` directory first. Use the printed origin and workspace values,
+and provide the selected server's operator bearer through `O8_NEXT_API_TOKEN`,
+as for the existing composer. No installed configuration or data path is read.
+The fixture host supports the existing protocol-only checks without a desktop.
+The grid window itself still needs a platform display; on Linux without one,
+use the headless tests below.
+
+The size choices are 1, 2, 4 and 6. Ctrl+Alt+arrow moves focus geometrically;
+adding Shift moves the pane and its focus together. Tab/Shift+Tab cycles focus.
+Home/End scrolls the focused transcript. Ctrl+Alt+W closes its viewer, leaving
+the worker running. Ctrl+Alt+P cycles through sessions not already in a slot;
+Ctrl+Alt+1/2/4/6 changes size. Ctrl+Alt+Enter zooms the focused pane. The toolbar
+also exposes size, session selection, zoom and refresh; headers expose Close.
+
+The explicit layout file stores size, ordered session keys and focus separately
+for each exact workspace path. A saved workspace layout takes precedence over
+the initial command-line size. Smaller grids retain their hidden slots, live
+streams and scroll positions. Closed viewers drop their subscription. Missing
+sessions retain their slot and show “unavailable”; refreshing retries discovery.
+Invalid layout files are rejected before window startup and preserved.
+
+Saved threads and runtime workers come from the existing thread and inventory
+GETs. Original worker keys select the existing history GET and session stream;
+there are no new server routes. Each slot uses the existing native transcript
+merger and retained row renderer. Headers contain at most 40 Unicode scalar
+values of title and static state words from session status/outcome fields.
+Hidden slots do not enter the element tree. Clip gates defer both header and
+transcript layout until visible, before any text shaping or painting.
+
+```sh
+cargo test --locked --manifest-path native/o8-next/Cargo.toml
+npx vitest run tests/next-pane-grid-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml pane_grid_measurement -- --ignored --nocapture
+```
+
+The grid currently contains read-only transcript panes. Per-slot terminals
+remain to be integrated with the separately reviewed terminal surface; this
+change does not import that branch. Measurement endpoints, raw samples and
+remaining acceptance are in [pane grid evidence](evidence/pane-grid/README.md).

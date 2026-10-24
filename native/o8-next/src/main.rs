@@ -2,8 +2,12 @@
 mod activity;
 mod client;
 mod composer;
+mod grid_sessions;
 mod merge;
 mod model;
+mod pane;
+mod pane_grid;
+mod pane_layout;
 mod retained;
 mod sidebar;
 mod stream;
@@ -19,10 +23,13 @@ use std::{env, fs, process::ExitCode, time::Instant};
 
 fn run() -> Result<(), String> {
     let started = Instant::now();
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] {
         println!(
             "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE | --composer-benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
+        );
+        println!(
+            "Pane grid: --pane-grid 1|2|4|6 --workspace REPOSITORY_PATH --pane-layout ABSOLUTE_FILE"
         );
         return Ok(());
     }
@@ -57,6 +64,7 @@ fn run() -> Result<(), String> {
         );
         return Ok(());
     }
+    let grid = pane_layout::Options::extract(&mut args)?;
     let mut server = None;
     let mut offscreen = false;
     let mut enabled = false;
@@ -122,6 +130,19 @@ fn run() -> Result<(), String> {
     };
     let client =
         Client::new(&server.ok_or("Pass --server with an explicit disposable server origin")?)?;
+    if let Some(options) = grid {
+        if benchmark.is_some()
+            || composer_benchmark.is_some()
+            || stream_benchmark.is_some()
+            || unattended
+        {
+            return Err(
+                "Pane grid uses its own headless test workload; omit single-pane benchmark flags"
+                    .into(),
+            );
+        }
+        return pane_grid::launch(client, offscreen, options);
+    }
     // The real session list and history reads are also exercised without a window
     // by the parity/protocol runner. Interactive reads happen off the UI thread.
     ui::launch(
