@@ -1,15 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { AgentMessage, AgentPresence } from '@/lib/agents/types';
+import type { AgentMessage, AgentMessageIdentity, AgentPresence } from '@/lib/agents/types';
 import { isOperatorWindowVisible } from '@/lib/tauri/window-visibility';
 
 const POLL_MS = 15_000;
 
 export function selectPeerMessages(messages: AgentMessage[], self: AgentPresence): AgentMessage[] {
   const name = self.name.toLocaleLowerCase();
-  return messages.filter((message) => message.repo === self.repo
-    && (message.from.toLocaleLowerCase() === name || message.to.toLocaleLowerCase() === name));
+  const matchesIdentity = (identity: AgentMessageIdentity | null) => identity?.runtime === self.runtime
+    && identity.sessionKey !== null
+    && (self.sessionKey !== null
+      ? identity.sessionKey === self.sessionKey
+      : self.agentId === `session:${identity.sessionKey}`);
+  return messages.filter((message) => {
+    if (message.repo !== self.repo) return false;
+    const identities = message.refs.identities;
+    // Legacy records have no identity snapshot; a recorded mismatch must not
+    // be attributed to a replacement session that reuses the same codename.
+    return (message.from.toLocaleLowerCase() === name && (!identities || matchesIdentity(identities.from)))
+      || (message.to.toLocaleLowerCase() === name && (!identities || matchesIdentity(identities.to)));
+  });
 }
 
 function matchesSession(presence: AgentPresence, sessionKey: string): boolean {
