@@ -14,6 +14,7 @@ import { shortWorkerTitle, workerAttention } from './worker-pane-chrome';
 import { useWorkerPaneSize } from './useWorkerPaneSize';
 import { WorkerPaneHeader, WORKER_ICON_BUTTON } from './WorkerPaneHeader';
 import { WorkerPaneComposer } from './WorkerPaneComposer';
+import { useComposerDraftValue } from '../thoughts/chat-panel/composer-draft-store';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import {
   TerminalStatusEvidenceDisclosure,
@@ -295,7 +296,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     : slice.status === 'loading' || slice.status === 'idle';
   const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [draft, setDraft] = useState('');
+  const { value: draft, setValue: setDraft, captureOwner: captureDraftOwner, warning: draftWarning } = useComposerDraftValue(
+    JSON.stringify(['worker-steer', sessionKey]), 'input', '',
+  );
   const [sending, setSending] = useState(false);
   // Fix #4: synchronous guard so held-Enter can't double-fire before setState flushes
   const sendingRef = useRef(false);
@@ -351,6 +354,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   }, []);
 
   const resolveSteer = useCallback(async (request: { body: string; message: string; interrupt?: boolean }) => {
+    const ownsDraft = captureDraftOwner();
     setSending(true);
     setSteerReceipt('sending');
     setSendError(null);
@@ -370,7 +374,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
         setSteerReceipt('failed');
-        if (!request.interrupt) setDraft(request.message);
+        if (!request.interrupt && ownsDraft()) setDraft(request.message);
         pendingSteerRef.current = null;
         return;
       }
@@ -391,7 +395,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         setSendError('Final receipt unavailable. Check the same action before sending again.');
       } else {
         setSteerReceipt('failed');
-        if (!request.interrupt) setDraft(request.message);
+        if (!request.interrupt && ownsDraft()) setDraft(request.message);
         pendingSteerRef.current = null;
         setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
       }
@@ -400,7 +404,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       setSending(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
-  }, [clearTranscriptLoadingFallback, sessionKey]);
+  }, [captureDraftOwner, clearTranscriptLoadingFallback, sessionKey, setDraft]);
 
   const submitSteer = useCallback((resumeMessage?: string) => {
     const message = resumeMessage ?? trimmedDraft;
@@ -414,7 +418,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     pendingSteerRef.current = request;
     setDraft('');
     void resolveSteer(request);
-  }, [resolveSteer, sessionKey, trimmedDraft]);
+  }, [resolveSteer, sessionKey, setDraft, trimmedDraft]);
 
   const stopWorker = useCallback(() => {
     if (sendingRef.current || pendingSteerRef.current) return;
@@ -569,6 +573,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             onResume={canSteer ? () => submitSteer(trimmedDraft || 'Continue the assigned task.') : undefined}
             onStop={stopWorker} onOpenReview={onOpenReview} repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace}
           />
+          {draftWarning ? <div data-worker-draft-warning role="status" style={{ color: 'var(--t-text-secondary)',
+            fontSize: 11, paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>{draftWarning}</div> : null}
           {steerReceipt === 'failed' || steerReceipt === 'unknown' ? (
             <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)', fontSize: 11, paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
               <span>{steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
