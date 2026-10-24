@@ -2620,6 +2620,14 @@
       ]
     },
     {
+      "path": "tests/dependency-fetch-security-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-pool-dispatch-real-path.test.ts",
       "reasons": [
         "child-process",
