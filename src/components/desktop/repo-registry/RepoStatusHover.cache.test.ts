@@ -124,6 +124,31 @@ it('keeps the known counts after a rate-limited background refresh', async () =>
   expect(reads()).toHaveLength(2); expect(values()).toEqual(['2 open·1 awaiting review']);
 });
 
+it.each([{}, { prs: null }, { prs: {} }])('retains known PR counts after a malformed successful refresh: %j', async payload => {
+  await render();
+  fetchMock.mockImplementation(async (url: string) => url.startsWith('/api/panel/prs?')
+    ? Response.json(payload) : Response.json({}));
+  await act(async () => { await client.invalidateQueries(); }); await settle();
+  expect(reads()).toHaveLength(2);
+  expect(values()).toEqual(['2 open·1 awaiting review']);
+  expect(client.getQueryState(['gh', 'org/sample', 'prs'])?.status).toBe('error');
+
+  fetchMock.mockImplementation(async (url: string) => url.startsWith('/api/panel/prs?') ? list(1) : Response.json({}));
+  await act(async () => { await client.invalidateQueries(); }); await settle();
+  expect(values()).toEqual(['1 open']);
+  expect(client.getQueryState(['gh', 'org/sample', 'prs'])?.status).toBe('success');
+});
+
+it('accepts valid empty PR lists and stale broker snapshots with error metadata', async () => {
+  fetchMock.mockImplementation(async (url: string) => url.startsWith('/api/panel/prs?')
+    ? Response.json({ repo: 'org/sample', prs: [{ number: 1, state: 'OPEN' }], stale: true, error: 'Refresh unavailable' })
+    : Response.json({}));
+  await render(); expect(values()).toEqual(['1 open·1 awaiting review']);
+  fetchMock.mockImplementation(async () => Response.json({ repo: 'org/sample', prs: [] }));
+  await act(async () => { await client.invalidateQueries(); }); await settle();
+  expect(values()).toEqual(['None open']);
+});
+
 it.each(['failure', 'malformed'])('shows unknown rather than zero open PRs after an initial %s', async kind => {
   fetchMock.mockImplementation(async (url: string) => !url.startsWith('/api/panel/prs?') ? Response.json({})
     : kind === 'failure' ? new Response('unavailable', { status: 503 }) : Response.json({ prs: {} }));

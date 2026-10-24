@@ -125,6 +125,24 @@ it('retains selectable known issues after a rate-limited refresh', async () => {
   expect(reads()).toHaveLength(2); expect(issueButton(7)).toBeDefined();
   await act(async () => issueButton(7)!.click()); expect(select.mock.calls[0][0].repo).toBe('org/sample');
 });
+it.each([{}, { issues: null }, { issues: {} }])('retains selectable issues after a malformed successful refresh: %j', async payload => {
+  await render(); fetchMock.mockImplementation(async () => Response.json(payload));
+  await act(async () => { await client.invalidateQueries(); }); await settle();
+  expect(issueButton(7)).toBeDefined();
+  expect(client.getQueryState(['gh', 'org/sample', 'issues'])?.status).toBe('error');
+  await act(async () => issueButton(7)!.click());
+  expect(select.mock.calls[0][0]).toMatchObject({ repo: 'org/sample', number: 7 });
+});
+it('accepts valid stale issue snapshots and subsequent empty lists', async () => {
+  fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos })
+    : Response.json({ issues: [issue()], stale: true, error: 'Refresh unavailable' }));
+  await render(); expect(issueButton(7)).toBeDefined();
+  expect(client.getQueryData(['gh', 'org/sample', 'issues'])).toMatchObject({ stale: true, error: 'Refresh unavailable' });
+  fetchMock.mockImplementation(async () => Response.json({ issues: [] }));
+  await act(async () => { await client.invalidateQueries(); }); await settle();
+  expect(issueButton(7)).toBeUndefined();
+  expect(client.getQueryState(['gh', 'org/sample', 'issues'])?.status).toBe('success');
+});
 it('reports an initial failure and retries on the next opening', async () => {
   fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos })
     : new Response('unavailable', { status: 503 }));
