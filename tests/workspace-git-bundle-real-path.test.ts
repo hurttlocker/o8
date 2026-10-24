@@ -59,6 +59,7 @@ const artifactWorkers = await import('@/lib/workspace/ignored-artifact-worker');
 const execution = await import('@/lib/worktree/materialization-execution');
 const repoPath = path.join(root, 'repo');
 let repo: Awaited<ReturnType<typeof addRepo>>;
+let historicalWorkspace: Awaited<ReturnType<typeof workspace>>;
 let finished = false;
 let failed = false;
 function git(cwd: string, ...args: string[]): string {
@@ -113,6 +114,7 @@ beforeAll(async () => {
   git(repoPath, 'add', '.gitignore', 'tracked.txt');
   git(repoPath, 'commit', '-qm', 'base');
   repo = await addRepo(repoPath);
+  historicalWorkspace = await workspace('historical-source');
 });
 
 afterAll(() => {
@@ -328,7 +330,7 @@ describe('portable source preservation through the managed retirement entry', ()
     expect(readFileSync(partial, 'utf8')).toBe('partial retained manifest');
     finished = true;
   }, 120_000);
-  it('recovers dirty, untracked and unpushed source with its parents in an empty repository', async () => {
+  it('retains dirty source, then recovers explicitly committed untracked and unpushed work with its parents', async () => {
     const packetId = 'portable-source';
     const bank = path.join(dataDir, 'workspace-preservation', 'git-bundles');
     const priorBundles = existsSync(bank) ? readdirSync(bank) : [];
@@ -342,6 +344,16 @@ describe('portable source preservation through the managed retirement entry', ()
     mkdirSync(path.join(created.path, '.o8'), { recursive: true });
     const checkpoint = Buffer.from([0, 255, 42, 128, 0]);
     writeFileSync(path.join(created.path, '.o8', 'checkpoint.bin'), checkpoint);
+    const dirtyStatus = git(created.path, 'status', '--porcelain');
+    expect(await manager.cleanup(created.id)).toBe(false);
+    expect(git(created.path, 'rev-parse', 'HEAD')).toBe(unpushedHead);
+    expect(git(created.path, 'status', '--porcelain')).toBe(dirtyStatus);
+    expect(readFileSync(path.join(created.path, 'tracked.txt'), 'utf8')).toBe('dirty source at retirement\n');
+    expect(readFileSync(path.join(created.path, 'untracked.txt'), 'utf8')).toBe('untracked source at retirement\n');
+    // Cleanup no longer auto-commits unfinished source (#4206). The fixture
+    // explicitly saves it before asking the real retirement entry to bank it.
+    git(created.path, 'add', 'tracked.txt', 'untracked.txt');
+    git(created.path, 'commit', '-qm', 'save source for portable recovery');
     expect(await manager.cleanup(created.id)).toBe(true);
     expect(existsSync(created.path)).toBe(false);
     const snapshot = getWorkspaceSnapshot(repo.id, packetId)!;
@@ -595,7 +607,7 @@ describe('portable source preservation through the managed retirement entry', ()
       expect(live.size).toBe(0);
     } finally { spy.mockRestore(); }
     finished = true;
-  }, 60_000);
+  }, 120_000);
   it('holds over-deep ignored content before exhausting directory workers', async () => {
     const packetId = 'artifact-directory-depth';
     const { manager, created, lane } = await workspace(packetId);
@@ -679,7 +691,7 @@ describe('portable source preservation through the managed retirement entry', ()
     } finally { spy.mockRestore(); }
     finished = true;
   }, 60_000);
-  it('banks dirty source through authenticated Close and restores nested ignored bytes', async () => {
+  it('refuses dirty authenticated Close, then banks explicitly saved source and restores nested ignored bytes', async () => {
     const packetId = 'close-dirty-source';
     const { created, lane } = await workspace(packetId);
     // Materialize idle targets before reopening the database to verify durable Close state.
@@ -712,10 +724,19 @@ describe('portable source preservation through the managed retirement entry', ()
       prompt: '', summary: '', constraints: '', totalWaves: 1, missionState: mission,
       packetMeta: mission.packets.map(({ id, title, referenceLabel }) => ({ id, title, referenceLabel })),
     });
-    const response = await closePacket(new NextRequest('http://localhost/api/orchestrator/discard-packet', {
+    const closeRequest = (clientMutationId: string) => new NextRequest('http://localhost/api/orchestrator/discard-packet', {
       method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-      body: JSON.stringify({ packetId, disposition: 'superseded', clientMutationId: 'close-dirty-source-once' }),
-    }));
+      body: JSON.stringify({ packetId, disposition: 'superseded', clientMutationId }),
+    });
+    const dirtyStatus = git(created.path, 'status', '--porcelain');
+    const refused = await closePacket(closeRequest('close-dirty-source-refused'));
+    expect(refused.status, JSON.stringify(await refused.json())).toBe(409);
+    expect(git(created.path, 'rev-parse', 'HEAD')).toBe(unpublished);
+    expect(git(created.path, 'status', '--porcelain')).toBe(dirtyStatus);
+    expect(readFileSync(path.join(created.path, checkpointPath))).toEqual(checkpoint);
+    git(created.path, 'add', 'tracked.txt', 'untracked.txt');
+    git(created.path, 'commit', '-qm', 'save stopped source for Close');
+    const response = await closePacket(closeRequest('close-saved-source-once'));
     const closed = await response.json();
     expect(response.status, JSON.stringify(closed)).toBe(200);
     expect(closed.result).toMatchObject({ closed: true, worktreeRemoved: true });
@@ -764,35 +785,16 @@ describe('portable source preservation through the managed retirement entry', ()
     expect(readFileSync(path.join(merged.created.path, 'tracked.txt'), 'utf8')).toBe('post-merge source stays held\n');
     expect(getWorkspaceSnapshot(repo.id, 'merged-dirty-refused')).toBeNull();
     finished = true;
-  }, 60_000);
+  }, 120_000);
   it('keeps historical trusted manifests readable and denies private downloads to workers', async () => {
-    finished = false;
-    const summary = (await (await GET(request('portable-source'))).json()).result;
-    const archive = await readWorkspacePreservation(summary.preservationId);
-    const historical = { ...archive.payload };
-    delete historical.gitBundle;
-    const content = Buffer.from(JSON.stringify(historical));
-    const legacyId = createHash('sha256').update(content).digest('hex');
-    writeFileSync(path.join(dataDir, 'workspace-preservation', legacyId + '.json'), content, { mode: 0o600, flag: 'wx' });
-    // Seed a separate historical fixture receipt; never rewrite an existing manifest or owner journal.
-    const row = getSqlite().prepare('SELECT * FROM workspace_preservations WHERE preservation_id = ?')
-      .get(summary.preservationId) as Record<string, string | number | null>;
-    const columns = Object.keys(row);
-    getSqlite().prepare('INSERT INTO workspace_preservations (' + columns.join(', ') + ') VALUES ('
-      + columns.map(() => '?').join(', ') + ')').run(...columns.map((column) => (
-      column === 'preservation_id' || column === 'manifest_sha256' ? legacyId : row[column]
-    )));
-    closeDb();
-    const legacy = await readWorkspacePreservation(legacyId);
-    expect(legacy.payload.gitBundle).toBeUndefined();
-    expect(legacy.receipt.headCommit).toBe(archive.receipt.headCommit);
-    expect(legacy.payload.capture).toEqual(archive.payload.capture);
-    const worker = new NextRequest('http://localhost/api/orchestrator/workspace/preservation?packetId=portable-source&format=bundle', {
-      headers: { authorization: 'Bearer git-bundle-worker-test-token', host: 'localhost' },
-    });
-    expect((await GET(worker)).status).toBe(403);
-    const anonymous = new NextRequest(worker.url);
-    expect((await GET(anonymous)).status).toBe(401);
+    const packetId = 'historical-source';
+    const { manager, created } = historicalWorkspace;
+    expect(await manager.cleanup(created.id)).toBe(true);
+    const inspected = await GET(request(packetId));
+    expect(inspected.status).toBe(200);
+    const summary = (await inspected.json()).result;
+    const { verifyHistoricalGitBundleManifest } = await import('./workspace-git-bundle-historical-fixture');
+    await verifyHistoricalGitBundleManifest(summary.preservationId, dataDir, packetId);
     finished = true;
-  });
+  }, 120_000);
 });

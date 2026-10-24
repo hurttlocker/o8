@@ -178,6 +178,15 @@ const path = require('node:path');
 const readline = require('node:readline');
 let rootCanonical;
 const directories = [];
+let phase = 'capture';
+let phaseStarted = Date.now();
+function progress(entries, done = false) {
+  if (done || entries % 128 === 0) process.stdout.write('O8_PURGE_PROGRESS '
+    + JSON.stringify({ phase, entries, elapsedMs: Date.now() - phaseStarted, done }) + '\n');
+}
+function beginPhase(name) {
+  phase = name; phaseStarted = Date.now(); progress(0);
+}
 
 function verifyLocation() {
   for (const directory of directories) {
@@ -198,13 +207,25 @@ function verifyLocation() {
 
 // Node has no openat/fchdir API. Enter one no-follow-opened component at a
 // time in this isolated helper, then re-verify both cwd and the named inode.
-// Every leaf syscall consequently uses a single name in an attested cwd.
+// Keep the verified common ancestors open between siblings. Reopening the
+// entire chain for every leaf makes broad, deep build output quadratic in depth.
+// Every leaf syscall still uses a single name in a freshly attested cwd.
 async function inDirectory(relative, expectedByPath, operation) {
   const parts = relative === '.' ? [] : relative.split(path.sep);
   if (parts.some(part => !part || part === '.' || part === '..')) throw new Error('Exact purge refused an unsafe component.');
-  async function enter(index) {
+  verifyLocation();
+  let common = 0;
+  while (common < parts.length && common + 1 < directories.length
+    && directories[common + 1].relative === path.join(...parts.slice(0, common + 1))) common++;
+  while (directories.length > common + 1) {
+    const current = directories[directories.length - 1];
     verifyLocation();
-    if (index === parts.length) return operation();
+    process.chdir('..');
+    directories.pop();
+    try { verifyLocation(); } finally { await current.handle.close(); }
+  }
+  for (let index = common; index < parts.length; index++) {
+    verifyLocation();
     const part = parts[index];
     const childRelative = path.join(directories[directories.length - 1].relative, part);
     const expected = expectedByPath.get(childRelative);
@@ -221,11 +242,10 @@ async function inDirectory(relative, expectedByPath, operation) {
       }
       process.chdir(part);
       directories.push({ relative: childRelative, entry: expected, handle });
-      try { verifyLocation(); return await enter(index + 1); }
-      finally { process.chdir('..'); directories.pop(); verifyLocation(); }
-    } finally { await handle.close(); }
+      verifyLocation();
+    } catch (error) { await handle.close(); throw error; }
   }
-  try { return await enter(0); }
+  try { return await operation(); }
   finally { verifyLocation(); }
 }
 
@@ -254,12 +274,15 @@ async function manifestAt() {
       ctimeMs: stat.ctimeMs,
     };
     entries.push(entry);
+    progress(entries.length);
     byPath.set(relative, entry);
     if (kind === 'directory') {
       const names = (await inDirectory(relative, byPath, () => fsp.readdir('.'))).sort().reverse();
       for (const name of names) pending.push(path.join(relative, name));
     }
   }
+  await inDirectory('.', byPath, async () => {});
+  progress(entries.length, true);
   return entries;
 }
 
@@ -341,6 +364,8 @@ async function releaseContent(manifest) {
   }
   const expectedChildNames = childNamesByParent(manifest);
   const byPath = new Map(manifest.map(entry => [entry.relative, entry]));
+  beginPhase('preflight');
+  let checked = 0;
   for (const expected of manifest) {
     await inDirectory(path.dirname(expected.relative), byPath, async () => {
       const actual = await fsp.lstat(path.basename(expected.relative));
@@ -356,7 +381,10 @@ async function releaseContent(manifest) {
         throw new Error('Exact purge directory entries changed after capture.');
       }
     }
+    progress(++checked);
   }
+  progress(checked, true);
+  beginPhase('release');
   const releasedNames = new Map();
   let releasedEntries = 0;
   for (const expected of [...manifest].reverse()) {
@@ -388,6 +416,7 @@ async function releaseContent(manifest) {
       } finally { if (handle) await handle.close(); }
     });
     releasedEntries += 1;
+    progress(releasedEntries);
     if (releasedEntries === 1 && process.env.NODE_ENV === 'test'
       && process.env.O8_TEST_PURGE_STOP_MARKER) {
       fs.writeFileSync(process.env.O8_TEST_PURGE_STOP_MARKER, expected.relative, { flag: 'wx' });
@@ -397,6 +426,7 @@ async function releaseContent(manifest) {
   if ((await fsp.readdir('.')).length !== 0) {
     throw new Error('Exact purge namespace release left unexpected entries.');
   }
+  progress(releasedEntries, true);
 }
 
 async function main() {
@@ -416,6 +446,7 @@ async function main() {
   rootCanonical = fs.realpathSync('.');
   const rootHandle = await fsp.open('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   directories.push({ relative: '.', entry: { device: captured.dev, inode: captured.ino, kind: 'directory' }, handle: rootHandle });
+  beginPhase('capture');
   const manifest = await manifestAt();
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
@@ -427,8 +458,10 @@ async function main() {
     }
   }
   process.stdout.write('O8_PURGE_CAPTURED ' + fingerprint + '\n');
-  process.stdout.write('O8_PURGE_MANIFEST ' + Buffer.from(JSON.stringify(manifest)).toString('base64url') + '\n');
-  if (process.env.O8_PURGE_CAPTURE_ONLY === '1') return;
+  if (process.env.O8_PURGE_CAPTURE_ONLY === '1') {
+    process.stdout.write('O8_PURGE_MANIFEST ' + Buffer.from(JSON.stringify(manifest)).toString('base64url') + '\n');
+    return;
+  }
   const continuation = await iterator.next();
   if (continuation.done) throw new Error('Exact purge continuation was not authorized.');
   await releaseContent(manifest);
@@ -469,10 +502,35 @@ async function runCapturedPurge(
   child.stdin.write(`${JSON.stringify({ entries: expectedManifest ?? [] })}\n`);
   try {
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Exact purge capture timed out.')), 60_000);
+      const started = Date.now();
+      let completed = -1;
+      let inspected = 0;
+      let timeout: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          // Capture has no mutation authority. Stop and observe our own helper
+          // rather than waiting indefinitely for EOF behind a stalled scan.
+          child.kill('SIGKILL');
+          reject(new Error(`Exact purge capture stalled after ${Date.now() - started}ms (${Math.max(0, completed)} entries; no progress for 60000ms).`));
+        }, 60_000);
+      };
+      arm();
       const inspect = () => {
+        let newline: number;
+        while ((newline = stdout.indexOf('\n', inspected)) >= 0) {
+          const line = stdout.slice(inspected, newline);
+          inspected = newline + 1;
+          if (!line.startsWith('O8_PURGE_PROGRESS ')) continue;
+          const progress = JSON.parse(line.slice('O8_PURGE_PROGRESS '.length)) as { phase: string; entries: number };
+          if (progress.phase === 'capture' && progress.entries > completed) {
+            completed = progress.entries;
+            arm();
+          }
+        }
         if (/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
           clearTimeout(timeout);
+          child.stdout.off('data', inspect);
           resolve();
         }
       };
@@ -480,6 +538,7 @@ async function runCapturedPurge(
       void closed.then(() => {
         if (!/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
           clearTimeout(timeout);
+          child.stdout.off('data', inspect);
           reject(new Error(stderr.trim() || 'Exact purge capture failed.'));
         }
       });
@@ -506,7 +565,16 @@ async function runCapturedPurge(
   }
   child.stdin.end('continue\n');
   const code = await closed;
+  reportPurgePhases(stdout);
   if (code !== 0) throw new Error(stderr.trim() || 'Exact purge content release failed.');
+}
+
+function reportPurgePhases(stdout: string): void {
+  for (const line of stdout.split('\n')) {
+    if (!line.startsWith('O8_PURGE_PROGRESS ')) continue;
+    const progress = JSON.parse(line.slice('O8_PURGE_PROGRESS '.length)) as { done?: boolean };
+    if (progress.done) console.info('[exact-directory-purge]', line.slice('O8_PURGE_PROGRESS '.length));
+  }
 }
 
 /** Capture the exact descendant inode set before content verification begins. */
@@ -534,6 +602,7 @@ export async function captureExactDirectoryManifest(
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
   child.stdin.end('{"entries":[]}\n');
   const code = await new Promise<number | null>((resolve) => child.once('close', resolve));
+  reportPurgePhases(stdout);
   const match = /O8_PURGE_CAPTURED ([0-9a-f]{64})\n/.exec(stdout);
   const manifestMatch = /O8_PURGE_MANIFEST ([A-Za-z0-9_-]+)\n/.exec(stdout);
   if (code !== 0 || !match?.[1] || !manifestMatch?.[1]) {

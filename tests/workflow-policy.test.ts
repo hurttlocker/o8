@@ -180,18 +180,28 @@ describe('workflow policy — every workflow is classified from the filesystem',
     expect(violations, 'push triggers are permitted only as push.branches: [main] with no tag filter').toEqual([]);
   });
 
-  it('allows macOS runners only in workflow_dispatch-only workflows', () => {
+  it('limits macOS runners to manual work and the bounded weekly workspace regression suite', () => {
     const violations: string[] = [];
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
       const manualOnly = triggers.size === 1 && triggers.has('workflow_dispatch');
+      // #4444 adds one weekly native resource suite, never a per-PR macOS lane.
+      const weeklyResources = file.name === 'macos-resource-tests.yml';
+      if (weeklyResources) {
+        expect([...triggers].sort()).toEqual(['schedule', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).schedule).toEqual([{ cron: '37 6 * * 2' }]);
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['timeout-minutes']).toBe(45);
+        expect(job.strategy).toBeUndefined();
+      }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }
     }
-    expect(violations, 'macOS minutes cost 10x and are permitted only for explicitly dispatched work').toEqual([]);
+    expect(violations, 'macOS jobs require explicit dispatch except the single bounded weekly workspace suite').toEqual([]);
   });
 
   it('pins every third-party action to a full commit SHA', () => {

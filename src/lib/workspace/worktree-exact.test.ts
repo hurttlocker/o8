@@ -29,6 +29,7 @@ import type { ProcessQuiescenceReceipt } from './process-quiescence';
 import { recoverGitWorktreeAdminReceipt } from './worktree-exact-identity';
 import { prepareExactWorkspaceClaim, readExactWorkspaceClaim } from './exact-workspace-claim-state';
 import {
+  captureExactDirectoryManifest,
   captureExactDirectoryManifestFingerprint,
 } from './exact-directory-purge';
 import {
@@ -2200,7 +2201,7 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
     const location = locateExactWorktreeQuarantine(input);
     mkdirSync(location.quarantineRoot, { recursive: true });
     const sourceIdentity = lstatSync(f.worktree);
-    const sourceManifestFingerprint = await captureExactDirectoryManifestFingerprint(
+    const sourceManifest = await captureExactDirectoryManifest(
       f.worktree,
       { device: sourceIdentity.dev, inode: sourceIdentity.ino },
     );
@@ -2216,7 +2217,8 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
       quarantinePath: location.quarantinePath,
       sourceDevice: lstatSync(f.worktree).dev,
       sourceInode: lstatSync(f.worktree).ino,
-      sourceManifestFingerprint,
+      sourceManifestFingerprint: sourceManifest.fingerprint,
+      sourceManifest: sourceManifest.entries,
       quarantineRootDevice: lstatSync(location.quarantineRoot).dev,
       quarantineRootInode: lstatSync(location.quarantineRoot).ino,
       canonicalQuarantineRoot: realpathSync(location.quarantineRoot),

@@ -1,17 +1,19 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as processHelpers from '@/lib/providers/child-process';
 
 import { captureExactDirectoryManifest, purgeExactDirectory, readCapturedPurgeCwdSnapshot } from './exact-directory-purge';
 
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -30,6 +32,8 @@ describe('exact directory purge', () => {
 
   it.skipIf(process.platform === 'win32')('attests a native purge through an unchanged ancestor alias', async () => {
     const { candidate, alias } = aliasedFixture();
+    mkdirSync(path.join(candidate, 'z-nested/deep'), { recursive: true });
+    writeFileSync(path.join(candidate, 'z-nested/deep/last.txt'), 'nested traversal returns to root for attestation');
     const stat = await lstat(candidate);
     let captured = false;
     await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined,
@@ -156,14 +160,61 @@ describe('exact directory purge', () => {
     expect(() => readFileSync(firstPath, 'utf8')).toThrow();
   });
 
+  it.skipIf(process.platform === 'win32').each(['progressing', 'stopped'] as const)(
+    'bounds capture by completed entry progress and settles a %s helper', async mode => {
+      const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-progress-'));
+      roots.push(root);
+      const candidate = path.join(root, 'output');
+      mkdirSync(candidate);
+      for (let index = 0; index < 768; index++) writeFileSync(path.join(candidate, index + '.js'), 'owned output');
+      const stat = await lstat(candidate);
+      const originalSpawn = processHelpers.spawn;
+      let injected = false;
+      let closed: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+      vi.spyOn(processHelpers, 'spawn').mockImplementation(((...supplied: unknown[]) => {
+        const command = supplied[0] as string;
+        const args = Array.isArray(supplied[1]) ? supplied[1] as string[] : undefined;
+        if (args?.[0] === '-e' && args[1].includes('O8_PURGE_CAPTURED')) {
+          const script = mode === 'stopped'
+            ? args[1].replace("  beginPhase('capture');", "  beginPhase('capture'); process.kill(process.pid, 'SIGSTOP');")
+            : args[1].replace('function progress(entries, done = false) {', `function progress(entries, done = false) {
+                if (phase === 'capture' && entries % 128 === 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);`);
+          injected = script !== args[1];
+          const child = Reflect.apply(originalSpawn, processHelpers,
+            [command, ['-e', script, ...args.slice(2)], supplied[2]]) as ChildProcess;
+          child.once('close', (code, signal) => { closed = { code, signal }; });
+          return child;
+        }
+        return Reflect.apply(originalSpawn, processHelpers, supplied) as ChildProcess;
+      }) as typeof processHelpers.spawn);
+      // Exercise the production watchdog without taking a minute per fixture.
+      const originalTimeout = globalThis.setTimeout;
+      vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, delay, ...args) =>
+        originalTimeout(handler, delay === 60_000 ? 1_000 : delay, ...args));
+      const operation = purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino });
+      if (mode === 'stopped') {
+        await expect(operation).rejects.toThrow(/capture stalled after \d+ms \(0 entries; no progress for 60000ms\)/);
+        expect(closed).toEqual({ code: null, signal: 'SIGKILL' });
+        expect(readdirSync(candidate)).toHaveLength(768);
+        expect(readFileSync(path.join(candidate, '0.js'), 'utf8')).toBe('owned output');
+      } else {
+        await expect(operation).resolves.toBeUndefined();
+        expect(closed).toEqual({ code: 0, signal: null });
+        expect(existsSync(candidate)).toBe(false);
+      }
+      expect(injected).toBe(true);
+    }, 30_000,
+  );
+
   it('resumes an exact monotonic manifest after process death during namespace release', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-namespace-crash-'));
     roots.push(root);
     const directoryPath = path.join(root, 'retired-workspace');
-    mkdirSync(directoryPath);
-    writeFileSync(path.join(directoryPath, 'first.txt'), 'first bytes');
-    writeFileSync(path.join(directoryPath, 'second.txt'), 'second bytes');
-    writeFileSync(path.join(directoryPath, 'third.txt'), 'third bytes');
+    const nested = path.join(directoryPath, 'nested/deep');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(path.join(nested, 'first.txt'), 'first bytes');
+    writeFileSync(path.join(nested, 'second.txt'), 'shared bytes');
+    linkSync(path.join(nested, 'second.txt'), path.join(nested, 'third.txt'));
     const stat = await lstat(directoryPath);
     const identity = { device: stat.dev, inode: stat.ino };
     const manifest = await captureExactDirectoryManifest(directoryPath, identity);
