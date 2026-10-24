@@ -1,4 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
+import { attachSupervisedRun } from './supervised-run';
 /**
  * Shared helpers for the owned-session primitive.
  *
@@ -381,6 +382,7 @@ export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<bool
   // the inventory build past its hard timeout and wedges the observable in
   // "warming" forever. A finished run's process is gone by definition.
   if (run.finishedAt) return false;
+  if (run.supervisor) return (await attachSupervisedRun(run, run.supervisor.owner)).state !== 'exited';
   if (run.processIdentityRequired || run.processIdentity) {
     const proof = await probeOwnedRunIdentity(run);
     // Unknown identity preserves the record; startup and control require a match.

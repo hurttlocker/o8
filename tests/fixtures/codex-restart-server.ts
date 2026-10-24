@@ -66,6 +66,9 @@ async function main() {
               workMode: 'edit', workspaceTargetPath: repoPath, branchTarget: lane.branch }],
           }));
           response = NextResponse.json(lane);
+        } else if (path === '/api/fixture/fleet') {
+          await readFleet({ fresh: true });
+          response = NextResponse.json({ ok: true });
         } else if (path === '/api/fixture/sweep') {
           response = NextResponse.json({ archived: await sweepOrphanedCodexSessions(new Set(), -1) });
         } else if (path === '/api/fixture/state') {

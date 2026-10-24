@@ -1,4 +1,6 @@
 import { execFile } from '@/lib/providers/child-process';
+import { ownedSupervisorClient } from './o8d-supervisor';
+import { attachSupervisedRun } from '@/lib/runtimes/shared/owned-session/supervised-run';
 import { promisify } from 'node:util';
 
 import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
@@ -579,6 +581,18 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
       steps: [],
       note: 'The owned runtime recorded no active run.',
     };
+  }
+
+  if (activeRun.supervisor) {
+    return withOwnedStopOutcome(surfaceId, activeRun, () => escalateInterrupt({ pid: activeRun.pid }, {
+      isAlive: async () => {
+        const state = await attachSupervisedRun({ ...activeRun, id: activeRun.id!, pid: activeRun.pid! }, surfaceId);
+        // A leader's exit alone does not prove its entire group is gone.
+        return { alive: !state.groupEmpty, confirmedDead: state.groupEmpty };
+      },
+      kill: async (_target, signal) => { await ownedSupervisorClient().signal(activeRun.supervisor!, signal); },
+      sleep: defaultSleep,
+    }));
   }
 
   if (!activeRun.tmuxSession && (activeRun.processIdentityRequired || activeRun.processIdentity)) {

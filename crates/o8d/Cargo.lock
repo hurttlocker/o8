@@ -523,8 +523,10 @@ name = "o8d"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "form_urlencoded",
  "futures-util",
+ "libc",
  "reqwest",
  "serde_json",
  "subtle",

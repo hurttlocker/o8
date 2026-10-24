@@ -1,13 +1,19 @@
+#[cfg(feature = "experimental-ws")]
 use o8d::{
     websocket::{serve, ServerConfig},
     EventBus,
 };
+#[cfg(feature = "experimental-ws")]
 use serde_json::{json, Value};
-use std::{env, sync::Arc};
+use std::env;
+#[cfg(feature = "experimental-ws")]
+use std::sync::Arc;
+#[cfg(feature = "experimental-ws")]
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpListener,
 };
+#[cfg(feature = "experimental-ws")]
 use uuid::Uuid;
 
 #[tokio::main(worker_threads = 2)]
@@ -19,6 +25,24 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments
+        .iter()
+        .any(|argument| argument == "--experimental-supervisor")
+    {
+        #[cfg(all(feature = "experimental-supervisor", target_os = "linux"))]
+        return o8d::supervisor::run(&arguments).await;
+        #[cfg(not(all(feature = "experimental-supervisor", target_os = "linux")))]
+        return Err("supervisor unavailable".into());
+    }
+    #[cfg(feature = "experimental-ws")]
+    return websocket_run().await;
+    #[cfg(not(feature = "experimental-ws"))]
+    Err("explicit supported mode required".into())
+}
+
+#[cfg(feature = "experimental-ws")]
+async fn websocket_run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if !arguments
         .iter()

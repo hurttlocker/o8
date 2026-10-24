@@ -1,10 +1,14 @@
 # o8d delivery prototype (issue #4395, partial slice)
 
-This standalone Tokio crate is an opt-in experiment. No app launcher, default
-port, TypeScript producer, or runtime selection changes. Default Cargo features
-build only the delivery library. The binary requires both the `experimental-ws`
-Cargo feature and the `--experimental-ws` runtime flag, and refuses non-loopback
-listeners. It never executes terminal, orchestrator, or Symon commands.
+This standalone Tokio crate contains opt-in experiments. Default app launches
+and ports are unchanged. Default Cargo features enable no transport. Websocket
+mode requires both the `experimental-ws` Cargo feature and `--experimental-ws`
+runtime flag, and refuses non-loopback listeners. That mode never executes
+terminal, orchestrator, or Symon commands.
+
+The separate Linux process supervisor uses `experimental-supervisor` and
+`--experimental-supervisor`. Its protocol, native Codex launch opt-in and fixture
+verification are documented in [SUPERVISOR.md](SUPERVISOR.md).
 
 ```sh
 cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
