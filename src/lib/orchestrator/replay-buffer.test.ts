@@ -11,6 +11,29 @@ const mk = (event: string, data: Record<string, unknown>): OrchestratorReplayMes
 const zeroClock = () => 0;
 
 describe('OrchestratorReplayBuffers', () => {
+  it('bounds UTF-8 replay bytes and keeps the exact recorded suffix', () => {
+    const b = new OrchestratorReplayBuffers(1500, zeroClock, 1024);
+    const recorded = Array.from({ length: 12 }, (_, index) => b.record('s', mk('output', { text: String(index) + '\u{1F9EA}'.repeat(60) })));
+    const replay = b.since('s', 0);
+    expect(replay.reduce((sum, raw) => sum + Buffer.byteLength(raw), 0)).toBeLessThanOrEqual(1024);
+    expect(replay).toEqual(recorded.slice(-replay.length));
+    expect(replay.length).toBeGreaterThan(0);
+  });
+
+  it('releases an oversized entry and resets byte accounting at turn boundaries', () => {
+    const b = new OrchestratorReplayBuffers(1500, zeroClock, 256);
+    b.record('s', mk('output', { text: 'x'.repeat(1024) }));
+    expect(b.since('s', 0)).toEqual([]);
+    b.record('s', mk('status', { status: 'busy' }));
+    const raw = b.record('s', mk('output', { text: 'new' }));
+    expect(b.since('s', 0)).toHaveLength(2);
+    b.record('s', mk('status', { status: 'ready' }));
+    expect(b.since('s', 0)).toEqual([]);
+    const next = b.record('s', mk('status', { status: 'busy' }));
+    expect(b.since('s', 0)).toEqual([next]);
+    expect(JSON.parse(next).seq).toBeGreaterThan(JSON.parse(raw).seq);
+  });
+
   it('stamps a monotonic seq and replays only events after the since cursor', () => {
     const b = new OrchestratorReplayBuffers(1500, zeroClock);
     b.record('s', mk('status', { status: 'busy' })); // seq 1
