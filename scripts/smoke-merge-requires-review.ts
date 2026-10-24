@@ -1,10 +1,11 @@
 #!/usr/bin/env tsx
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { cleanupGovernanceSmokeRepo } from './lib/governance-smoke-cleanup';
 import type * as ApprovalsStore from '../src/lib/approvals/store';
 import type * as LaneCommands from '../src/lib/lane/commands';
 import type * as LaneRegistry from '../src/lib/lane/registry';
@@ -208,7 +209,7 @@ async function createCaseRepo(caseId: string, opts: { highRisk?: boolean; projec
     baseHead,
     markerPath,
     markerValue,
-    cleanup: () => rm(root, { recursive: true, force: true }),
+    cleanup: () => cleanupGovernanceSmokeRepo(root),
   };
 }
 

@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { Lane } from '@/lib/lane/types';
 import { settleTerminalWorkspaceManifest } from './lifecycle';
+import { trackTerminalLaneWork } from '@/lib/lane/terminal-work';
 
 export function settleTerminalWorkspaceManifestAndLeases(input: {
   worktreePath?: string | null;
@@ -18,7 +19,7 @@ export function settleTerminalWorkspaceManifestAndLeases(input: {
 export function settleWorkspaceManifestOnTerminal(
   lane: Pick<Lane, 'id' | 'worktreePath' | 'packetId'>,
 ): void {
-  void settleTerminalWorkspaceManifestAndLeases({
+  trackTerminalLaneWork(settleTerminalWorkspaceManifestAndLeases({
     worktreePath: lane.worktreePath,
     packetId: lane.packetId,
     laneId: lane.id,
@@ -26,5 +27,5 @@ export function settleWorkspaceManifestOnTerminal(
     console.error(
       `[workspace-manifest] Terminal settlement failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
-  });
+  }));
 }

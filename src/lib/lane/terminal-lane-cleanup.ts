@@ -2,6 +2,7 @@ import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 import { settleTerminalWorkspaceManifestAndLeases } from '@/lib/workspace/manifest/terminal-release';
 import { laneOwnsWorktree } from './lane-storage-release';
+import { trackTerminalLaneWork } from './terminal-work';
 
 type TerminalCleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'packetId'>
   & Partial<Pick<Lane, 'baseBranch'>>
@@ -22,7 +23,7 @@ function releaseWithoutWorktree(lane: TerminalCleanupLane): void {
 }
 
 export function scheduleTerminalLaneCleanup(lane: TerminalCleanupLane): void {
-  void (async () => {
+  trackTerminalLaneWork((async () => {
     try {
       await settleTerminalWorkspaceManifestAndLeases({
         worktreePath: lane.worktreePath,
@@ -52,5 +53,5 @@ export function scheduleTerminalLaneCleanup(lane: TerminalCleanupLane): void {
     console.error(
       `[lane-worktree] Terminal worktree cleanup failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
-  });
+  }));
 }
