@@ -81,7 +81,9 @@ lanes/projects/leases. Only external runtime/auth observations and screenshots
 are fixture replacements. `tests/fixtures/mcp-parity/requests.json` records tool
 calls, argument variants, profiles, batches, notifications and malformed input.
 The fixture binds its generated repo path to `$FIXTURE_REPO`. Additional native
-credential and profile refusals are recorded in `native-reads.json`. The suite
+credential and profile refusals are recorded in `native-reads.json`, consumed by
+`tests/o8d-mcp-parity-real-path.test.ts` in the test named
+`replays additional native credential and profile refusals`. The suite
 also covers committed WAL updates without writes, missing databases, publisher
 binding, token rotation, reconciliation fallback, and snapshot boundaries.
 
@@ -114,14 +116,20 @@ HTTP adapter, not a production Next.js process, and establish no speedup claim.
 
 ## Scale and event-loop load
 
-For the larger persisted-state benchmark, use the same release binary and HTTP
-fixture entry points:
+From the repository root on Linux with Node 22 and Rust stable, regenerate the
+raw samples with this exact command sequence:
 
 ```sh
+cargo build --locked --manifest-path crates/o8d/Cargo.toml --release --features experimental-mcp
+benchmark_dir="$(mktemp -d)"
 O8D_MCP_TEST_BINARY="$PWD/crates/o8d/target/release/o8d-mcp" \
-O8_MCP_SCALE_BENCH_REPORT_DIR="$PWD/work/mcp-scale" \
+O8_MCP_SCALE_BENCH_REPORT_DIR="$benchmark_dir" \
 npx vitest run tests/o8d-mcp-parity-real-path.test.ts -t 'realistic state'
+printf 'Raw samples: %s\n' "$benchmark_dir"
 ```
+
+The generated `large-idle.json` and `large-cpu-busy.json` stay in that temporary
+directory. Do not commit the raw samples.
 
 The fixture contains 300 missions, 2,000 packets and lanes, 50 initialized Git
 repositories, 10 projects and 200 leases. There are 276 archived missions and
@@ -147,5 +155,34 @@ include its TypeScript fallbacks. Bound mission and task projections in this
 fixture retain those fallbacks, and status can fall back when its shared
 snapshot needs refresh. These measurements use the fixture HTTP adapter and
 synthetic CPU work; they do not measure a production Next.js deployment.
-The recorded cohorts and earlier small-fixture receipts are in
-[o8d-mcp-native-scale.json](../../docs/internals/o8d-mcp-native-scale.json).
+
+## Recorded scale summary
+
+Machine class: Linux development environment. CPU model, memory capacity and
+virtualization details were not recorded in the original receipt. Both cohorts
+used Node 22.23.4 and a Rust release build. No builds or other test suites ran
+during sampling.
+
+Each tool has 100 measured samples per server per cohort, after 10 warmups.
+Values below are p50 / p95 in milliseconds. Rust endpoint values include
+TypeScript fallback.
+
+| Tool | Idle TypeScript | Idle Rust endpoint | CPU-loaded TypeScript | CPU-loaded Rust endpoint | Idle fallbacks | CPU-loaded fallbacks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `o8_status` | 2.22 / 1830.80 | 3.46 / 2052.45 | 2.42 / 98.12 | 873.86 / 2069.02 | 39 | 54 |
+| `get_mission_status` | 425.64 / 533.52 | 439.82 / 539.00 | 598.62 / 789.55 | 545.10 / 664.10 | 110 | 110 |
+| `o8_task_list` | 188.06 / 244.09 | 202.28 / 239.94 | 389.77 / 514.12 | 475.73 / 531.37 | 110 | 110 |
+| `o8_list_repos` | 3.96 / 6.38 | 1.79 / 3.42 | 5.28 / 106.50 | 1.92 / 3.84 | 0 | 0 |
+| `o8_list_projects` | 3.25 / 5.53 | 1.35 / 1.93 | 4.65 / 106.08 | 1.68 / 2.34 | 0 | 0 |
+| `o8_lease_list` | 14.10 / 21.00 | 4.07 / 6.80 | 15.46 / 119.02 | 4.29 / 6.21 | 0 | 0 |
+
+Fallback counts cover all 110 candidate requests per tool, including warmups.
+The CPU-loaded cohort completed 1,160 synchronous blocks, with 116,029 ms of
+injected CPU work over 358,543 ms (32.4% observed duty). It requested 100 ms
+blocks every 125 ms; application work delayed the timer.
+
+Bound mission and task requests fell back on every call. Status refreshes still
+produced roughly two-second Rust endpoint p95. These fixture measurements do
+not establish an across-the-board 5x speedup. A later `terminalReason: null`
+parity alignment applies to prepared, unbound missions, which these bound
+mission cohorts do not exercise.
