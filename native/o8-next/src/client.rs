@@ -1,5 +1,6 @@
 use crate::model::History;
 use serde::{Deserialize, de::DeserializeOwned};
+use std::net::{IpAddr, SocketAddr};
 use std::{io::Read, time::Duration};
 use url::{Host, Url};
 
@@ -15,6 +16,12 @@ pub struct Session {
 #[derive(Deserialize)]
 struct Sessions {
     threads: Vec<Session>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WsInfo {
+    ws_port: u16,
+    ws_token: String,
 }
 
 #[derive(Clone)]
@@ -84,6 +91,24 @@ impl Client {
             return Err("Server returned history for a different session".into());
         }
         Ok(history)
+    }
+    /// Same credential/port response used by web reconnect recovery. The native
+    /// process never reads a token file or resolves installed-app configuration.
+    pub fn websocket(&self) -> Result<(Url, SocketAddr), String> {
+        let info: WsInfo = self.get("/api/panel/ws-info", &[])?;
+        if info.ws_port == 0 || info.ws_token.is_empty() || info.ws_token.len() > 4096 {
+            return Err("Invalid WebSocket information".into());
+        }
+        let ip = match self.origin.host().unwrap() {
+            Host::Ipv4(ip) => IpAddr::V4(ip),
+            Host::Ipv6(ip) => IpAddr::V6(ip),
+            _ => unreachable!(),
+        };
+        let mut url = self.origin.join("/ws").unwrap();
+        url.set_scheme("ws").unwrap();
+        url.set_port(Some(info.ws_port)).unwrap();
+        url.query_pairs_mut().append_pair("token", &info.ws_token);
+        Ok((url, SocketAddr::new(ip, info.ws_port)))
     }
 }
 

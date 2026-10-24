@@ -6,10 +6,11 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 regex = "=1.13.1"
 serde = { version = "=1.0.228", features = ["derive", "rc"] }
-serde_json = "=1.0.150"
+serde_json = { version = "=1.0.150", features = ["preserve_order"] }
 ureq = { version = "=2.12.1", default-features = false, features = ["json"] }
 url = "=2.5.8"
 
