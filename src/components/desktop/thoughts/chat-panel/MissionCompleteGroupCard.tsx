@@ -39,7 +39,9 @@ export function MissionCompleteGroupCard({
     0,
   );
   const latestTs = entries[entries.length - 1]?.timestampLabel;
-  const headline = `${totalMerged} ${totalMerged === 1 ? 'packet' : 'packets'} merged & archived`;
+  const headline = totalMerged > 0
+    ? `${totalMerged} ${totalMerged === 1 ? 'packet' : 'packets'} merged & archived`
+    : `${entries.length} missions completed`;
   const sub = entries.every((entry) => entry.event.kind === 'mission-complete')
     ? `${entries.length} missions`
     : `${entries.length} packet updates`;

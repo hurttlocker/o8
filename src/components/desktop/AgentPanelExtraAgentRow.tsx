@@ -6,6 +6,7 @@ import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { ScheduledTaskMark } from './ScheduledTaskMark';
 import { CHAT_ROW_RADIUS, COMPACT_CHAT_ROW_HEIGHT, SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
+import type { LaneOutcome } from '@/lib/lane/types';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import { WorkerReviewAction } from './workspace-terminal/WorkerReviewAction';
 
@@ -28,7 +29,7 @@ export interface ExtraAgentRow {
   packetId: string | null;
   laneId: string | null;
   laneStatus: LaneStatus | null;
-  outcome: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
+  outcome: LaneOutcome | null;
   outcomeNote: string | null;
   lastEventLabel: string | null;
   statusEvidence?: TerminalStatusEvidence;
@@ -110,6 +111,7 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   if (row.outcome === 'merged') return 'merged';
   if (row.outcome === 'no_changes') return 'Finished — no changes';
   if (row.outcome === 'discarded') return 'discarded';
+  if (row.outcome === 'closed_unmerged') return 'Closed';
   if (row.outcome === 'pr_opened') return 'PR open';
   if (row.outcome === 'asked') return 'Waiting for your reply';
   if (row.rejected) return 'declined';
@@ -188,7 +190,9 @@ export function ExtraAgentRowView({
   const dotLabel = rowStatusLabel(row);
   const preview = row.outcomeNote || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
   const canFocus = Boolean((row.packetId || row.sessionKey || row.laneId) && (onFocusRow || onSelectSession));
-  const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
+  const resolved = row.outcome === 'merged' || row.outcome === 'no_changes'
+    || row.outcome === 'discarded' || row.outcome === 'closed_unmerged';
+  const canRetry = Boolean(row.packetId && onRetryPacket && !resolved && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
   const canInteract = canFocus || canRetry;
   const [hovered, setHovered] = useState(false);
   const recede = link === 'linked'

@@ -27,6 +27,7 @@ import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { LaneOutcome } from '@/lib/lane/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 import { SectionLabel } from './repo-focus/tabs/chats/shared';
@@ -59,7 +60,7 @@ export interface LaneSummary {
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;
-  outcome?: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
+  outcome?: LaneOutcome | null;
   outcomeNote?: string | null;
   ownership: LaneOwnership;
   lastEventAt: string | null;

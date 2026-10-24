@@ -12,7 +12,7 @@ function generateLaneLifecycleMutationId(laneId: string) {
 
 // NOTE: lane status is exposed as `status` here; clients coalesce laneStatus ?? status (see laneStatusOf).
 function buildLaneLifecyclePayload(
-  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath' | 'label' | 'outcome' | 'runtime'>,
   previousStatus: LaneStatus | null,
   timestamp: string,
 ): LaneLifecycleEventPayload {
@@ -20,6 +20,9 @@ function buildLaneLifecyclePayload(
     laneId: lane.id,
     packetId: lane.packetId,
     status: lane.status,
+    label: lane.label,
+    outcome: lane.outcome ?? null,
+    runtime: lane.runtime,
     packetStatus: packetStatusFromLaneStatus(lane.status) ?? undefined,
     previousStatus,
     sessionKey: lane.sessionKey,
@@ -30,7 +33,7 @@ function buildLaneLifecyclePayload(
 }
 
 export function publishLaneLifecycleEvent(
-  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath' | 'runtime' | 'label'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath' | 'runtime' | 'label' | 'outcome'>,
   previousStatus: LaneStatus | null,
   timestamp: string,
 ) {
@@ -72,6 +75,8 @@ export function publishLaneLifecycleEvent(
       surfaceId: payload.sessionKey ?? undefined,
       sessionKey: payload.sessionKey ?? undefined,
       laneId: payload.laneId,
+      laneLabel: payload.label,
+      laneOutcome: payload.outcome,
       packetId: payload.packetId ?? undefined,
       repoPath: payload.repoPath,
       branch: payload.branch,

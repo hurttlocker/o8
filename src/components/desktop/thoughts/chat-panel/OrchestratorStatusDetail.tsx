@@ -61,14 +61,19 @@ function detailContent(event: OrchestratorStatusEventData): { explain: string; r
     case 'mission-complete':
       return {
         explain: event.packets && event.packets.length > 0
-          ? 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. Here is what shipped.'
-          : 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. The thread is ready for your next mission.',
+          ? 'This mission has finished. Here are its packet outcomes.'
+          : 'This mission has finished. The thread is ready for your next mission.',
         rows: [
           { label: 'Merged', value: `${event.mergedCount} ${event.mergedCount === 1 ? 'packet' : 'packets'}` },
           ...(typeof event.archivedCount === 'number'
             ? [{ label: 'Archived', value: `${event.archivedCount} ${event.archivedCount === 1 ? 'lane' : 'lanes'}` }]
             : []),
         ],
+      };
+    case 'packet-complete':
+      return {
+        explain: event.closed ? 'This packet was closed without a merge.' : 'This packet completed without a merge.',
+        rows: [{ label: 'Packet', value: event.packetTitle }],
       };
     case 'merge':
       return {

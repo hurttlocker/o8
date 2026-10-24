@@ -1,3 +1,4 @@
+import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
@@ -287,7 +288,6 @@ import { drainParkedSymonWatches } from './lib/automations/symon-watch';
 import { startBroadcastDirectorLoop } from './lib/broadcast/director';
 import { startBroadcastSpeakerLoop } from './lib/broadcast/speaker';
 import type {
-  LaneLifecycleEventPayload,
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
   RealtimeHealthDescriptor,
@@ -2587,26 +2587,6 @@ function publishRealtimeBridgeConnectionState(
       },
     ),
   ]);
-}
-
-function mutationToLaneLifecyclePayload(
-  mutation: RealtimeMutationRecord,
-): LaneLifecycleEventPayload | null {
-  if (mutation.action !== 'lane-lifecycle') return null;
-  if (!mutation.laneId || !mutation.laneStatus || !mutation.branch || !mutation.repoPath || !mutation.timestamp) {
-    return null;
-  }
-
-  return {
-    laneId: mutation.laneId,
-    packetId: mutation.packetId ?? null,
-    status: mutation.laneStatus,
-    previousStatus: mutation.previousStatus ?? null,
-    sessionKey: mutation.sessionKey ?? null,
-    branch: mutation.branch,
-    repoPath: mutation.repoPath,
-    timestamp: mutation.timestamp,
-  };
 }
 
 function normalizeRealtimeStreamKey(raw: string | undefined, sessionKey?: string | null): RealtimeStreamKey | null {
