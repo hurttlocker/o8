@@ -18,6 +18,7 @@ import {
   deliverOrchestratorPayload,
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
+import { useTranscriptTextFlush } from './use-orchestrator-stream/text-flush';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
 import { trackComposerSubmission } from './use-orchestrator-stream/track-submission';
 import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
@@ -96,8 +97,6 @@ export function useOrchestratorStream(
   // Highest orchestrator event seq applied for the current session view —
   // drives the replay `since` cursor + client-side de-dup (see socket.ts).
   const lastSeqRef = useRef(0);
-  // rAF handle coalescing streaming-text flushes — see scheduleFlushCurrentAssistant.
-  const flushFrameRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetryBindingRef = useRef<string | null>(null);
@@ -427,13 +426,7 @@ export function useOrchestratorStream(
     pendingActivityHandlerRef.current(event);
   }, []);
 
-  const flushCurrentAssistant = useCallback(() => {
-    // An immediate flush supersedes any queued frame — cancel it so a late
-    // frame can't fire a redundant setMessages after a terminal flush.
-    if (flushFrameRef.current !== null) {
-      if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushFrameRef.current);
-      flushFrameRef.current = null;
-    }
+  const commitCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
     if (!current || (current.chunks.length === 0 && current.thinkingChunks.length === 0)) return;
 
@@ -481,23 +474,8 @@ export function useOrchestratorStream(
     });
   }, []);
 
-  // Coalesced flush for the streaming-text path: at most one setMessages per
-  // animation frame (≤60fps) regardless of delta rate. Each delta used to fire
-  // its own flush — a full re-render + markdown re-parse per token — which made
-  // streaming choppy and starved the WS read loop, letting backpressure drop
-  // narration between tool pills. Terminal flushes (turn 'ready', heal) still
-  // call flushCurrentAssistant directly for a synchronous final paint. 2026-06-17.
-  const scheduleFlushCurrentAssistant = useCallback(() => {
-    if (flushFrameRef.current !== null) return;
-    if (typeof requestAnimationFrame === 'undefined') {
-      flushCurrentAssistant();
-      return;
-    }
-    flushFrameRef.current = requestAnimationFrame(() => {
-      flushFrameRef.current = null;
-      flushCurrentAssistant();
-    });
-  }, [flushCurrentAssistant]);
+  const { flush: flushCurrentAssistant, schedule: scheduleFlushCurrentAssistant, cancel: cancelTextFlush } =
+    useTranscriptTextFlush(commitCurrentAssistant, options?.visible ?? true);
 
   const connect = useCallback(() => {
     if (!repoPathRef.current) return;
@@ -670,10 +648,7 @@ export function useOrchestratorStream(
 
     return () => {
       mountedRef.current = false;
-      if (flushFrameRef.current !== null) {
-        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushFrameRef.current);
-        flushFrameRef.current = null;
-      }
+      cancelTextFlush();
       if (tokenRefreshTimerRef.current) {
         clearTimeout(tokenRefreshTimerRef.current);
         tokenRefreshTimerRef.current = null;
@@ -695,7 +670,7 @@ export function useOrchestratorStream(
         pendingSendWatchdogRef.current = null;
       }
     };
-  }, [repoPath, connect, refreshTokenTelemetry, updateRunningTotal]);
+  }, [repoPath, connect, refreshTokenTelemetry, updateRunningTotal, cancelTextFlush]);
 
   useEffect(() => {
     telemetryBindingRef.current = null;

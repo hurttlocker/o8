@@ -420,7 +420,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
-    projectId: threadProjectId,
+    projectId: threadProjectId, visible: open,
     seededPlanText: planText,
     hasHistory: chatMessages.some(message => !message.voice),
     threadId,
