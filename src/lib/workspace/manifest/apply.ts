@@ -168,11 +168,13 @@ function tcpHealth(port: number, timeoutMs: number): Promise<{ ok: boolean; erro
 async function httpHealth(
   url: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    const timeout = AbortSignal.timeout(timeoutMs);
     const response = await fetch(url, {
       redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     return response.ok
       ? { ok: true }
@@ -185,9 +187,10 @@ async function httpHealth(
 export async function probeHttpHealth(
   url: string,
   timeoutMs: number = DEFAULT_HEALTH_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<WorkspaceManifestHealthReceipt> {
   const startedAt = Date.now();
-  const result = await httpHealth(url, timeoutMs);
+  const result = await httpHealth(url, timeoutMs, signal);
   return {
     kind: 'http',
     target: url,
@@ -202,6 +205,7 @@ async function probeHealth(input: {
   health: WorkspaceManifestServiceHealth;
   service: WorkspaceManifestService;
   ports: Record<string, number>;
+  signal: AbortSignal;
 }): Promise<WorkspaceManifestHealthReceipt> {
   const startedAt = Date.now();
   const timeoutMs = input.health.timeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
@@ -212,7 +216,7 @@ async function probeHealth(input: {
   if (input.health.http !== undefined) {
     kind = 'http';
     target = resolveTemplate(input.health.http, input.ports, port);
-    return probeHttpHealth(target, timeoutMs);
+    return probeHttpHealth(target, timeoutMs, input.signal);
   } else {
     kind = 'tcp';
     target = port === undefined ? '127.0.0.1:(unallocated)' : `127.0.0.1:${port}`;
@@ -304,8 +308,9 @@ async function applyLoadedManifest(input: {
       throw new Error(`Service ${service.name} cwd escapes the packet worktree.`);
     }
     const health = service.health
-      ? await probeHealth({ health: service.health, service, ports })
+      ? await probeHealth({ health: service.health, service, ports, signal: input.lifecycle.signal })
       : null;
+    if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
     const serviceReceipt: WorkspaceManifestServiceReceipt = {
       name: service.name,
       commandId: commandId(service.command),
