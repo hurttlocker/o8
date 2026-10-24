@@ -1,9 +1,37 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { NextRequest } from 'next/server';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+const metadataWrite = vi.hoisted(() => ({
+  hold: undefined as undefined | {
+    directory: string;
+    opened: () => void;
+    release: Promise<void>;
+  },
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      const hold = metadataWrite.hold;
+      const target = args[0];
+      if (hold && typeof target === 'string' && dirname(target) === hold.directory) {
+        metadataWrite.hold = undefined;
+        // Reproduce the real truncate-before-write window, including for an
+        // atomic writer's staging file, without replacing reads or adapters.
+        await actual.writeFile(target, '');
+        hold.opened();
+        await hold.release;
+      }
+      return actual.writeFile(...args);
+    },
+  };
+});
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-mobile-history-runtime-'));
 const piRoot = join(dataDir, 'owned-pi');
@@ -105,7 +133,7 @@ describe('mobile history runtime transcript parity', () => {
       transcript: Array<{ id: string; role: string; text: string; timestamp?: number }>;
     };
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(payload.transcript).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'run-mobile-history-pi:prompt',
@@ -124,6 +152,51 @@ describe('mobile history runtime transcript parity', () => {
     ]));
     expect(payload.transcript.find((entry) => entry.text === 'Pi persisted answer')?.timestamp)
       .toEqual(expect.any(Number));
+  });
+
+  it.each([1, 2, 3])('keeps initial Pi route and inbox reads available during a metadata write: %s', async (attempt) => {
+    const sessionKey = `pi-owned:mobile-history-concurrent-${attempt}`;
+    const prompt = `Concurrent Pi prompt ${attempt}`;
+    const answer = `Concurrent Pi answer ${attempt}`;
+    writePersistedSession({
+      root: piRoot,
+      sessionKey,
+      prompt,
+      runOutput: [
+        JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: answer } }),
+        JSON.stringify({ type: 'agent_end' }),
+      ].join('\n'),
+    });
+    const sessionDir = join(piRoot, sessionKey.split(':')[1]);
+    const opened = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    metadataWrite.hold = { directory: sessionDir, opened: opened.resolve, release: release.promise };
+
+    const initialRead = getMobileSessionTranscript(sessionKey, 50, true);
+    try {
+      await Promise.race([
+        opened.promise,
+        initialRead.then(() => { throw new Error('Initial history read did not reach the metadata write.'); }),
+      ]);
+      const [response, inboxTranscript] = await Promise.all([
+        GET(historyRequest(sessionKey)),
+        getMobileSessionTranscript(sessionKey, 50, true),
+      ]);
+      const payload = await response.json();
+      expect(response.status, JSON.stringify(payload)).toBe(200);
+      for (const transcript of [payload.transcript, inboxTranscript]) {
+        expect(transcript).toEqual(expect.arrayContaining([
+          expect.objectContaining({ role: 'user', text: prompt }),
+          expect.objectContaining({ role: 'assistant', text: answer }),
+        ]));
+      }
+    } finally {
+      metadataWrite.hold = undefined;
+      release.resolve();
+      await initialRead;
+    }
+    expect(JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8')).surfaceId).toBe(sessionKey);
+    expect(readdirSync(sessionDir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('coalesces persisted owned Claude deltas through history and incremental runtime reads', async () => {
