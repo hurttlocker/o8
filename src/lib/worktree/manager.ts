@@ -1419,21 +1419,28 @@ export class WorktreeManager {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 120_000,
-        }).catch(() => { /* pip may not be available */ });
+        }).catch((error) => {
+          if (launch?.packetId && launch.laneId) throw error;
+          // Interactive workspaces can still proceed without optional tooling.
+        });
       }
       if (await this.pathExists(path.join(worktreePath, 'go.mod'))) {
         await execFileAsync('go', ['mod', 'download'], {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 60_000,
-        }).catch(() => { /* go may not be available */ });
+        }).catch((error) => {
+          if (launch?.packetId && launch.laneId) throw error;
+        });
       }
       if (await this.pathExists(path.join(worktreePath, 'Cargo.toml'))) {
         await execFileAsync('cargo', ['fetch'], {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 120_000,
-        }).catch(() => { /* cargo may not be available */ });
+        }).catch((error) => {
+          if (launch?.packetId && launch.laneId) throw error;
+        });
       }
     }
     if (launch?.packetId && launch.laneId) {

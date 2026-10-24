@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ const boundary = vi.hoisted(() => ({
   humanDecision: false,
   spoofManifestReceipt: false,
   preparedPaths: [] as string[],
+  refuseStorage: false,
   launch: vi.fn(async () => ({ ok: true, sessionKey: 'codex-owned:fixture', note: 'fixture launch' })),
 }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => undefined) }));
@@ -26,6 +27,10 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 
 const root = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'launch-provisioning-'));
 const repoPath = join(root, 'repo');
+const bin = join(root, 'bin');
+const failureReceipt = join(root, 'failure.json');
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+const fixtureInputs = ['requirements.txt', 'go.mod', 'Cargo.toml'];
 vi.stubEnv('O8_WORKTREE_ROOT', join(root, 'worktrees'));
 vi.stubEnv('O8_SKIP_PRELAUNCH_TYPECHECK', '1');
 const registry = await import('@/lib/lane/registry');
@@ -47,8 +52,41 @@ beforeAll(async () => {
   execFileSync('git', ['clone', '--bare', repoPath, origin], { stdio: 'pipe' });
   git('remote', 'add', 'origin', origin);
   git('fetch', 'origin');
+  mkdirSync(bin);
+  for (const command of ['git', 'pip', 'go', 'cargo']) {
+    const executable = join(bin, command);
+    writeFileSync(executable, [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs');",
+      `const receipt = ${JSON.stringify(failureReceipt)};`,
+      `const command = ${JSON.stringify(command)};`,
+      'const args = process.argv.slice(2);',
+      "const failure = fs.existsSync(receipt) ? JSON.parse(fs.readFileSync(receipt, 'utf8')) : {};",
+      "if (failure.command === command && (command !== 'git' || args.includes('add') && args.includes('worktree'))) {",
+      "  if (command !== 'git') { fs.mkdirSync('partial-dependencies', { recursive: true }); fs.writeFileSync('partial-dependencies/partial', 'incomplete'); }",
+      '  fs.writeFileSync(receipt, JSON.stringify({ ...failure, failedAt: Date.now(), attempts: (failure.attempts ?? 0) + 1 }));',
+      "  console.error('fixture ' + command + ' provisioning refused'); process.exit(42);",
+      '}',
+      ...(command === 'git' ? [
+        `const result = require('node:child_process').spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });`,
+        'process.exit(result.status ?? 1);',
+      ] : ['process.exit(0);']),
+    ].join('\n'));
+    chmodSync(executable, 0o755);
+  }
+  vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH}`);
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   const { WorktreeManager } = await import('@/lib/worktree/manager');
+  const create = WorktreeManager.prototype.create;
+  vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (this: InstanceType<typeof WorktreeManager>, opts) {
+    if (boundary.refuseStorage) {
+      writeFileSync(failureReceipt, JSON.stringify({ failedAt: Date.now(), attempts: 1 }));
+      // Refuse the scheduler's proof at the real materialization admission gate.
+      getSqlite().prepare('UPDATE storage_admission_reservations SET lease_expires_at = 0 WHERE reservation_id = ?')
+        .run(opts.storageAdmissionReservationId);
+    }
+    return create.call(this, opts);
+  });
   // Pause at the real manager's last setup boundary, before it publishes ready.
   const prototype = WorktreeManager.prototype as unknown as {
     resetTrackedWorkspaceChanges(path: string): Promise<void>;
@@ -81,6 +119,9 @@ afterEach(() => {
   boundary.invalidateLane = false;
   boundary.humanDecision = false;
   boundary.spoofManifestReceipt = false;
+  boundary.refuseStorage = false;
+  rmSync(failureReceipt, { force: true });
+  for (const input of fixtureInputs) rmSync(join(repoPath, input), { force: true });
 });
 afterAll(() => {
   vi.unstubAllGlobals();
@@ -114,7 +155,76 @@ async function status(packet: OrchestratorPacket) {
   return (await response.json()).result.packets[0] as OrchestratorPacket;
 }
 
+async function callerStatuses(packet: OrchestratorPacket) {
+  const priorFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (new URL(String(url)).pathname === '/api/orchestrator/status') {
+      return statusRoute.GET(new NextRequest(String(url), { headers: init?.headers }));
+    }
+    return new Response('{}', { status: 200 });
+  }));
+  vi.stubEnv('O8_API_TOKEN', getOrCreateWsToken());
+  const packets: OrchestratorPacket[] = [];
+  try {
+    const { handleGetMissionStatus } = await import('@/lib/mcp/operator-handlers/mission');
+    const mcp = await handleGetMissionStatus({ missionId: `mission-${packet.id}` });
+    const content = mcp.content[0] as { text: string };
+    packets.push(JSON.parse(content.text).packets[0]);
+    const { runMission } = await import('../cli/src/commands/mission');
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await runMission({ human: false, verbose: false }, 'status', ['--mission', `mission-${packet.id}`])).toBe(0);
+      packets.push(JSON.parse(output.mock.calls.map(([chunk]) => String(chunk)).join('')).status.packets[0]);
+    } finally { output.mockRestore(); }
+    return packets;
+  } finally { vi.stubGlobal('fetch', priorFetch); }
+}
+
 describe('launch provisioning through mission HTTP entry points', () => {
+  it.each([
+    ['git', null], ['pip', 'requirements.txt'],
+    ['go', 'go.mod'], ['cargo', 'Cargo.toml'], ['storage', null],
+  ] as const)('surfaces %s provisioning refusal on one poll without relaunching', async (command, input) => {
+    for (const file of fixtureInputs) rmSync(join(repoPath, file), { force: true });
+    if (input) writeFileSync(join(repoPath, input), 'fixture\n');
+    const git = (...args: string[]) => execFileSync(realGit, args, { cwd: repoPath, stdio: 'pipe' });
+    git('add', '-A');
+    git('-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '--allow-empty', '-m', `fixture ${command}`);
+    git('push', 'origin', 'main');
+    writeFileSync(failureReceipt, JSON.stringify({ command }));
+    boundary.refuseStorage = command === 'storage';
+    const packet = persistMission(`provisioning-failure-${command}`);
+    const launches = boundary.launch.mock.calls.length;
+    await dispatch(packet);
+    const polled = await status(packet);
+    const callers = await callerStatuses(packet);
+    const firstPollMs = Date.now() - JSON.parse(readFileSync(failureReceipt, 'utf8')).failedAt;
+    const lane = registry.findLatestLaneByPacket(packet.id)!;
+    process.stdout.write(`[provisioning-refusal] ${JSON.stringify({ command, firstPollMs, status: polled.status, visible: Boolean(polled.blockedReason), launches: boundary.launch.mock.calls.length - launches })}\n`);
+    expect.soft(firstPollMs).toBeLessThan(5_000);
+    expect.soft(polled.status).toBe('failed');
+    expect.soft(polled.blockedReason).toContain(command === 'storage' ? 'storage admission proof' : `fixture ${command} provisioning refused`);
+    for (const caller of callers) {
+      expect.soft(caller.status).toBe('failed');
+      expect.soft(caller.blockedReason).toBe(polled.blockedReason);
+    }
+    expect.soft(lane.status).toBe('failed');
+    expect.soft(boundary.launch).toHaveBeenCalledTimes(launches);
+    expect.soft(getSqlite().prepare('SELECT state FROM storage_admission_reservations WHERE owner_id = ?').pluck().get(packet.id)).toBe('released');
+    const { getWorktreeManager } = await import('@/lib/worktree');
+    expect.soft((await getWorktreeManager(repoPath).list()).some((entry) => entry.branch === packet.branchTarget)).toBe(false);
+    const { managedPacketWorktreeId, resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+    const base = resolveWorktreeRootLayout(repoPath).primaryBase;
+    expect.soft(readdirSync(base).filter((entry) => entry.startsWith(managedPacketWorktreeId(packet.id)!))).toEqual([]);
+    const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+    await runDispatchTick(control.readOrchestratorControlPlaneState());
+    const { enforceWedgeTimeouts } = await import('@/lib/lane/wedge-timeouts');
+    enforceWedgeTimeouts(Date.now() + 70 * 60_000);
+    expect.soft((await status(packet)).status).toBe('failed');
+    expect.soft(JSON.parse(readFileSync(failureReceipt, 'utf8')).attempts).toBe(1);
+    expect(boundary.launch).toHaveBeenCalledTimes(launches);
+  }, 120_000);
+
   it('finishes the same fresh launch when only its provisioning watchdog has escalated', async () => {
     boundary.wedge = true;
     const packet = persistMission('provisioning-watchdog');
@@ -175,6 +285,9 @@ describe('launch provisioning through mission HTTP entry points', () => {
       expect(polled.status).toBe('blocked');
       expect(polled.queueState).toBe('held');
       expect(polled.blockedReason).toContain(state === 'awaiting_orchestrator' ? 'launch_stalled' : 'orchestrator_wedge_timeout');
+      for (const caller of await callerStatuses(packet)) {
+        expect(caller).toMatchObject({ status: 'blocked', queueState: 'held', blockedReason: polled.blockedReason });
+      }
     }
   });
 
