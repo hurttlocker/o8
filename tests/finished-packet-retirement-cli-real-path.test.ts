@@ -71,7 +71,7 @@ async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetI
   if (provisionEnvironment) {
     await new WorktreeManager(repo.localPath).create({
       agentType: 'codex', taskName: packetId, packetId, branchName: branch,
-      baseBranch: revision, managed: true, skipSetup: true, envMode: 'copy',
+      baseBranch: revision, managed: true, skipSetup: true, envMode: 'skip',
       isolationPreference: 'git-worktree',
       envFiles: packetId.endsWith('leading-dot') ? ['./.env', './.env.local'] : undefined,
     });
@@ -79,6 +79,19 @@ async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetI
     mkdirSync(path.dirname(workspacePath), { recursive: true });
     git(repo.localPath, 'clone', '--quiet', '--no-hardlinks', '--no-checkout', repo.localPath, workspacePath);
     git(workspacePath, 'checkout', '-qb', branch, revision);
+  }
+  // Pre-fix packets can still carry reference receipts. Preserve retirement
+  // coverage without asking current provisioning to create unsafe bindings.
+  if (provisionEnvironment) {
+    const environmentReferences = Object.fromEntries(['.env', '.env.local'].map((name) => {
+      const source = path.join(repo.localPath, name);
+      symlinkSync(source, path.join(workspacePath, name));
+      return [name, source];
+    }));
+    await withWorktreeMetaTransaction(repo.localPath, async (transaction) => {
+      const entry = (await transaction.readAll())[worktreeId]!;
+      await transaction.save(worktreeId, { ...entry, environmentReferences });
+    });
   }
   git(workspacePath, 'config', 'user.name', 'o8 regression');
   git(workspacePath, 'config', 'user.email', 'o8@example.test');
@@ -279,7 +292,7 @@ describe('finished packet checkout retirement', () => {
   }, 120_000);
 
   it.each(['original', 'leading-dot', 'source-removed', 'source-rotated', 'file-replacement', 'link-replacement'] as const)(
-    'provisions packet environment references and safely handles %s on close', async (change) => {
+    'retires legacy packet environment references and safely handles %s on close', async (change) => {
       const values = { '.env': 'O8_ENV_FIXTURE=base\n', '.env.local': 'O8_ENV_FIXTURE=local\n' };
       for (const [name, value] of Object.entries(values)) writeFileSync(path.join(repoPath, name), value);
       const sourceStats = Object.fromEntries(Object.keys(values).map((name) => [name, lstatSync(path.join(repoPath, name))]));

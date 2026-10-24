@@ -35,6 +35,7 @@ import type {
   WorkspaceIsolationPreference,
 } from './types';
 import { getApfsCowCapability } from './apfs';
+import { bootstrapEnvironmentFiles } from './environment-bootstrap';
 import { finalizeCloneBranchRefs } from './clone-branch-refs';
 import { worktreeActivityMtimeMs } from './activity';
 import {
@@ -1743,54 +1744,7 @@ export class WorktreeManager {
     identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
     opts: CreateWorktreeOptions,
   ): Promise<void> {
-    // Packet configuration stays at its source; a saved copy policy must not
-    // duplicate credentials into every worker checkout.
-    const envMode = opts.envMode === 'skip' ? 'skip' : opts.packetId ? 'symlink' : opts.envMode ?? 'copy';
-    if (envMode === 'skip') return;
-
-    const envFiles = opts.envFiles?.filter(Boolean) ?? ['.env', '.env.local'];
-    for (const configuredPath of envFiles) {
-      const envFile = configuredPath.trim().replaceAll('\\', '/').replace(/^\.\//, '');
-      if (!envFile || path.isAbsolute(envFile)
-        || envFile.split('/').some((part) => !part || part === '.' || part === '..' || part === '.git')) {
-        throw new Error('Environment bootstrap requires a safe repository-relative path.');
-      }
-      const sourcePath = await this.resolveEnvBootstrapSource(envFile);
-      if (!sourcePath) continue;
-
-      let result: Awaited<ReturnType<typeof createPinnedWorkspaceBinding>>;
-      try {
-        result = await createPinnedWorkspaceBinding(worktreePath, identity, envFile, {
-          mode: envMode === 'symlink' ? 'symlink' : 'copy-file',
-          source: sourcePath,
-        });
-      } catch (error) {
-        if (isPinnedWorkspacePublishError(error)) throw error;
-        // Keep env bootstrap best-effort; missing env should show in readiness instead of killing creation.
-        continue;
-      }
-      if (envMode === 'symlink' && result === 'created') {
-        await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
-          const id = path.basename(worktreePath);
-          const entry = (await transaction.readAll())[id];
-          if (!entry) throw new Error('Environment reference lost its managed workspace owner.');
-          entry.environmentReferences = { ...entry.environmentReferences, [envFile]: sourcePath };
-          await transaction.save(id, entry);
-        });
-      }
-    }
-  }
-
-  private async resolveEnvBootstrapSource(envFile: string): Promise<string | null> {
-    const directSource = path.join(this.repoRoot, envFile);
-    if (await this.pathExists(directSource)) return directSource;
-
-    if (envFile === '.env') {
-      const localFallback = path.join(this.repoRoot, '.env.local');
-      if (await this.pathExists(localFallback)) return localFallback;
-    }
-
-    return null;
+    await bootstrapEnvironmentFiles(this.repoRoot, worktreePath, identity, opts);
   }
 
   // ── Safety Hook Injection ──

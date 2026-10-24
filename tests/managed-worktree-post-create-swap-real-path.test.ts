@@ -104,7 +104,6 @@ it('does not copy an environment secret after the created workspace is replaced'
   const sentinel = path.join(replacement, 'sentinel');
   writeFileSync(sentinel, 'preserve');
   const packetId = `env-swap-${Date.now()}`;
-  const reservationId = await reserve(repoRoot, packetId);
   h.beforeBinding = (workspacePath, relativePath) => {
     if (relativePath !== '.env') return;
     h.beforeBinding = null;
@@ -114,7 +113,7 @@ it('does not copy an environment secret after the created workspace is replaced'
   await expect(prepareLaunchWorktree({
     repoRoot, agentType: 'codex', taskName: 'env swap proof',
     branchName: `inline/${packetId}`, baseBranch: 'main', isolate: true,
-    skipSetup: true, packetId, storageAdmissionReservationId: reservationId,
+    skipSetup: true,
   })).rejects.toThrow(/ownership changed|identity changed/);
 
   expect(existsSync(path.join(replacement, '.env'))).toBe(false);
