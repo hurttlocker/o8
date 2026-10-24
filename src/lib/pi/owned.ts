@@ -24,6 +24,7 @@ import type {
 } from '@/lib/fleet/types';
 import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned-session/types';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { writeJsonFile } from '@/lib/fs/json';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import { startPiRunUsage, finishPiRunUsage, piCacheWarmingReceipt, type PiRunUsage } from '@/lib/pi/run-usage';
@@ -252,10 +253,6 @@ async function readJson<T>(filePath: string): Promise<T | null> {
   }
 }
 
-async function writeJson(filePath: string, value: unknown) {
-  await writeFile(filePath, JSON.stringify(value, null, 2));
-}
-
 async function listSessionDirs() {
   const root = await ensureRoot();
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
@@ -277,7 +274,7 @@ async function findSession(surfaceId: string) {
 
 async function saveSession(session: PiSessionRecord) {
   session.updatedAt = nowIso();
-  await writeJson(metadataPath(session.sessionDir), session);
+  await writeJsonFile(metadataPath(session.sessionDir), session);
 }
 
 async function appendRunLine(run: PiRunRecord, frame: unknown) {
