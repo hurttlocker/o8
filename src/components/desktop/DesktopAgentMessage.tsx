@@ -46,6 +46,8 @@ interface DesktopAgentMessageProps {
   /** True only for the in-flight assistant message — drives the smooth
    *  (typewriter) text reveal so bursts of tokens flow in instead of popping. */
   isStreaming?: boolean;
+  /** Hidden transcripts skip cosmetic frame-by-frame text reveals. */
+  animateStreaming?: boolean;
   repoPath?: string | null;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
@@ -183,7 +185,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onRunInTerminal,
   onRetryDelivery,
   visualizations,
-  userDelivery,
+  userDelivery, animateStreaming = true,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
   // Sanitize regex chain runs on every render unless memoized — heavy on
@@ -199,7 +201,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const deliveryRetryId = onRetryDelivery ? deliveryFailureClientMessageId(entry.id) : null;
   // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
   // bursty deltas so words flow in. No-op (returns full text) for user/history.
-  const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming);
+  const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming, animateStreaming);
   // Markdown parsing is O(reply length). It used to be keyed on the per-FRAME
   // reveal string, so renderLLMMarkdown re-ran ~60×/sec for the ENTIRE stream —
   // pinning the WKWebView main thread so sidebar clicks / "New session" / any
