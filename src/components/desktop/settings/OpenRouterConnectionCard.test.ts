@@ -113,6 +113,46 @@ it('marks retained work figures stale after refresh fails and clears the warning
   }
 });
 
+it.each([
+  { olderOk: true, newerOk: true },
+  { olderOk: false, newerOk: true },
+  { olderOk: true, newerOk: false },
+])('keeps the newest work refresh result (older=$olderOk, newer=$newerOk)', async ({ olderOk, newerOk }) => {
+  const refreshes: Array<(response: Response) => void> = [];
+  let workReads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (!url.startsWith('/api/v2/keys/openrouter/work')) {
+      return new Response(JSON.stringify({ providers: [{ id: 'openrouter', connection: connected }] }));
+    }
+    workReads += 1;
+    if (workReads === 1) return new Response(JSON.stringify(work));
+    return new Promise<Response>((resolve) => { refreshes.push(resolve); });
+  }));
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const response = (ok: boolean, calls: number) => new Response(JSON.stringify({
+    ...work, totals: { ...work.totals, calls },
+  }), { status: ok ? 200 : 503 });
+  try {
+    await act(async () => { root.render(createElement(OpenRouterProviderPanel)); });
+    const summary = () => container.querySelector('section[aria-label="Work run by o8"]')!;
+    expect(summary().textContent).toContain('across 39 calls');
+    await act(async () => { window.dispatchEvent(new Event('o8:openrouter-connection-changed')); });
+    await act(async () => { window.dispatchEvent(new Event('o8:openrouter-connection-changed')); });
+    expect(refreshes).toHaveLength(2);
+    await act(async () => { refreshes[1](response(newerOk, 43)); });
+    const newestText = summary().textContent;
+    expect(newestText).toContain(newerOk ? 'across 43 calls' : 'across 39 calls');
+    expect(summary().querySelector('[role="alert"]') !== null).toBe(!newerOk);
+    await act(async () => { refreshes[0](response(olderOk, 41)); });
+    expect(summary().textContent).toBe(newestText);
+    expect(summary().querySelector('[role="alert"]') !== null).toBe(!newerOk);
+    expect(workReads).toBe(3);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
 it('keeps the models picker out of a disconnected OpenRouter panel', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ providers: [{ id: 'openrouter', connection: { ...connected, state: 'disconnected', details: null } }] }) })));
   const container = document.createElement('div');

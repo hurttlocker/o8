@@ -44,7 +44,9 @@ export function OpenRouterWorkSection() {
 
   useEffect(() => {
     let cancelled = false;
+    let requestSequence = 0;
     const load = async () => {
+      const request = ++requestSequence;
       try {
         const response = await fetch('/api/v2/keys/openrouter/work?days=30', { cache: 'no-store' });
         if (!response.ok) throw new Error('Could not read o8\'s OpenRouter usage.');
@@ -52,9 +54,11 @@ export function OpenRouterWorkSection() {
         if (!payload?.totals || !Array.isArray(payload.bySource) || typeof payload.days !== 'number') {
           throw new Error('Could not read o8\'s OpenRouter usage.');
         }
-        if (!cancelled) { setWork(payload as OpenRouterWorkView); setError(null); }
+        if (!cancelled && request === requestSequence) { setWork(payload as OpenRouterWorkView); setError(null); }
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not read o8\'s OpenRouter usage.');
+        if (!cancelled && request === requestSequence) {
+          setError(cause instanceof Error ? cause.message : 'Could not read o8\'s OpenRouter usage.');
+        }
       }
     };
     void load();
