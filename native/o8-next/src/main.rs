@@ -18,6 +18,9 @@ mod shell;
 mod shell_state;
 mod sidebar;
 mod stream;
+mod terminal;
+mod terminal_grid;
+mod terminal_transport;
 mod text;
 mod transport;
 mod ui;
@@ -33,7 +36,7 @@ fn run() -> Result<(), String> {
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] {
         println!(
-            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE | --composer-benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
+            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID | --benchmark FILE | --composer-benchmark FILE]\nSaved sessions, composer and opt-in terminal. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
         );
         println!("{}", shell::HELP);
         println!(
@@ -81,6 +84,7 @@ fn run() -> Result<(), String> {
     }
     let grid = pane_layout::Options::extract(&mut args)?;
     let mut server = None;
+    let mut terminal = None;
     let mut offscreen = false;
     let mut enabled = false;
     let mut benchmark = None;
@@ -95,6 +99,7 @@ fn run() -> Result<(), String> {
             "--offscreen" => offscreen = true,
             "--unattended-on-screen" => unattended = true,
             "--server"
+            | "--terminal"
             | "--benchmark"
             | "--composer-benchmark"
             | "--stream-benchmark"
@@ -103,6 +108,12 @@ fn run() -> Result<(), String> {
                 let value = args.get(i).ok_or("Missing flag value")?.clone();
                 if args[i - 1] == "--server" {
                     server = Some(value);
+                } else if args[i - 1] == "--terminal" {
+                    if value.is_empty() || value.len() > 200 || value.chars().any(char::is_control)
+                    {
+                        return Err("Invalid terminal session id".into());
+                    }
+                    terminal = Some(value);
                 } else if args[i - 1] == "--benchmark" {
                     benchmark = Some(value);
                 } else if args[i - 1] == "--composer-benchmark" {
@@ -144,6 +155,11 @@ fn run() -> Result<(), String> {
         }
     };
     if let Some(options) = grid {
+        if terminal.is_some() {
+            return Err(
+                "Use per-slot terminal selection in the pane grid, without --terminal".into(),
+            );
+        }
         if benchmark.is_some()
             || composer_benchmark.is_some()
             || stream_benchmark.is_some()
@@ -163,6 +179,17 @@ fn run() -> Result<(), String> {
     }
     let client =
         Client::new(&server.ok_or("Pass --server with an explicit disposable server origin")?)?;
+    if let Some(session) = terminal {
+        if benchmark.is_some()
+            || composer_benchmark.is_some()
+            || stream_benchmark.is_some()
+            || unattended
+        {
+            return Err("Use --terminal alone with --server and optional --offscreen".into());
+        }
+        terminal::launch(client, session, offscreen);
+        return Ok(());
+    }
     // The real session list and history reads are also exercised without a window
     // by the parity/protocol runner. Interactive reads happen off the UI thread.
     ui::launch(

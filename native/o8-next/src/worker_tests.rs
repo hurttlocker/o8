@@ -82,7 +82,15 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         "render the default mode in words"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    // GPUI installs the native input handler during paint after focus changes.
+    draw(cx);
     cx.simulate_input("Start streaming");
+    assert_eq!(
+        surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone()),
+        "Start streaming",
+        "native input must reach the focused composer before Enter"
+    );
+    draw(cx);
     let start = Instant::now();
     cx.simulate_keystrokes("enter");
     wait(&surface, cx, "first worker transcript", |s| {
@@ -150,7 +158,9 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         contains(s, "Promoted instruction")
     });
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    draw(cx);
     cx.simulate_input("Removed instruction");
+    draw(cx);
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     draw(cx);
@@ -186,10 +196,18 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         "Draft kept"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    draw(cx);
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Queued instruction");
+    draw(cx);
     cx.simulate_keystrokes("enter");
-    cx.run_until_parked();
+    wait(&surface, cx, "persisted queued instruction", |s| {
+        s.queue["items"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["payload"]["text"] == "Queued instruction" && item["status"] == "queued"
+            })
+        })
+    });
     assert!(
         !surface.read_with(cx, |s, _| contains(s, "Queued instruction")),
         "queue waits for active turn"
@@ -212,6 +230,13 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         .unwrap();
     wait(&surface, cx, "queued worker result", |s| {
         contains(s, "Worker received: Queued instruction")
+    });
+    wait(&surface, cx, "completed worker steering receipt", |s| {
+        s.transcript.as_ref().unwrap().entries.iter().any(|e| {
+            e.role == "assistant"
+                && e.text.contains("Steered instruction")
+                && e.text.contains("Promoted instruction")
+        })
     });
     assert!(surface.read_with(cx, |s, _| {
         s.transcript.as_ref().unwrap().entries.iter().any(|e| {

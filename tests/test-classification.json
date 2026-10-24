@@ -3962,6 +3962,14 @@
       ]
     },
     {
+      "path": "tests/next-terminal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/nightly-typecheck-heap-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3984,6 +3992,14 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8-next-grid-terminal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },

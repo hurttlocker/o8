@@ -191,6 +191,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
             );
         });
     }
+    #[cfg(target_os = "linux")]
     let memory = fs::read_to_string("/proc/self/status")
         .unwrap()
         .lines()
@@ -201,6 +202,20 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         })
         .unwrap()
         / 1024.;
+    #[cfg(not(target_os = "linux"))]
+    let memory = {
+        let output = Process::new("ps")
+            .args(["-p", &std::process::id().to_string(), "-o", "rss="])
+            .output()
+            .expect("native process RSS");
+        assert!(output.status.success(), "native process RSS command");
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .trim()
+            .parse::<f64>()
+            .unwrap()
+            / 1024.
+    };
     let handle = cx.update(|window, _| window.window_handle());
     cx.cx
         .simulate_window_resize(handle, size(px(1024.), px(720.)));
@@ -245,7 +260,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     assert!(restarted.read_with(restart_cx, |s, _| s.current().unwrap().composer));
     println!(
         "O8_NEXT_SHELL_EVIDENCE {}",
-        json!({"endpoint":"Linux GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor", "launchToInteractiveMs":launch,"paletteOpenToFrameMs":palette,"workspaceSwitchMs":switching,"idleMemoryMiB":memory,"workspaces":2,"restoredSurfaces":3})
+        json!({"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor", "platform":std::env::consts::OS, "launchToInteractiveMs":launch,"paletteOpenToFrameMs":palette,"workspaceSwitchMs":switching,"idleMemoryMiB":memory,"workspaces":2,"restoredSurfaces":3})
     );
     // Persisted surfaces restore lazily, including the grid's own saved slots.
     restart_cx.simulate_keystrokes("ctrl-tab");
