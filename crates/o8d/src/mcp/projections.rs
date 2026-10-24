@@ -167,6 +167,7 @@ pub fn status(data: Value, runtime: Value, snapshot: Value, args: &Value) -> Val
         .collect();
     json!({"summary":format!("{}.",pieces.join(". ")),"data":{
         "runtimeConnections":runtime,"snapshot":snapshot,"agents":projected,"approvals":approvals,"approvalCount":count,
-        "recentActivity":recent,"spendCapHits":array(&data["spendCapHits"])
+        "recentActivity":recent,"spendCapHits":array(&data["spendCapHits"]),
+        "terminalReasons":array(&data["terminalReasons"]),"terminalReasonsTruncated":data["terminalReasonsTruncated"] == true
     }})
 }

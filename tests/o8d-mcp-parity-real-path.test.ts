@@ -1,13 +1,14 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { compareMcpExchanges, replayMcp, sendRecordedMcp, type RecordedMcpRequest } from '../scripts/lib/mcp-parity';
+import { seedMcpScaleFixture, startMcpCpuLoad } from './fixtures/mcp-parity/scale-benchmark';
 
 // Replace external observations only. Middleware, MCP handlers, API routes and persisted state are real.
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
@@ -21,6 +22,7 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
 }));
 
 const directory = process.env.CORTEX_IDE_DATA_DIR!;
+process.env.CORTEX_IDE_DB_PATH = join(directory, 'cortex-ide.db');
 const token = 'o8d-fixture-operator-credential';
 writeFileSync(join(directory, 'ws-token'), token);
 const refusedCredentials = { worker: 'fixture-worker-credential', device: 'fixture-device-credential', spectator: 'fixture-spectator-credential' };
@@ -58,6 +60,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
 };
 let base = '';
 let rust = '';
+let nativeRust = '';
 let records: RecordedMcpRequest[];
 let failedSource = '';
 const server = createServer(async (incoming, outgoing) => {
@@ -92,10 +95,12 @@ function toolPayload(exchange: Awaited<ReturnType<typeof call>>) {
   return JSON.parse((exchange.body as { result: { content: Array<{ text: string }> } }).result.content[0].text);
 }
 
-async function startRust(upstream: string): Promise<string> {
+async function startRust(upstream: string, native = false, database?: string): Promise<string> {
   const binary = process.env.O8D_MCP_TEST_BINARY ?? 'crates/o8d/target/debug/o8d-mcp';
-  const child = spawn(binary, ['--experimental-mcp', '--listen', '127.0.0.1:0', '--upstream', upstream], {
+  const child = spawn(binary, ['--experimental-mcp', '--listen', '127.0.0.1:0', '--upstream', upstream,
+    ...(native ? ['--native-reads', '--data-dir', directory] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(database ? { env: { ...process.env, CORTEX_IDE_DB_PATH: database } } : {}),
   });
   children.push(child);
   const [line] = await Promise.race([once(child.stdout!, 'data'), once(child, 'exit').then(() => { throw new Error('Rust MCP startup failed'); })]);
@@ -123,6 +128,7 @@ beforeAll(async () => {
   if (!address || typeof address === 'string') throw new Error('missing fixture listener');
   base = `http://127.0.0.1:${address.port}`;
   process.env.PORT = String(address.port);
+  process.env.O8_API_PORT = String(address.port);
   process.env.O8_API_BASE = base;
   writeFileSync(join(directory, 'api-port'), String(address.port));
   const repo = join(directory, 'repo');
@@ -152,6 +158,10 @@ beforeAll(async () => {
     owner: { id: 'fixture-owner', label: 'Fixture owner', pid: process.pid }, claimToken: 'fixture-lease-claim-value-0123456789', ttlMs: 86_400_000 }) });
   expect(leaseResponse.status).toBe(200);
   rust = await startRust(base);
+  nativeRust = await startRust(base, true);
+  // Establish the paired publisher generation using the caller's credential.
+  await call(base, 'o8_list_repos');
+  await call(nativeRust, 'o8_list_repos');
   records = JSON.parse(readFileSync('tests/fixtures/mcp-parity/requests.json', 'utf8').replaceAll('$FIXTURE_REPO', repo));
 }, 120_000);
 afterAll(async () => {
@@ -173,6 +183,151 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
   it('replays every recorded request field by field against the same persisted state', async () => {
     expect(await replayMcp(base, rust, token, records)).toBe(records.length);
   }, 120_000);
+
+  it('replays the recorded parity set with native reads enabled', async () => {
+    expect(await replayMcp(base, nativeRust, token, records)).toBe(records.length);
+  }, 120_000);
+
+  it.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
+    'reads %s natively with zero TypeScript requests', async (name) => {
+      const expected = await call(base, name);
+      seen.length = 0;
+      const actual = await call(nativeRust, name);
+      compareMcpExchanges(expected, actual, name === 'o8_status'
+        ? ['/body/result/content/0/text/json/data/snapshot/ageMs'] : []);
+      expect(seen.map((entry) => entry.path)).toEqual([]);
+    },
+  );
+
+  it('replays additional native credential and profile refusals', async () => {
+    const additional: RecordedMcpRequest[] = JSON.parse(readFileSync('tests/fixtures/mcp-parity/native-reads.json', 'utf8'));
+    expect(await replayMcp(base, nativeRust, token, additional)).toBe(additional.length);
+  });
+
+  it('sees committed WAL updates without modifying SQLite or the registries', async () => {
+    const sqlite = getSqlite();
+    expect(sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
+    const lane = createLane({ repoPath: join(directory, 'repo'), runtime: 'codex', branch: 'fixture/native-wal', label: 'Native WAL fixture' });
+    const expected = await call(base, 'o8_task_list');
+    const changes = sqlite.prepare('SELECT total_changes() AS count').get();
+    const dataVersion = sqlite.pragma('data_version', { simple: true });
+    const jsonFiles = ['repos.json', 'projects.json', 'orchestrator-state.json'].map((file) => readFileSync(join(directory, file), 'utf8'));
+    seen.length = 0;
+    const result = await call(nativeRust, 'o8_task_list');
+    compareMcpExchanges(expected, result);
+    expect(toolPayload(result).tasks.some((task: { id: string }) => task.id === lane.id)).toBe(true);
+    expect(seen).toHaveLength(0);
+    expect(sqlite.prepare('SELECT total_changes() AS count').get()).toEqual(changes);
+    expect(sqlite.pragma('data_version', { simple: true })).toBe(dataVersion);
+    expect(['repos.json', 'projects.json', 'orchestrator-state.json'].map((file) => readFileSync(join(directory, file), 'utf8'))).toEqual(jsonFiles);
+  });
+
+  it('does not create a missing native database and falls back through tools/call', async () => {
+    const database = join(directory, 'absent-native.db');
+    const candidate = await startRust(base, true, database);
+    const expected = await call(base, 'o8_list_projects');
+    seen.length = 0;
+    compareMcpExchanges(expected, await call(candidate, 'o8_list_projects'));
+    expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+    expect(existsSync(database)).toBe(false);
+    expect(existsSync(`${database}-wal`)).toBe(false);
+  });
+
+  it.each([-1, 5_000, 15_000])('falls back for a persisted status age of %s ms', async (ageMs) => {
+    await call(base, 'o8_status', { fresh: true });
+    const sqlite = getSqlite();
+    const row = sqlite.prepare("SELECT key, value FROM app_state WHERE key LIKE 'o8d/mcp/v1/status/%' ORDER BY updated_at DESC LIMIT 1").get() as { key: string; value: string };
+    const value = JSON.parse(row.value);
+    value.snapshot.capturedAt = ageMs < 0 ? Date.now() + 60_000 : Date.now() - ageMs;
+    sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify(value), row.key);
+    try {
+      seen.length = 0;
+      expect((await call(nativeRust, 'o8_status')).status).toBe(200);
+      expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+    } finally { sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(row.value, row.key); }
+  });
+
+  it('preserves exact session snapshot keys and explicit fresh requests', async () => {
+    for (const args of [{ sessionKey: 'fixture:unobserved' }, { fresh: true }]) {
+      seen.length = 0;
+      const result = await call(nativeRust, 'o8_status', args);
+      expect(result.status).toBe(200);
+      expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+    }
+  });
+
+  it('falls back on malformed policy, stale publisher identity and disabled reads', async () => {
+    await call(base, 'o8_list_repos');
+    const sqlite = getSqlite();
+    const row = sqlite.prepare("SELECT value FROM app_state WHERE key = 'o8d/mcp/v1/policy'").get() as { value: string };
+    const original = JSON.parse(row.value);
+    for (const value of ['{', JSON.stringify({ ...original, startId: 'invalid' }), JSON.stringify({ ...original, enabled: false })]) {
+      sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(value);
+      seen.length = 0;
+      expect((await call(nativeRust, 'o8_list_repos')).status).toBe(200);
+      expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+    }
+    sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(row.value);
+  });
+
+  it.each(['archived', 'dependency', 'preflight'] as const)('preserves %s mission reconciliation through fallback', async (kind) => {
+    const saved = readFileSync(join(directory, 'orchestrator-state.json'), 'utf8');
+    const state = JSON.parse(saved).mission;
+    const packet = state.packets[0];
+    if (kind === 'archived') packet.archivedAt = '2026-01-01T00:00:00.000Z';
+    if (kind === 'dependency') {
+      state.packets.push({ ...packet, id: 'dependent-fixture', dependencyPacketIds: [packet.id] });
+    }
+    if (kind === 'preflight') { packet.preflightRefusals = 3; packet.maxAttempts = 3; }
+    writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState(state));
+    try {
+      for (const name of ['get_mission_status', 'o8_task_list']) {
+        const expected = await call(base, name);
+        seen.length = 0;
+        compareMcpExchanges(expected, await call(nativeRust, name));
+        expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+      }
+    } finally { writeFileSync(join(directory, 'orchestrator-state.json'), saved); }
+  });
+
+  it('refuses an unbound publisher generation even when its process identity is live', async () => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(403, { 'content-type': 'application/json' }).end('{"error":"Fixture upstream refuses"}');
+    });
+    const upstreamUrl = await listen(upstream);
+    await call(base, 'o8_list_repos');
+    const sqlite = getSqlite();
+    const row = sqlite.prepare("SELECT value FROM app_state WHERE key = 'o8d/mcp/v1/policy'").get() as { value: string };
+    const fake = { ...JSON.parse(row.value), base: upstreamUrl, generation: 'another-publisher-generation' };
+    sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(JSON.stringify(fake));
+    try {
+      const candidate = await startRust(upstreamUrl, true);
+      const actual = await call(candidate, 'o8_list_repos');
+      expect(actual.status).toBe(403);
+      expect(actual.body).toEqual({ error: 'Fixture upstream refuses' });
+    } finally {
+      sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(row.value);
+      await stop(upstream);
+    }
+  });
+
+  it.each(['data', 'approvals', 'runtimeConnections'] as const)('falls back instead of projecting malformed published %s', async (field) => {
+    await call(base, 'o8_status', { fresh: true });
+    const sqlite = getSqlite();
+    const row = sqlite.prepare("SELECT key, value FROM app_state WHERE key LIKE 'o8d/mcp/v1/status/%' ORDER BY updated_at DESC LIMIT 1").get() as { key: string; value: string };
+    const broken = JSON.parse(row.value);
+    if (field === 'data') delete broken.snapshot.data;
+    if (field === 'approvals') broken.snapshot.data.approvals = {};
+    if (field === 'runtimeConnections') broken.snapshot.runtimeConnections = {};
+    sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify(broken), row.key);
+    try {
+      seen.length = 0;
+      const actual = await call(nativeRust, 'o8_status');
+      expect(actual.status).toBe(200);
+      expect(toolPayload(actual).data.runtimeConnections).toBeTruthy();
+      expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+    } finally { sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(row.value, row.key); }
+  });
 
   it.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
     'serves %s without forwarding a tools/call to TypeScript', async (name) => {
@@ -258,7 +413,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       const recording = { name: kind, body };
       const expected = await sendRecordedMcp(base, credential, recording);
       seen.length = 0;
-      const actual = await sendRecordedMcp(rust, credential, recording);
+      const actual = await sendRecordedMcp(nativeRust, credential, recording);
       expect(actual.status).toBe(403);
       compareMcpExchanges(expected, actual);
       expect(seen.map((entry) => entry.path)).toEqual(['/api/mcp']);
@@ -272,22 +427,28 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       const recording = { name: 'narrow', headers: { 'x-o8-mcp-profile': 'full' }, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'o8_status' } } };
       const expected = await sendRecordedMcp(base, token, recording);
       seen.length = 0;
-      compareMcpExchanges(expected, await sendRecordedMcp(rust, token, recording));
-      expect(seen.map((entry) => entry.path)).toEqual(['/api/mcp']);
-      expect((await call(rust, 'o8_status')).body).toMatchObject({ result: { isError: true } });
+      compareMcpExchanges(expected, await sendRecordedMcp(nativeRust, token, recording));
+      expect(seen).toHaveLength(0);
+      expect((await call(nativeRust, 'o8_status')).body).toMatchObject({ result: { isError: true } });
     } finally { delete process.env.O8_OPERATOR_MCP_PROFILE; }
     delete process.env.O8D_MCP_READS;
-    try { compareMcpExchanges(await call(base, 'o8_list_repos'), await call(rust, 'o8_list_repos')); }
+    try { compareMcpExchanges(await call(base, 'o8_list_repos'), await call(nativeRust, 'o8_list_repos')); }
     finally { process.env.O8D_MCP_READS = '1'; }
   });
 
-  it('rechecks a rotated operator credential before returning the catalog', async () => {
+  it('rechecks a rotated operator credential before native reads and the catalog', async () => {
     const recording = { name: 'rotation', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } };
+    const nativeRead = { name: 'rotation read', body: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'o8_list_repos' } } };
     const replacement = 'fixture-replacement-operator-credential';
     writeFileSync(join(directory, 'ws-token'), replacement);
     try {
-      expect((await sendRecordedMcp(rust, token, recording)).status).toBe(401);
-      compareMcpExchanges(await sendRecordedMcp(base, replacement, recording), await sendRecordedMcp(rust, replacement, recording));
+      expect((await sendRecordedMcp(nativeRust, token, recording)).status).toBe(401);
+      expect((await sendRecordedMcp(nativeRust, token, nativeRead)).status).toBe(401);
+      compareMcpExchanges(await sendRecordedMcp(base, replacement, recording), await sendRecordedMcp(nativeRust, replacement, recording));
+      const expected = await sendRecordedMcp(base, replacement, nativeRead);
+      seen.length = 0;
+      compareMcpExchanges(expected, await sendRecordedMcp(nativeRust, replacement, nativeRead));
+      expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
     } finally { writeFileSync(join(directory, 'ws-token'), token); }
   });
 
@@ -348,12 +509,82 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
   });
   it.runIf(Boolean(process.env.O8_MCP_BENCH_REPORT))('measures both servers with the existing speed MCP client', async () => {
     await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', `--reference=${base}`,
-      `--candidate=${rust}`, `--output=${process.env.O8_MCP_BENCH_REPORT}`], {
+      `--candidate=${nativeRust}`, `--output=${process.env.O8_MCP_BENCH_REPORT}`], {
       env: { ...process.env, O8_MCP_PARITY_TOKEN: token },
     });
     const report = JSON.parse(readFileSync(process.env.O8_MCP_BENCH_REPORT!, 'utf8'));
     expect(report.results).toHaveLength(14);
     expect(report.samples).toBe(100);
   }, 180_000);
+
+  it.runIf(Boolean(process.env.O8_MCP_SCALE_BENCH_REPORT_DIR))('measures realistic state with idle and CPU-loaded TypeScript', async () => {
+    const fixture = await seedMcpScaleFixture({ directory, sqlite: getSqlite(),
+      initializeRepo: async (path) => { await promisify(execFile)('git', ['init', '--quiet', path]); },
+      acquireLease: async (index) => {
+        const response = await fetch(`${base}/api/leases`, { method: 'POST', headers: {
+          authorization: `Bearer ${token}`, 'content-type': 'application/json',
+        }, body: JSON.stringify({ action: 'acquire', resource: `fixture:scale-lease-${index}`,
+          owner: { id: `fixture-owner-${index}`, label: `Fixture owner ${index}`, pid: process.pid },
+          claimToken: `scale-fixture-claim-value-${String(index).padStart(12, '0')}`, ttlMs: 86_400_000 }) });
+        expect(response.status).toBe(200);
+      },
+    });
+    const registered = toolPayload(await call(base, 'o8_list_repos'));
+    expect(registered.count).toBe(50);
+    expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM missions').get()).toEqual({ count: 300 });
+    expect(fixture).toMatchObject({ missions: 300, packets: 2_000, lanes: 2_000, repos: 50, leases: 200, projects: 10 });
+    expect(toolPayload(await call(base, 'o8_lease_list')).count).toBe(200);
+    for (const name of ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list']) {
+      if (name === 'o8_status') await call(base, name, { fresh: true });
+      compareMcpExchanges(await call(base, name), await call(nativeRust, name), name === 'o8_status'
+        ? ['/body/result/content/0/text/json/data/snapshot/ageMs'] : []);
+    }
+    const outputDirectory = process.env.O8_MCP_SCALE_BENCH_REPORT_DIR!;
+    mkdirSync(outputDirectory, { recursive: true });
+    for (const busy of [false, true]) {
+      await call(base, 'o8_status', { fresh: true });
+      await call(nativeRust, 'o8_status');
+      seen.length = 0;
+      const stopLoad = startMcpCpuLoad(busy);
+      const output = join(outputDirectory, busy ? 'large-cpu-busy.json' : 'large-idle.json');
+      let cpuLoad;
+      try {
+        await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', `--reference=${base}`,
+          `--candidate=${nativeRust}`, `--output=${output}`], { env: { ...process.env, O8_MCP_PARITY_TOKEN: token } });
+      } finally { cpuLoad = stopLoad(); }
+      const report = JSON.parse(readFileSync(output, 'utf8'));
+      expect(report.results).toHaveLength(14);
+      expect(report.samples).toBe(100);
+      expect(cpuLoad.cycles > 0).toBe(busy);
+      const referenceRequests = report.samples + report.warmups;
+      const fallbackRequestsIncludingWarmups = Object.fromEntries(report.results.filter((row: { server: string; name: string }) =>
+        row.server === 'Rust' && row.name !== 'tools/list').map((row: { name: string }) => {
+        const calls = seen.filter((entry) => {
+          if (entry.path !== '/api/mcp') return false;
+          const request = JSON.parse(entry.body);
+          return request.method === 'tools/call' && request.params?.name === row.name;
+        }).length;
+        expect(calls).toBeGreaterThanOrEqual(referenceRequests);
+        expect(calls).toBeLessThanOrEqual(referenceRequests * 2);
+        return [row.name, calls - referenceRequests];
+      }));
+      writeFileSync(output, `${JSON.stringify({ schema: 'o8/mcp/scale-benchmark/v1',
+        scenario: busy ? 'large-cpu-busy' : 'large-idle', fixture, cpuLoad,
+        node: process.versions.node, transport: 'fixture HTTP adapter using production middleware, MCP handlers and read routes',
+        clientAndRustInSeparateProcesses: true, fallbackRequestsIncludingWarmups, ...report }, null, 2)}\n`);
+    }
+  }, 1_200_000);
+
+  it('refuses scale seeding outside the owned fixture database', async () => {
+    const ownedDirectory = join(directory, 'scale-seeder-owned');
+    mkdirSync(ownedDirectory, { recursive: true });
+    const sqlite = getSqlite();
+    const before = sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get();
+    await expect(seedMcpScaleFixture({ directory: ownedDirectory, sqlite,
+      initializeRepo: async () => { throw new Error('Unreachable repo mutation'); },
+      acquireLease: async () => { throw new Error('Unreachable lease mutation'); },
+    })).rejects.toThrow('Refusing scale seeding outside the owned fixture database');
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get()).toEqual(before);
+  });
 
 });

@@ -67,6 +67,10 @@ function readPanelToken(): string | null {
     return null;
   }
 }
+/** Keep native mission reads behind this client's credential-rotation window. */
+export function nativeMissionReadCredentialMatches(token: string): boolean {
+  return readPanelToken() === token;
+}
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type {
   ApproveAndMergeInput as ApproveAndMergeRequest,

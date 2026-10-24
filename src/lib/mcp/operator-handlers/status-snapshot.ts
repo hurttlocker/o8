@@ -1,5 +1,6 @@
 import { runtimeConnectionRows } from '@/lib/runtimes/shared/connection-evidence';
 import { apiFetch, getApiBase } from './shared';
+import { publishNativeStatus, removeNativeStatus } from '@/lib/mcp/native-read-publication';
 
 const REFRESH_AFTER_MS = 5_000;
 const MAX_AGE_MS = 15_000;
@@ -36,7 +37,10 @@ function readConnections(base: string) {
 function pruneSources() {
   for (const [key, source] of sources) {
     if (sources.size <= MAX_SNAPSHOTS) break;
-    if (!source.inflight) sources.delete(key);
+    if (!source.inflight) {
+      sources.delete(key);
+      removeNativeStatus(key);
+    }
   }
 }
 
@@ -55,6 +59,7 @@ function refresh(source: Source, base: string, sessionKey: string | undefined): 
     }
     const snapshot = { data, runtimeConnections: connections.value, capturedAt };
     source.snapshot = snapshot;
+    publishNativeStatus(base, sessionKey, snapshot);
     return snapshot;
   });
   source.inflight = request;

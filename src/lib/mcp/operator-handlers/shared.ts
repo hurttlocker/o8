@@ -82,6 +82,11 @@ export function setApiBase(base: string): void {
   _apiBase = base;
 }
 
+/** Native reads must retain this API client's credential-rotation behavior. */
+export function nativeReadCredentialMatches(token: string): boolean {
+  return readPanelToken() === token;
+}
+
 let _apiBaseCache: { value: string; ts: number } | null = null;
 /**
  * Re-reads the api-port file each call because dev-bridge swaps and prod-app
