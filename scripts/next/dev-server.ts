@@ -43,13 +43,13 @@ async function main() {
   // adding post-boot recordings (their deliberately tight timestamps are valid).
   const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
   listMobileOrchestratorThreads();
-  const seeds = JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8')) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
+  const seeds = (process.argv.includes('--inbox-empty') ? [] : JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8'))) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
   for (const seed of seeds) {
     writeFileSync(join(dataDir, 'chat-history', `${seed.id}.json`), JSON.stringify({ ...seed,
       messages: seed.messages, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
       savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true }));
   }
-  if (process.argv.includes('--shell')) {
+  if (process.argv.includes('--shell') && !process.argv.includes('--inbox-empty')) {
     const { seedShellWorkspace } = await import('./shell-fixture');
     seeds.push(seedShellWorkspace(dataDir, root));
   }
@@ -75,6 +75,11 @@ async function main() {
   await isolateTranscriptDiscovery(transcriptFixtures);
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
   const review = process.argv.includes('--review');
+  const inbox = process.argv.includes('--inbox');
+  const inboxApprovals = inbox && !process.argv.includes('--inbox-empty') ? await (await import('./inbox-fixture')).seedInboxFixture(repo, dataDir) : [];
+  const inboxRoutes = inbox ? await import('../../src/app/api/panel/supervisor-inbox/route') : null;
+  const approvalRoutes = inbox ? await import('../../src/app/api/panel/approvals/route') : null;
+  if (inbox && process.env.O8_NEXT_INBOX_ORACLE) await (await import('./inbox-fixture')).writeInboxOracle(process.env.O8_NEXT_INBOX_ORACLE);
   if (review) await (await import('./review-fixture')).seedReviewFixture(repo);
   const packetDiff = await import('../../src/app/api/lanes/[id]/diff/route');
   const worktreeDiff = await import('../../src/app/api/worktrees/diff/route');
@@ -96,6 +101,9 @@ async function main() {
     '/api/v2/chat-history': context, '/api/orchestrator/state': state,
     '/api/orchestrator/composer-queue': queue.GET, '/api/panel/ws-info': wsInfo,
     '/api/runtime/inventory': inventory,
+    ...(inboxRoutes && approvalRoutes ? {
+      '/api/panel/supervisor-inbox': inboxRoutes.GET, '/api/panel/approvals': approvalRoutes.GET,
+    } : {}),
     ...(review ? {
       '/api/worktrees/diff': worktreeDiff.GET,
       '/api/orchestrator/review-state': reviewState.GET,
@@ -117,7 +125,8 @@ async function main() {
       const route = req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
-          : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST : null;
+          : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST
+            : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -126,9 +135,10 @@ async function main() {
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
       if (body) {
-        const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string };
+        const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string; id?: string; action?: string };
         const owned = route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
+          : route === approvalRoutes?.POST ? inboxApprovals.some((approval) => approval.id === target.id) && ['approve', 'reject'].includes(target.action ?? '')
           : target.threadId?.startsWith('thoughts-composer-') && target.repoPath === repo;
         if (!owned) { res.writeHead(400).end(); return; }
       }
