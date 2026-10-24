@@ -102,6 +102,73 @@ it.each(['right', 'bottom'] as const)('refreshes the retained %s index on resume
   expect(select).toHaveBeenCalledWith('src/after.ts');
 });
 
+it.each(['right', 'bottom'] as const)('retains the %s workspace index across repository switches while refreshing its loaded folders', async surface => {
+  await render(surface, true); await settled(() => Boolean(item('src/before.ts')));
+  const folder = item('src/')!; const selected = item('src/before.ts')!;
+  const nextRepo = join(workspace, 'next'); await mkdir(nextRepo);
+  await writeFile(join(nextRepo, 'other.ts'), 'export {};');
+  await render(surface, true, nextRepo); await settled(() => Boolean(item('other.ts')));
+  const hidden = (selected.getRootNode() as ShadowRoot).host.closest('[hidden]');
+  expect(hidden?.hasAttribute('inert')).toBe(true);
+  select.mockClear(); await act(async () => selected.click());
+  expect(select).not.toHaveBeenCalled();
+  await writeFile(join(workspace, 'src/after.ts'), 'export {};');
+  const fetcher = vi.mocked(fetch); const read = fetcher.getMockImplementation()!;
+  const pending: Array<() => Promise<void>> = [];
+  fetcher.mockImplementation((input, init) => new URL(String(input), 'http://localhost').pathname !== '/api/panel/files'
+    ? read(input, init) : new Promise<Response>(resolve => {
+      pending.push(async () => resolve(await read(input, init)));
+    }));
+  await render(surface, true);
+  expect(item('src/')).toBe(folder);
+  expect(item('src/before.ts')).toBe(selected);
+  expect(folder.getAttribute('aria-expanded')).toBe('true');
+  expect(selected.getAttribute('aria-selected')).toBe('true');
+  expect(host.textContent).not.toContain('Loading files...');
+  expect(pending).toHaveLength(2);
+  await act(async () => { for (const finish of pending) await finish(); });
+  await settled(() => Boolean(item('src/after.ts')));
+  expect(item('src/before.ts')?.getAttribute('aria-selected')).toBe('true');
+  expect(item('src/')?.getAttribute('aria-expanded')).toBe('true');
+  expect(requests.filter(request => request.workspace === nextRepo)).toHaveLength(1);
+  await act(async () => item('src/after.ts')!.click());
+  expect(select).toHaveBeenCalledWith('src/after.ts');
+});
+
+it('evicts the least recently visited workspace after three retained indexes', async () => {
+  const repos = new Map<string, string>();
+  for (const id of ['b', 'c', 'd']) {
+    const path = join(workspace, id); await mkdir(path); await writeFile(join(path, `${id}.ts`), 'export {};'); repos.set(id, path);
+  }
+  await render('right', true); await settled(() => Boolean(item('src/before.ts')));
+  const original = item('src/before.ts')!;
+  await render('right', true, repos.get('b')); await settled(() => Boolean(item('b.ts')));
+  const evicted = item('b.ts')!;
+  await render('right', true, repos.get('c')); await settled(() => Boolean(item('c.ts')));
+  await render('right', true); await settled(() => Boolean(item('src/before.ts')));
+  expect(item('src/before.ts')).toBe(original);
+  await render('right', true, repos.get('d')); await settled(() => Boolean(item('d.ts')));
+  expect(host.querySelectorAll('file-tree-container')).toHaveLength(3);
+  expect(evicted.isConnected).toBe(false);
+  await render('right', true, repos.get('b')); await settled(() => Boolean(item('b.ts')));
+  expect(item('b.ts')).not.toBe(evicted);
+  expect(host.querySelectorAll('file-tree-container')).toHaveLength(3);
+});
+
+it('does not evict a loaded index for workspace switches while Files is inactive', async () => {
+  const repos: string[] = [];
+  for (const id of ['b', 'c', 'd']) {
+    const path = join(workspace, id); await mkdir(path); await writeFile(join(path, `${id}.ts`), 'export {};'); repos.push(path);
+  }
+  await render('right', true); await settled(() => Boolean(item('src/before.ts')));
+  const selected = item('src/before.ts')!;
+  const before = requests.length;
+  for (const repo of repos) await render('right', false, repo);
+  expect(requests).toHaveLength(before);
+  await render('right', true);
+  expect(item('src/before.ts')).toBe(selected);
+});
+
 it.each(['right', 'bottom'] as const)('keeps the %s cached rows usable after failed refreshes and recovers through Retry', async surface => {
   await render(surface, true); await settled(() => Boolean(item('src/before.ts')));
   const folder = item('src/')!; const selected = item('src/before.ts')!;
