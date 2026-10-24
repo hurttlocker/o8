@@ -51,8 +51,8 @@ describe('buildOrchestratorSystemPrompt packaged template loading', () => {
 
     const prompt = await buildFromUnavailableSource(packagedRoot);
 
-    expect(prompt).toContain('## ORCHESTRATOR PROTOCOL');
-    expect(prompt).toContain('Clarify-first — interview before dispatch');
+    expect(prompt).toContain('## Orchestrator protocol');
+    expect(prompt).toContain('Clarify-first: interview before dispatch');
     expect(prompt).not.toContain('The markdown prompt file could not be loaded.');
   });
 
@@ -63,6 +63,6 @@ describe('buildOrchestratorSystemPrompt packaged template loading', () => {
     const prompt = await buildFromUnavailableSource(packagedRoot);
 
     expect(prompt).toContain('The markdown prompt file could not be loaded.');
-    expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+    expect(prompt).not.toContain('## Orchestrator protocol');
   });
 });

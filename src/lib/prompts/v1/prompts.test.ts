@@ -76,7 +76,7 @@ describe('programmatic prompt catalog v1', () => {
     expect(review).toContain('`INVARIANT: <one sentence, or NONE>`');
     expect(review).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');
     expect(review).toContain('or any COMPLETENESS site is uncovered');
-    expect(review).toContain('list EVERY uncovered `SITE:` line in the request-changes findings');
+    expect(review).toContain('list every uncovered `SITE:` line in the request-changes findings');
     expect(review).not.toContain('## Pre-edit task contract');
     expect(review).not.toContain('MINIMALITY:');
   });
@@ -128,7 +128,7 @@ describe('programmatic prompt catalog v1', () => {
       expect(prompt).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');
     }
     expect(review).toContain('or any COMPLETENESS site is uncovered');
-    expect(review).toContain('list EVERY uncovered `SITE:` line in the request-changes findings');
+    expect(review).toContain('list every uncovered `SITE:` line in the request-changes findings');
     expect(blind).toContain('every COMPLETENESS site is covered');
     expect(review).toContain('include contractCoverageEvidence');
     expect(review).toContain('reviewedHeadSha must equal contractCoverageEvidence.headSha');
@@ -146,7 +146,7 @@ describe('programmatic prompt catalog v1', () => {
     });
 
     expect(review).toContain('Structured contract: missing');
-    expect(review).toContain('You may NOT approve if the pre-edit task contract is missing');
+    expect(review).toContain('You may not approve if the pre-edit task contract is missing');
   });
 
   it('keeps the native Symon template versioned and time-parameterized', () => {

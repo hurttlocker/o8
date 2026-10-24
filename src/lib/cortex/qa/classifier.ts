@@ -117,8 +117,8 @@ export function resetClassifierCache(): void {
   classifierCache.clear();
 }
 
-const CLASSIFIER_PROMPT = `Classify the engineering question. Return ONLY a single JSON object — no prose, no markdown fences, no \`\`\` blocks, no commentary before or after.
-The very first character of your response MUST be \`{\` and the last MUST be \`}\`.
+const CLASSIFIER_PROMPT = `Classify the engineering question. Return only a single JSON object — no prose, no markdown fences, no \`\`\` blocks, no commentary before or after.
+The very first character of your response must be \`{\` and the last must be \`}\`.
 Output exactly: { "class": "A" | "B", "bm25_variants": ["v1","v2","v3"] }
 Class A = lookup ("who/when/where/what"), 1-2 fact answer, deterministic
 Class B = reasoning ("why/how/explain"), multi-fact composition required

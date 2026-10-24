@@ -1,0 +1,42 @@
+[
+  {
+    "file": "src/lib/prompts/v1/fact-extraction.ts",
+    "tokensSha256": "8c5adec242b73698e1a347e7076fbf6b32143e1a0d2fd7d2f7ccdd43bb6706fe"
+  },
+  {
+    "file": "src/lib/prompts/v1/cortex-compose.ts",
+    "tokensSha256": "3220aeb509224d7863ff0bdc41d043f93325d8e2e14d764222af72a46b84d442"
+  },
+  {
+    "file": "src/lib/cortex/qa/classifier.ts",
+    "tokensSha256": "61cb9b80a515b3fd66a78b652966080187f5245b587af8c5a6a94cb6066751bc"
+  },
+  {
+    "file": "src/lib/orchestrator/huddle-access.ts",
+    "tokensSha256": "261f65c57b05704a03ea2891897256e7c9a6fced4877e5dc9e4791eb39bde0a5"
+  },
+  {
+    "file": "src/lib/lane/orchestrator-backends/openclaw.ts",
+    "tokensSha256": "4fd0b5fc554eb315f52c56a4e334e12d19e73875962647ecd97b49d297f1dd24"
+  },
+  {
+    "file": "src/lib/dictation/polish-prompt.ts",
+    "tokensSha256": "5f304bfe95ff9088628fbac5427a7d0b02bcf5fa8939615bc8e26b16a3eae819"
+  },
+  {
+    "file": "src/lib/voice/realtime-session-config.ts",
+    "tokensSha256": "d60d254f5e9ee2545a2e8f1bbf42973e782e54812776cf1185ef45533b13bfdb"
+  },
+  {
+    "file": "src/lib/prompts/v1/approval-adjudication.mjs",
+    "tokensSha256": "14d9b281b23ea1de438e24f10d96270be0a01179bc40a2db8ccc62f16750f075"
+  },
+  {
+    "file": "src/lib/mcp/operator-handlers/quality-search-input.ts",
+    "tokensSha256": "2dc37e60d21f78b5238423dd4d1e0f4717dd18f281b936e0e3a291ca545cc977"
+  },
+  {
+    "file": "src/lib/prompts/v1/symon-native-system.txt",
+    "tokensSha256": "09bcd31675a408097f0c1c1331c4bcb89cbb8b38ab21b5b023f2a112f2b1e7b1"
+  }
+]

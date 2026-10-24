@@ -863,6 +863,12 @@
       ]
     },
     {
+      "path": "src/lib/prompts/prompt-audit.test.ts",
+      "reasons": [
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/providers/embedded-child-policy.test.ts",
       "reasons": [
         "child-process",
@@ -4685,6 +4691,13 @@
     {
       "path": "tests/projects-switcher-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/prompt-inventory-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },

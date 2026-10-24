@@ -33,7 +33,7 @@ export function resolvePacketHuddleEnabled(packet: HuddleAccessInput): boolean {
 export const HUDDLE_PROMPT_SECTION = [
   'Huddle mode (this packet): align with the orchestrator BEFORE you edit anything.',
   'First read the repo + this packet. If you have the Engineering Brain (`o8 ask`), consult it for relevant conventions, directives, or past fixes and fold that into your thinking — org memory is part of the huddle.',
-  'Then post ONE report — `o8 packet report --event huddle --message "<your implementation plan, and flag any real ambiguity, a materially better approach, or a blocker that would waste this turn>"` — and STOP.',
-  'The orchestrator will respond to align (confirm, refine, or accept your alternative). Implement ONLY after that response — and do this huddle exactly once, at the start, never again mid-task.',
+  'Then post one report — `o8 packet report --event huddle --message "<your implementation plan, and flag any real ambiguity, a materially better approach, or a blocker that would waste this turn>"` — and STOP.',
+  'The orchestrator will respond to align (confirm, refine, or accept your alternative). Implement only after that response — and do this huddle exactly once, at the start, never again mid-task.',
   'If you have no real concern, still post your one-line plan so the orchestrator can confirm and you proceed.',
 ].join(' ');

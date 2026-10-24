@@ -141,12 +141,12 @@ export function buildPacketSelfReviewInstructions(baseBranch = 'main'): string[]
   return [
     'Self-review gate before completion:',
     `1. Before reporting completion, review your own diff against the original task by running \`git diff ${baseBranch}...HEAD\`.`,
-    '2. Evaluate the actual patch against the original desired outcome, not just filenames. Distinguish the implementation evidence you observed from the user-facing outcome that still requires independent review. If you find issues that would BREAK the task (typecheck failure, runtime crash, scope creep, security risk), fix them and rerun the diff. Cap fix attempts at TWO per issue — if a fix attempt does not resolve the finding, accept the current state, record the residual, set `decision: "partial"`, and commit. Do NOT loop indefinitely.',
-    '3. Lint warnings (especially `react-hooks/exhaustive-deps` and other style-only rules) are ADVISORY, not blocking. Do not gate self-review on a clean lint pass — note any warnings in the issuesFound array and finalize the packet.',
+    '2. Compare the patch with the desired outcome and distinguish observed implementation evidence from the user-facing outcome awaiting independent review. Fix typecheck failures, crashes, scope creep, and security risks, then review the diff again. Allow at most two fix attempts per issue; if unresolved, record the residual, set `decision: "partial"`, and commit the current state. Do not loop indefinitely.',
+    '3. Style-only lint warnings are advisory. Record them in issuesFound and finalize; warnings that reveal real breakage still need a fix.',
     '4. When your fix establishes or restores an invariant, name it and enumerate every production path with that property in the packet notes. Cover each path or record it under `residual`; do not commit a one-site patch of a many-site invariant as `implementation_ready`.',
     `5. End your final response with a machine-readable block in this exact format: ${PACKET_SELF_REVIEW_TAG_START} {"passed":true,"confidence":"high|medium|low","summary":"one sentence","issuesFound":["issue you found and fixed"],"outcome":"observable result the implementation supports","evidence":["command, artifact, or real-path observation"],"residual":"remaining uncertainty or none","decision":"implementation_ready|partial|blocked","recurrenceProtection":"test, invariant, validation, automation, durable learning, or none"} ${PACKET_SELF_REVIEW_TAG_END}`,
     '6. Use `decision: "implementation_ready"` and `passed: true` only when the scoped implementation and its verification are ready for independent review. This does not declare the user-facing outcome closed. Use `decision: "partial"` or `"blocked"` with `passed: false` whenever notable work or authority remains.',
-    '7. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk OR an unfixable lint warning OR an exhausted retry; use `low` when notable uncertainty remains.',
+    '7. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk, an unfixable lint warning, or an exhausted retry; use `low` when notable uncertainty remains.',
     '8. Do not report completion without the self-review block.',
   ];
 }
@@ -159,4 +159,17 @@ export function buildReadOnlyPacketSelfReviewInstructions(): string[] {
     '3. Use `decision: "finding_ready"` with `passed: true` only when the outcome, at least one concrete evidence item, and the residual uncertainty are stated. Use `partial` or `blocked` with `passed: false` otherwise.',
     '4. This receipt records a reviewable finding. It does not permit edits, commits, mutations, or unsupported claims.',
   ];
+}
+
+/** Shared by direct delegation and scheduled packet dispatch. */
+export function buildPacketCompletionInstructions(readOnly: boolean, baseBranch = 'main'): string[] {
+  return readOnly
+    ? [
+        'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.',
+        ...buildReadOnlyPacketSelfReviewInstructions(),
+      ]
+    : [
+        ...buildPacketSelfReviewInstructions(baseBranch),
+        'Before reporting completion, commit every file you created or changed for this task, including new untracked files, with a descriptive message (check `git status` before committing). Do not commit generated artifacts or files outside the task. Uncommitted changes can be lost during worktree cleanup.',
+      ];
 }

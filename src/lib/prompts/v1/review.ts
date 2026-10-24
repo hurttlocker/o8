@@ -58,10 +58,10 @@ export function buildBlindSecondPassPromptV1(input: BlindSecondPassPromptInputV1
       ? `You may agree only if ${taskContractMissing ? 'the required structured task contract exists, ' : ''}every guard is live, every write is partitioned correctly, every requirement is covered, the minimality trace clears, every COMPLETENESS site is covered, and the execution path reaches the changed code.`
       : 'You may agree only if every guard is live, every write is partitioned correctly, every sub-requirement is covered, every COMPLETENESS site is covered, and the execution path reaches the changed code.',
     '',
-    'Do NOT call submit_review. Do NOT call lane_command. Do not stamp or merge anything yourself.',
-    'End your output with EXACTLY one final line:',
+    'Do not call submit_review. Do not call lane_command. Do not stamp or merge anything yourself.',
+    'End your output with exactly one final line:',
     'SECOND_PASS_VERDICT: agree',
-    'OR',
+    'or',
     'SECOND_PASS_VERDICT: disagree - <file:line> <reason>',
   ].filter((value): value is string => value !== null).join('\n');
 }
@@ -103,7 +103,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
   const depthGuidance = input.depth === 'deep-dive'
     ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
     : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
-  // #1490 — surface the worker's self-reported departures to the reviewer.
+  // #1490; surface the worker's self-reported departures to the reviewer.
   const deviationsSection = input.deviationsEntries.length > 0
     ? [
         '## Worker deviations from brief',
@@ -131,14 +131,14 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     '',
     'SCOPE traces - required for every changed file that writes or mutates state:',
     '`SCOPE: <file:line> partition=<repo|tenant|user|project|lane|packet|scope|slug|id|NONE>`',
-    'Then state the SINGLE intended destination and confirm the diff writes there and ONLY there. Flag output written to the wrong location or duplicated across locations.',
+    'Then state the single intended destination and confirm the diff writes there and only there. Flag output written to the wrong location or duplicated across locations.',
     '',
     'GUARD traces - required for every new guard, condition, or early return:',
     '`GUARD: <file:line> fires-from=<file:line|INERT>`',
     '',
     contractArmed
-      ? 'COVERAGE checklist - enumerate EACH requirement ID from the pre-edit task contract:'
-      : 'COVERAGE checklist - enumerate EACH sub-requirement from the packet scope:',
+      ? 'COVERAGE checklist - enumerate each requirement ID from the pre-edit task contract:'
+      : 'COVERAGE checklist - enumerate each sub-requirement from the packet scope:',
     '`COVERAGE:`',
     contractArmed
       ? '`[x] <ID> <sub-requirement> - evidence <file:line|command output>`'
@@ -162,14 +162,14 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     '`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`',
     '',
     contractArmed
-      ? `Hard approval rule: You may NOT approve if ${taskContractMissing ? 'the pre-edit task contract is missing, ' : ''}any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, the diff contains an unjustified non-minimal change unit, or any COMPLETENESS site is uncovered. Request changes instead.`
-      : 'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or any COMPLETENESS site is uncovered. Request changes instead.',
-    'When any COMPLETENESS site is uncovered, list EVERY uncovered `SITE:` line in the request-changes findings so the next worker round receives the full set.',
+      ? `Hard approval rule: You may not approve if ${taskContractMissing ? 'the pre-edit task contract is missing, ' : ''}any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, the diff contains an unjustified non-minimal change unit, or any COMPLETENESS site is uncovered. Request changes instead.`
+      : 'Hard approval rule: You may not approve if any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or any COMPLETENESS site is uncovered. Request changes instead.',
+    'When any COMPLETENESS site is uncovered, list every uncovered `SITE:` line in the request-changes findings so the next worker round receives the full set.',
     contractArmed
       ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per file-backed requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched. For every process constraint include a separate processEntries item `{ constraintId, source: "transcript"|"lane-event"|"command", reference }` citing a concrete turn, event, or command observation. If process evidence is unavailable, record a Reviewer limitation: and omit that process entry; the operator must supply its citation before merge. reviewedHeadSha must equal contractCoverageEvidence.headSha.'
       : null,
     'To clear an intentional global write, cite the file:line that proves the global destination is correct.',
-    'Where the change has observable output (a file written, a command stdout, a function return), PREFER to run it in the worktree and inspect the ACTUAL output over reasoning about the diff.',
+    'Where the change has observable output (a file written, a command stdout, a function return), prefer to run it in the worktree and inspect the actual output over reasoning about the diff.',
   ].filter((value): value is string => value !== null).join('\n');
 
   return [
@@ -177,9 +177,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     '',
     depthGuidance,
     '',
-    'Review the changes and provide your verdict. Your review summary will be shown',
-    'to the operator on their approval card — they don\'t read code, so your summary',
-    'IS their understanding of what happened.',
+    'Review the diff independently. Summarize the change and its evidence for the operator approval card.',
     '',
     input.mergeGateSection,
     input.mergeGateSection ? '' : null,
@@ -205,16 +203,13 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     '',
     input.adversarialReviewProtocol || null,
     input.adversarialReviewProtocol ? '' : null,
-    '## Your review should include:',
-    '1. What was changed (1-2 sentences)',
-    '2. The Required verification traces above, completed before the verdict',
-    '3. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the one its name implies.',
-    input.mergeGateSection ? '4. Address each merge gate violation — these are enforcement-level findings' : null,
-    input.mechanicalChecksSummary ? `${input.mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
-    `${input.mergeGateSection && input.mechanicalChecksSummary ? '6' : input.mergeGateSection || input.mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
+    'Report a 1-2 sentence change summary, the completed Required verification traces, and your recommendation: approve or request changes.',
+    'EXECUTION-PATH TRACE: trace the actual call path the change runs under, not the one its name implies.',
+    input.mergeGateSection ? 'Address each merge gate violation as an enforcement-level finding.' : null,
+    input.mechanicalChecksSummary ? 'Confirm or dismiss each mechanical check finding with evidence.' : null,
     '',
     input.lane.packetId
-      ? `After reviewing, FIRST record your verdict by calling submit_review with packetId "${input.lane.packetId}", findings, and reviewedHeadSha from \`git rev-parse HEAD\`.`
+      ? `After reviewing, record your verdict by calling submit_review with packetId "${input.lane.packetId}", findings, and reviewedHeadSha from \`git rev-parse HEAD\`.`
       : 'This lane has no packet ID. Report the verdict and an Operator follow-up: to bind the lane to a packet before recording or merging it.',
     input.lane.packetId
       ? 'Set approved=true only if all required traces clear; otherwise set approved=false with findings. Never attempt a merge after a rejected or unrecorded verdict.'

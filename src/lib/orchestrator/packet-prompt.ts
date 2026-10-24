@@ -19,8 +19,7 @@ import {
 import { buildQualitySearchRolePrompt } from '@/lib/orchestrator/quality-search';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
 import {
-  buildPacketSelfReviewInstructions,
-  buildReadOnlyPacketSelfReviewInstructions,
+  buildPacketCompletionInstructions,
 } from '@/lib/orchestrator/self-review';
 import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
 import {
@@ -400,9 +399,6 @@ export async function buildPacketPrompt(
       ]
     : [];
   const readOnlyPacket = packet.launchContext?.workMode === 'read-only';
-  const readOnlySection = readOnlyPacket
-    ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
-    : null;
   const projectVerificationSection = readOnlyPacket ? null : await buildProjectVerificationPrompt(
     worktreePath ?? packet.lane?.worktreePath,
     packet.workspaceTargetPath,
@@ -419,7 +415,7 @@ export async function buildPacketPrompt(
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
   const captureProofSection = !readOnlyPacket && packetLooksUiShaped(packet)
-    ? 'Visual proof (UI changes): if you run this app\'s UI to verify a visual fix — only when the task legitimately serves its own app, e.g. you started it via `o8 run --detach`, and NEVER by spinning up o8\'s own dev servers per the sandbox note above — capture the broken state first then the fixed state: `o8 packet capture --url <localhost-url> --before --label "<what>" --wait-for "<selector>"`, make the fix, then the same command with `--after` and the SAME --label. FRAME THE CHANGE so the preview IS the change: pass `--clip "<sel>"` for a localized change (a footer/button/card — screenshots just that element, tight) — this is the preferred default; use `--full-page` only for whole-page/layout changes. Add `--hover "<sel>"` / `--click "<sel>"` if the change is an interaction state (:hover/:focus/open menu) a static shot can\'t show. They pair into a Bug/Fixed strip the operator sees on the packet, in review, and in chat. Skip entirely for pure-logic/backend changes.'
+    ? 'Visual proof (UI changes): only when the task legitimately serves its own app, capture the broken state with `o8 packet capture --url <localhost-url> --before --label "<what>" --wait-for "<selector>"`, then capture the fix with `--after` and the same --label. The pair appears in packet review and chat. Prefer `--clip "<sel>"` for a localized change; use `--full-page` for whole-page layouts. Add `--hover "<sel>"` or `--click "<sel>"` for interaction states. Follow the sandbox restrictions above; never start o8 dev servers for this. Skip pure-logic/backend changes.'
     : null;
   // #743 — Cortex context block. Pull directives + recent outcomes +
   // symbol-graph for this repo and prepend a `<context>` envelope so the
@@ -490,7 +486,6 @@ export async function buildPacketPrompt(
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
-    readOnlySection,
     outcomeOwnershipSection,
     alignmentSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
@@ -518,10 +513,7 @@ export async function buildPacketPrompt(
     brainSection,
     learnedRuleSection,
     projectVerificationSection,
-    ...(readOnlyPacket
-      ? buildReadOnlyPacketSelfReviewInstructions()
-      : buildPacketSelfReviewInstructions(baseBranch)),
-    readOnlyPacket ? null : 'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
+    ...buildPacketCompletionInstructions(readOnlyPacket, baseBranch),
     readOnlyPacket ? null : 'If the task requires a path outside the packet allowlist, request a bounded audited expansion with `o8 packet expand-scope --paths <path[,path]> --reason "<why the task requires it>"` before editing that path.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');

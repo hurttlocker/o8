@@ -439,7 +439,7 @@ export const RENDER_SURFACE_TOOL: Record<string, unknown> = {
         type: 'string',
         description:
           'A raw openui-lang program. First line is the root Surface; each named child is its own ' +
-          'statement referenced from a parent’s children array. Use ONLY facts already in the conversation.',
+          'statement referenced from a parent’s children array. Use only facts already in the conversation.',
       },
     },
     required: ['program'],

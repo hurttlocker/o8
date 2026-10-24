@@ -106,7 +106,7 @@ describe('cross-backend cold-start handoff', () => {
       workspace: 'full',
       governance: 'omitted',
     });
-    expect(prepared.prelude).toContain('COLD cross-backend continuation');
+    expect(prepared.prelude).toContain('cold cross-backend continuation');
     expect(prepared.prelude).toContain('Omitted layers: intent, governance');
     expect(prepared.prelude).not.toContain('<tool_use');
     expect(prepared.prelude).toContain('\\u003ctool_use');

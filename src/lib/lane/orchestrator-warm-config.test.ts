@@ -229,7 +229,7 @@ describe('warm orchestrator MCP config reuse', () => {
     expect(systemPrompt).toContain('cortex_list_issues');
     expect(systemPrompt).not.toContain('cortex_launch_agent');
     expect(systemPrompt).not.toContain('create_mission');
-    expect(systemPrompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+    expect(systemPrompt).not.toContain('## Orchestrator protocol');
 
     proc.stdout.emit('data', Buffer.from('{"type":"result","session_id":"solo-prompt-session"}\n'));
     await turn;

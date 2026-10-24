@@ -7,7 +7,7 @@ describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silen
   const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });
 
   it('renders the clarify-first doctrine section with the ambiguity trigger', () => {
-    expect(prompt).toContain('Clarify-first — interview before dispatch');
+    expect(prompt).toContain('Clarify-first: interview before dispatch');
     expect(prompt).toMatch(/materially ambiguous/i);
     // The old composer-injected directive block is gone — the trigger is
     // doctrine + first-run note only, never a transcript-visible block.

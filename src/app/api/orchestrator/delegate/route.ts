@@ -30,8 +30,7 @@ import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { authorizeFastDelegation } from '@/lib/orchestrator/fast-delegation-auth';
 import {
-  buildPacketSelfReviewInstructions,
-  buildReadOnlyPacketSelfReviewInstructions,
+  buildPacketCompletionInstructions,
 } from '@/lib/orchestrator/self-review';
 
 export const runtime = 'nodejs';
@@ -249,15 +248,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       launchContext,
     };
 
-    const completionContract = readOnly
-      ? [
-          'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.',
-          ...buildReadOnlyPacketSelfReviewInstructions(),
-        ]
-      : [
-          ...buildPacketSelfReviewInstructions(baseBranch),
-          'CRITICAL: Before reporting completion, commit all changes with a descriptive message. Uncommitted changes will be lost when the isolated worktree is cleaned up.',
-        ];
+    const completionContract = buildPacketCompletionInstructions(readOnly, baseBranch);
     const governedLaunchPrompt = [launchPrompt, ...(reviewSource ? [`Review PR #${reviewSource.pullRequest} at exact HEAD ${reviewSource.headSha}. Its source is already checked out; do not fetch or switch branches.`] : []), ...completionContract].join('\n\n');
 
     // Append the packet by MUTATING the state object passed into the
