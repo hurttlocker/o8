@@ -344,8 +344,10 @@ function WorkspaceChatComposerBase({
             value={chat.draft}
             onChange={(event) => {
               chat.setDraft(event.currentTarget.value);
-              event.currentTarget.style.height = 'auto';
-              event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 200)}px`;
+              if (typeof CSS === 'undefined' || !CSS.supports('field-sizing', 'content')) {
+                event.currentTarget.style.height = 'auto';
+                event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 200)}px`;
+              }
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -360,6 +362,7 @@ function WorkspaceChatComposerBase({
             readOnly={isLaneArchived}
             style={{
               width: '100%',
+              fieldSizing: 'content',
               minHeight: 52,
               maxHeight: 200,
               paddingTop: 11,

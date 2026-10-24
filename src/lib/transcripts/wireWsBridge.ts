@@ -31,10 +31,10 @@ function handleHistoryUpdate(
       messages: typed,
       status: 'fresh',
       lastUpdated: Date.now(),
-    });
+    }, { deferNotifications: true });
     return;
   }
-  transcriptStore.mergeEntries(sessionKey, typed, merge ? { merge } : undefined);
+  transcriptStore.mergeEntries(sessionKey, typed, { merge, deferNotifications: true });
 }
 
 export function buildTranscriptWsCallbacks(

@@ -17,6 +17,7 @@ import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
 import { MessageVisualizations } from '@/components/desktop/visualizations/MessageVisualizations';
 import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
+import type { VisualizationReference } from '@/lib/visualizations/types';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 
@@ -167,31 +168,34 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
       }
 
       return (
-        <div
+        <WorkspaceTranscriptMessage
           key={item.key}
-          data-o8-message-id={item.entry.id}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            width: '100%',
-            marginTop: index > 0 && block.entry.role === 'user' ? 8 : 0,
-          }}
-        >
-          <WorkerProse
-            entry={block.entry}
-            repoPath={repoPath}
-            onRunInTerminal={onRunInTerminal}
-          />
-          <MessageVisualizations references={byEntry.get(item.entry.id)} />
-          <WorkspaceTranscriptEventExtras
-            entry={item.entry}
-            onPermissionDecision={onPermissionDecision}
-          />
-        </div>
+          entry={item.entry}
+          prose={block.entry}
+          references={byEntry.get(item.entry.id)}
+          marginTop={index > 0 && block.entry.role === 'user' ? 8 : 0}
+          repoPath={repoPath}
+          onRunInTerminal={onRunInTerminal}
+          onPermissionDecision={onPermissionDecision}
+        />
       );
     })}
     {handback && markLast && !isStreaming ? <WorkerHandback data={handback} repoPath={repoPath} onReview={onOpenReview} />
       : <PacketWorkerHandback laneId={laneId ?? packetId} repoPath={repoPath} finished={markLast && !isStreaming} revision={entries.at(-1)?.id ?? ''} onReview={onOpenReview} />}
+  </div>;
+});
+
+const WorkspaceTranscriptMessage = memo(function WorkspaceTranscriptMessage({
+  entry, prose, references, marginTop, repoPath, onRunInTerminal, onPermissionDecision,
+}: Pick<WorkspaceTranscriptProps, 'repoPath' | 'onRunInTerminal' | 'onPermissionDecision'> & {
+  entry: MobileTranscriptEntry;
+  prose: MobileTranscriptEntry;
+  references?: VisualizationReference[];
+  marginTop: number;
+}) {
+  return <div data-o8-message-id={entry.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', width: '100%', marginTop }}>
+    <WorkerProse entry={prose} repoPath={repoPath} onRunInTerminal={onRunInTerminal} />
+    <MessageVisualizations references={references} />
+    <WorkspaceTranscriptEventExtras entry={entry} onPermissionDecision={onPermissionDecision} />
   </div>;
 });

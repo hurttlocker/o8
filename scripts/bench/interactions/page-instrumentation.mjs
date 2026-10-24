@@ -182,7 +182,7 @@ export async function observeComposerKeystroke(selector) {
       if (target.value !== before) {
         // rAF runs before paint, so the following frame is the first that can
         // observe the painted result.
-        requestAnimationFrame(() => requestAnimationFrame(() => finish(performance.now(), null)));
+        requestAnimationFrame(() => finish(performance.now(), null));
         return;
       }
       if (performance.now() > deadline) { finish(null, 'composer value never changed within 5000ms'); return; }

@@ -31,6 +31,18 @@ export interface ActivityBlock {
 }
 export type WorkerTranscriptBlock = ActivityBlock | { kind: 'message'; id: string; entry: MobileTranscriptEntry };
 
+const proseEntries = new WeakMap<MobileTranscriptEntry, MobileTranscriptEntry>();
+
+function proseEntry(entry: MobileTranscriptEntry): MobileTranscriptEntry {
+  if (!entry.toolCalls) return entry;
+  let prose = proseEntries.get(entry);
+  if (!prose) {
+    prose = { ...entry, toolCalls: undefined };
+    proseEntries.set(entry, prose);
+  }
+  return prose;
+}
+
 /** Display-only shell parsing. Never execute or interpolate the command. */
 export function stripShellWrapper(raw: string | string[]): string {
   let command = Array.isArray(raw) ? raw.join(' ') : raw.trim();
@@ -157,7 +169,7 @@ export function workerTranscriptBlocks(entries: MobileTranscriptEntry[], busy: b
     }
     if (entry.role !== 'tool' && (entry.text.trim() || entry.media?.length || entry.claudeCodeEvents?.length)) {
       flush();
-      blocks.push({ kind: 'message', id: entry.id, entry: { ...entry, toolCalls: undefined } });
+      blocks.push({ kind: 'message', id: entry.id, entry: proseEntry(entry) });
     }
   }
   flush();

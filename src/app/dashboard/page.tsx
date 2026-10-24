@@ -4333,6 +4333,13 @@ function DashboardInner() {
       <ReportIssueHost />
       <TelemetryCrashCapture />
       <SentryBrowserInit />
+      {!inTauri ? <div aria-hidden="true" style={{
+        position: 'fixed', top: 0, left: 0, right: 0,
+        height: 'calc(100vh / var(--ui-zoom, 1))',
+        pointerEvents: 'none',
+        backdropFilter: 'blur(18px) saturate(1.02)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
+      }} /> : null}
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       // Divided by --ui-zoom: WebKit CSS zoom scales output but vh keeps
       // computing against the unscaled window, so a plain 100vh shell shrinks
@@ -4347,8 +4354,7 @@ function DashboardInner() {
         ['--o8-shell-header-bg' as string]: 'transparent',
         ['--o8-shell-header-border' as string]: 'none',
       } : {}),
-      backdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
-      WebkitBackdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
+      isolation: inTauri ? undefined : 'isolate',
       color: 'var(--t-text)',
       fontFamily: 'var(--font-sans-system)',
       overflow: 'hidden',

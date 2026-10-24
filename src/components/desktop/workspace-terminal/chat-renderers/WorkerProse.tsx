@@ -1,12 +1,13 @@
 'use client';
 
+import { memo } from 'react';
 import { WorkerEventTime } from './WorkerEventTime';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { renderLLMMarkdown } from '@/components/desktop/LLMMarkdown';
 import { DesktopAgentMessage } from '@/components/desktop/DesktopAgentMessage';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 
-export function WorkerProse({ entry, repoPath, onRunInTerminal }: {
+export const WorkerProse = memo(function WorkerProse({ entry, repoPath, onRunInTerminal }: {
   entry: MobileTranscriptEntry;
   repoPath?: string | null;
   onRunInTerminal?: (command: string) => void;
@@ -29,4 +30,4 @@ export function WorkerProse({ entry, repoPath, onRunInTerminal }: {
       {renderLLMMarkdown(sanitizeTranscriptText(entry.text), { compact: true, onRunInTerminal })}
     </div>
   </div>;
-}
+});

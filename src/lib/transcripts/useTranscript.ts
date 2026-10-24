@@ -52,7 +52,7 @@ export function useTranscript(
     return transcriptStore.subscribe(sessionKey, listener);
   }, [sessionKey]);
   const getSnapshot = useCallback(
-    () => transcriptStore.getSlice(sessionKey),
+    () => transcriptStore.getPresentedSlice(sessionKey),
     [sessionKey],
   );
 
