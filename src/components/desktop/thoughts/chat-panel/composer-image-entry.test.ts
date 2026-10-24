@@ -112,6 +112,10 @@ function addComposer() {
 function render() { act(() => root.render(createElement(Harness))); }
 
 beforeEach(() => {
+  // Freeze the wall clock before mounting or creating receipts. Keep timers,
+  // microtasks and animation frames real so React and browser work still settle.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   active = true; disabled = false; context = 'first-chat'; failed = false; noUpload = false; deferred = false; readers = [];
   decodeDeferred = false; decodeFailed = false; decoders = [];
@@ -127,7 +131,7 @@ beforeEach(() => {
   vi.spyOn(client, 'evalJs').mockImplementation(async code => ({ result: new Function('window', `return ${code}`)(window) as string }));
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); render();
 });
-afterEach(() => { act(() => { secondRoot?.unmount(); root.unmount(); }); secondHost?.remove(); secondRoot = undefined; secondHost = undefined; host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); });
+afterEach(() => { act(() => { secondRoot?.unmount(); root.unmount(); }); secondHost?.remove(); secondRoot = undefined; secondHost = undefined; host.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); });
 
 describe('registered image tool -> normal installed composer handler', () => {
   it('acknowledges committed attachment state, correlates status, never sends or replays', async () => {
@@ -207,8 +211,11 @@ describe('registered image tool -> normal installed composer handler', () => {
   });
   it('expires a pending upload and blocks late reader completion', async () => {
     deferred = true;
+    const startedAt = Date.now();
     const pending = await attach();
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 20_001);
+    vi.setSystemTime(startedAt + 19_999);
+    expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).status).toBe('pending');
+    vi.setSystemTime(startedAt + 20_000);
     expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).code).toBe('upload_expired');
     await act(async () => readers[0].onload?.()); await frames();
     expect(host.querySelectorAll('img')).toHaveLength(0);
@@ -241,10 +248,15 @@ describe('registered image tool -> normal installed composer handler', () => {
   });
   it.each(['changed', 'expired'])('guards a %s target throughout asynchronous decoding', async (condition) => {
     decodeDeferred = true;
+    const startedAt = Date.now();
     const pending = await attach();
     expect(readers).toHaveLength(0);
     if (condition === 'changed') { context = 'changed-while-decoding'; render(); }
-    else vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 20_001);
+    else {
+      vi.setSystemTime(startedAt + 19_999);
+      expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).status).toBe('pending');
+      vi.setSystemTime(startedAt + 20_000);
+    }
     await act(async () => decoders[0].resolve()); await frames();
     expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).code).toBe(condition === 'changed' ? 'target_changed' : 'upload_expired');
     expect(readers).toHaveLength(0); expect(host.querySelectorAll('img')).toHaveLength(0);
@@ -368,8 +380,11 @@ describe('registered image tool -> normal installed composer handler', () => {
   });
   it('expires a background decode and does not replay or upload a late result', async () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); decodeDeferred = true;
+    const startedAt = Date.now();
     const pending = await attach({ allow_background: true });
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 20_001);
+    vi.setSystemTime(startedAt + 19_999);
+    expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).status).toBe('pending');
+    vi.setSystemTime(startedAt + 20_000);
     expect(await call('o8_view_image_attachment_status', { request_id: pending.request_id })).toMatchObject({ code: 'upload_expired', allow_background: true });
     await act(async () => decoders[0].resolve()); await frames();
     expect(readers).toHaveLength(0); expect(decoders).toHaveLength(1);
@@ -412,7 +427,7 @@ describe('registered image tool -> normal installed composer handler', () => {
   });
   it('bounds receipts and reclaims expired terminal records without disposing the active composer', async () => {
     let now = Date.now() + 700_000;
-    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.setSystemTime(now);
     const original = await call('o8_view_inspect_composer');
     failed = true;
     let terminal: Record<string, unknown> = {};
@@ -422,17 +437,17 @@ describe('registered image tool -> normal installed composer handler', () => {
       expect((await call('o8_view_image_attachment_status', { request_id: terminal.request_id })).code).toBe('upload_failed');
     }
     expect((await attach()).code).toBe('receipt_capacity');
-    now += 700_000;
+    now += 700_000; vi.setSystemTime(now);
     expect((await call('o8_view_image_attachment_status', { request_id: terminal.request_id })).code).toBe('unknown_request');
     expect((await call('o8_view_inspect_composer')).composer_id).toBe(original.composer_id);
     failed = false; decodeDeferred = true;
     const pending = await attach();
-    now += 19_999;
+    now += 19_999; vi.setSystemTime(now);
     expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).status).toBe('pending');
     expect((await attach()).code).toBe('upload_pending');
     await act(async () => decoders.at(-1)!.resolve()); await frames();
     expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).status).toBe('completed');
-    now += 600_001;
+    now += 600_001; vi.setSystemTime(now);
     expect((await call('o8_view_image_attachment_status', { request_id: pending.request_id })).code).toBe('unknown_request');
     expect((await call('o8_view_inspect_composer')).composer_id).toBe(original.composer_id);
     expect(sent).not.toHaveBeenCalled();
