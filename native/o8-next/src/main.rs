@@ -14,6 +14,8 @@ mod pane_grid;
 mod pane_layout;
 mod retained;
 mod rich;
+mod shell;
+mod shell_state;
 mod sidebar;
 mod stream;
 mod text;
@@ -33,6 +35,7 @@ fn run() -> Result<(), String> {
         println!(
             "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE | --composer-benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
         );
+        println!("{}", shell::HELP);
         println!(
             "Pane grid: --pane-grid 1|2|4|6 --workspace REPOSITORY_PATH --pane-layout ABSOLUTE_FILE"
         );
@@ -71,6 +74,9 @@ fn run() -> Result<(), String> {
             "{}",
             serde_json::to_string(&sidebar::tree(&sessions, Some(&args[2]))).unwrap()
         );
+        return Ok(());
+    }
+    if shell::try_launch(&args)? {
         return Ok(());
     }
     let grid = pane_layout::Options::extract(&mut args)?;

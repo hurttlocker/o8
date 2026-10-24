@@ -3979,6 +3979,16 @@
       ]
     },
     {
+      "path": "tests/o8-next-shell-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-serve-governed-loop-real-path.test.ts",
       "reasons": [
         "child-process",
