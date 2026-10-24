@@ -172,14 +172,18 @@ describe('ActivityFeed retained stream snapshots', () => {
     { name: 'later reset than HTTP-date', status: 403, seconds: 180, retry: 'date', retrySeconds: 60, reset: 180 },
     { name: 'later numeric retry than reset', status: 429, seconds: 180, retry: '180', reset: 60 },
     { name: 'short reset', status: 429, seconds: 30, reset: 30 },
-    { name: 'malformed headers fallback', status: 429, seconds: 300, retry: 'invalid', reset: NaN },
-    { name: 'expired headers fallback', status: 403, seconds: 300, retry: 'expired', reset: -60 },
-  ])('honors $name across lifecycle, fallback polling and refreshKey triggers', async ({ status, seconds, retry, retrySeconds, reset }) => {
+    { name: 'malformed headers fallback', status: 429, seconds: 60, retry: 'invalid', reset: NaN },
+    { name: 'exhausted quota with expired headers', status: 403, seconds: 60, retry: 'expired', reset: -60, remaining: '0' },
+    { name: 'capped numeric retry', status: 429, seconds: 86_400, retry: '172800' },
+    { name: 'capped HTTP-date retry', status: 403, seconds: 86_400, retry: 'date', retrySeconds: 172_800 },
+    { name: 'capped quota reset', status: 403, seconds: 86_400, reset: 172_800, remaining: '0' },
+  ])('honors $name across lifecycle, fallback polling and refreshKey triggers', async ({ status, seconds, retry, retrySeconds, reset, remaining }) => {
     await render(); const now = Date.now();
     const headers: Record<string, string> = {};
     if (retry) headers['retry-after'] = retry === 'date' ? new Date(now + (retrySeconds ?? seconds) * 1000).toUTCString()
       : retry === 'expired' ? new Date(now - 60_000).toUTCString() : retry;
     if (reset !== undefined) headers['x-ratelimit-reset'] = String(now / 1000 + reset);
+    if (remaining !== undefined) headers['x-ratelimit-remaining'] = remaining;
     reply = () => new Response(null, { status, headers });
     await refresh(); expectRows(repoA); expect(host.textContent).toContain('GitHub API paused');
     const before = reads().length;
@@ -192,6 +196,27 @@ describe('ActivityFeed retained stream snapshots', () => {
     await refresh(); expect(reads()).toHaveLength(before + 4); expectRows('deadline recovery');
     expect(host.textContent).not.toContain('GitHub API paused');
   });
+
+  it.each(['permission', 'reset without exhaustion', 'expired retry'] as const)(
+    'keeps a %s 403 retryable without a quota pause', async (kind) => {
+      await render();
+      const headers: Record<string, string> = kind === 'reset without exhaustion'
+        ? { 'x-ratelimit-reset': String(Date.now() / 1000 + 3600), 'x-ratelimit-remaining': '5' }
+        : kind === 'expired retry' ? { 'retry-after': new Date(Date.now() - 60_000).toUTCString() } : {};
+      reply = stream => stream === 'issues' ? new Response(null, { status: 403, headers })
+        : Response.json(payload(stream, 'fresh'));
+      await refresh();
+      expect(host.textContent).toContain(`${repoA} issue`);
+      for (const title of ['pull', 'check', 'commit']) expect(host.textContent).toContain(`fresh ${title}`);
+      expect(host.textContent).toContain('GitHub sync delayed');
+      expect(host.textContent).not.toContain('GitHub API paused');
+      const before = reads().length;
+      reply = stream => Response.json(payload(stream, 'permission recovery'));
+      await render(repoA, 1);
+      expect(reads()).toHaveLength(before + 4);
+      expectRows('permission recovery');
+    },
+  );
 
   it('hides the old scope while loading and ignores its late rate-limit response', async () => {
     await render();
