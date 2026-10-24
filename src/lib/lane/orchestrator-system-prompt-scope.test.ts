@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { CORTEX_READONLY_TOOLS } from '@/lib/mcp/cortex-readonly-tools';
+import { deferredMcpRequest } from '@/lib/mcp/deferred-tools';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { buildCodexOrchestratorPrompt } from './codex-orchestrator-session';
 import {
@@ -32,14 +33,16 @@ const OPERATOR_TOOLS = registeredToolNames(
     .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
     .map((name) => new URL(`operator-handlers/${name}`, MCP_DIR)),
 );
-const ALL_TOOLS = new Set([...CORTEX_TOOLS, ...OPERATOR_TOOLS]);
+const ALL_TOOLS = new Set([...CORTEX_TOOLS, ...OPERATOR_TOOLS,
+  ...registeredToolNames([new URL('deferred-tools.ts', MCP_DIR)]),
+]);
 
-/** Every registered tool the text names, plus any `cortex_*` name that is not registered at all. */
+/** Every registered tool the text names, including unregistered o8/Cortex names. */
 function namedTools(prompt: string): string[] {
   const named = new Set<string>();
   for (const match of prompt.matchAll(/\b([a-z0-9]+(?:_[a-z0-9]+)+)\b/g)) {
     const name = match[1]!;
-    if (ALL_TOOLS.has(name) || name.startsWith('cortex_')) named.add(name);
+    if (ALL_TOOLS.has(name) || name.startsWith('cortex_') || name.startsWith('o8_')) named.add(name);
   }
   return [...named].sort();
 }
@@ -50,7 +53,40 @@ function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
-const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi'];
+const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi', 'muse'];
+
+function renderedPrompts(backend: OrchestratorPromptBackend): string[] {
+  return [false, true].map(firstRunClarify => buildOrchestratorSystemPrompt('/tmp/example-repo', {
+    backend, firstRunClarify,
+  })).concat(backend === 'codex' ? [buildCodexOrchestratorPrompt('/tmp/example-repo', '')] : []);
+}
+
+async function deferredToolNames(): Promise<string[]> {
+  const result = await deferredMcpRequest({ id: 1, method: 'tools/list' }, () => [...ALL_TOOLS].map(name => ({
+    name, description: '', inputSchema: { type: 'object' },
+  })), true);
+  return (result.response!.result as { tools: Array<{ name: string }> }).tools.map(tool => tool.name);
+}
+
+describe('deferred core covers rendered orchestrator instructions', () => {
+  it.each(BACKENDS)('loads every tool named by the %s prompt without a search round trip', async backend => {
+    const loaded = new Set(await deferredToolNames());
+    for (const prompt of renderedPrompts(backend)) {
+      expect(namedTools(prompt).filter(name => !loaded.has(name))).toEqual([]);
+      expect(prompt).toContain('If o8_tool_search is listed, tools not in your list are reached with o8_tool_search, then o8_tool_call.');
+    }
+  });
+
+  it('defers everything except prompt-named tools, status, send and the discovery bridge', async () => {
+    const required = new Set(['o8_status', 'o8_send', 'o8_tool_search', 'o8_tool_call']);
+    for (const backend of BACKENDS) {
+      for (const prompt of renderedPrompts(backend)) {
+        for (const name of namedTools(prompt)) required.add(name);
+      }
+    }
+    expect((await deferredToolNames()).sort()).toEqual([...required].sort());
+  });
+});
 
 describe('orchestrator prompt tool scope (#2898)', () => {
   it.each(BACKENDS)('teaches explicit and natural visualization requests to %s without dispatch authority', backend => {

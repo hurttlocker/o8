@@ -8,8 +8,27 @@ original handler. Original results, errors and images pass through unchanged.
 This portable bridge uses ordinary MCP calls; it needs no provider-specific
 tool-search extension or changing `tools/list` notifications.
 
-The operator core contains `o8_status` and `o8_send`; Cortex keeps
-`cortex_fleet_status`. Search accepts a query, an optional offset and a limit
+The core is the union of every tool named by the rendered orchestrator prompts
+(including Codex's Brain instruction), plus `o8_status` and `o8_send`:
+
+- Operator: `o8_status`, `o8_send`, `o8_lane_events`, `o8_render`,
+  `o8_html_preview`, `o8_html_render`, `o8_visualization_read`, `cortex_ask`,
+  `create_mission`, `dispatch_mission`, `get_mission_status`, `get_packet_scope`,
+  `mission_tail`, `steer_packet`, `submit_review`, `approve_and_merge`,
+  `reset_packet`, `retry_packet`.
+- Cortex: `cortex_ask`, `cortex_ci_status`, `cortex_correct_workers`,
+  `cortex_fleet_status`, `cortex_interrupt_agent`, `cortex_launch_agent`,
+  `cortex_list_approvals`, `cortex_list_issues`, `cortex_list_prs`,
+  `cortex_read_packets`, `cortex_read_transcript`, `cortex_resolve_approval`,
+  `cortex_steer_agent`, `cortex_update_packet`, `cortex_wait_workers`,
+  `cortex_worker_catalog`.
+
+These are 33 unique names; `cortex_ask` is advertised by both servers. Every
+other built-in tool stays deferred. Dispatch and review can call the named
+tools immediately. The prompt instructs the model to reach tools outside its
+list with `o8_tool_search`, then `o8_tool_call`.
+
+Search accepts a query, an optional offset and a limit
 from 1 to 10. An empty query enumerates all definitions. Follow `nextOffset`
 until it is null. Exact names rank before keyword matches. Definitions are
 neither truncated nor cached across requests.
@@ -48,14 +67,16 @@ measure definition payloads, not billed provider tokens or latency.
 
 | Runtime or built-in surface | Before tools / tokens | After tools / tokens |
 | --- | ---: | ---: |
-| Full Claude orchestrator | 160 / 33,045 | 7 / 1,004 |
-| Full Codex orchestrator | 160 / 33,045 | 7 / 1,004 |
-| Worker with an explicitly deferred operator attachment | 128 / 28,511 | 4 / 728 |
+| Full Claude orchestrator | 160 / 33,045 | 38 / 13,366 |
+| Full Codex orchestrator | 160 / 33,045 | 38 / 13,366 |
+| Worker with an explicitly deferred operator attachment | 128 / 28,511 | 20 / 10,483 |
 | Pi command bridge | 3 / 195 | 3 / 195 |
 | External clients, operator only | 128 / 28,511 | 128 / 28,511 |
 
-Combined operator/Cortex definition bytes fall from 150,890 to 4,703. Restricted
-profiles and existing worker registrations retain their own complete catalogs.
+Combined operator/Cortex definition bytes fall from 150,890 to 61,455. Counts
+include both servers' discovery bridges and the shared `cortex_ask` definition.
+Restricted profiles and existing worker registrations retain their own complete
+catalogs.
 
 To capture the actual before/after operator and Cortex payloads:
 
@@ -67,9 +88,13 @@ O8_TOOL_DEFINITION_RECEIPT=/tmp/o8-tool-definitions.json \
 Tokenize each compact JSON array with `getEncoding('cl100k_base')` from
 `js-tiktoken`. Combine the operator and Cortex arrays before counting combined
 totals. Pi's three definitions come from `createO8CommandTools([])`; their
-schemas do not depend on the command catalog.
+schemas do not depend on the command catalog. Map Pi's `parameters` field to
+`inputSchema` for the same definition shape used in the table.
 
 The real-path tests discover and invoke non-core tools through generated
 Claude/Codex configurations and a persisted worker attachment. They inspect
 persisted project state, enumerate every operator verb, verify profile-hidden
 tools remain unavailable, and compare complete HTTP and stdio catalogs.
+The prompt-scope tests render every prompt backend, including first-run and
+Codex Brain instructions, and require every named tool to be initially loaded.
+They also require every other catalog tool to stay deferred.

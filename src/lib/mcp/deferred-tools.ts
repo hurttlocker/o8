@@ -7,7 +7,18 @@ interface Request {
   params?: Record<string, unknown>;
 }
 
-const CORE_TOOLS = new Set(['o8_status', 'o8_send', 'cortex_fleet_status']);
+// Union of tools named by the rendered orchestrator prompts, plus status/send.
+// orchestrator-system-prompt-scope.test.ts guards coverage and defers all others.
+const CORE_TOOLS = new Set([
+  'o8_status', 'o8_send', 'o8_html_preview', 'o8_html_render', 'o8_lane_events',
+  'o8_render', 'o8_visualization_read',
+  'approve_and_merge', 'create_mission', 'dispatch_mission', 'get_mission_status',
+  'get_packet_scope', 'mission_tail', 'reset_packet', 'retry_packet', 'steer_packet', 'submit_review',
+  'cortex_ask', 'cortex_ci_status', 'cortex_correct_workers', 'cortex_fleet_status',
+  'cortex_interrupt_agent', 'cortex_launch_agent', 'cortex_list_approvals', 'cortex_list_issues',
+  'cortex_list_prs', 'cortex_read_packets', 'cortex_read_transcript', 'cortex_resolve_approval',
+  'cortex_steer_agent', 'cortex_update_packet', 'cortex_wait_workers', 'cortex_worker_catalog',
+]);
 const SEARCH: McpTool = {
   name: 'o8_tool_search',
   description: 'Find o8 tools by name or keywords. Returns complete descriptions and argument schemas. Use an empty query and nextOffset to enumerate every tool. Call discovered tools with o8_tool_call.',

@@ -93,6 +93,9 @@ describe('deferred o8 tools through generated runtime configs and real servers',
         try {
           const initial = await peer.request<{ tools: Tool[] }>('tools/list', {});
           const name = server === 'operator' ? 'o8_create_project' : 'cortex_create_project';
+          expect(initial.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(server === 'operator'
+            ? ['dispatch_mission', 'get_packet_scope', 'submit_review', 'approve_and_merge']
+            : ['cortex_launch_agent', 'cortex_worker_catalog', 'cortex_read_transcript', 'cortex_ask']));
           expect(initial.tools.map(tool => tool.name)).not.toContain(name);
           expect(initial.tools.map(tool => tool.name)).toContain('o8_tool_search');
           expect(config.env?.O8_MCP_TOOL_LOADING).toBe('deferred');
@@ -160,7 +163,7 @@ describe('deferred o8 tools through generated runtime configs and real servers',
       try {
         const before = (await full.request<{ tools: Tool[] }>('tools/list', {})).tools;
         const after = (await compact.request<{ tools: Tool[] }>('tools/list', {})).tools;
-        expect(Buffer.byteLength(JSON.stringify(after))).toBeLessThan(Buffer.byteLength(JSON.stringify(before)) / 2);
+        expect(Buffer.byteLength(JSON.stringify(after))).toBeLessThan(Buffer.byteLength(JSON.stringify(before)));
         payloads[server] = { before, after };
       } finally { await full.close({ gracefulMs: 200 }); await compact.close({ gracefulMs: 200 }); }
     }
