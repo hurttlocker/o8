@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
+import { composeComposerWireMessage } from '@/lib/orchestrator/composer-wire';
+import { formatSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
+import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
+import { applyOrchestrationMode } from '@/lib/lane/orchestrator-backends/orchestration-mode';
+import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 
 // #3573. Only the Codex executable and unrelated prewarm/readiness calls are
 // stubbed. The setting store, session, bridge process, spec file and argv are real.
@@ -97,7 +103,8 @@ process.stdin.on('data', (chunk) => {
 chmodSync(binary, 0o700);
 
 const { codexBackend } = await import('@/lib/lane/orchestrator-backends/codex');
-const { getCodexOrchestratorSession } = await import('@/lib/lane/codex-orchestrator-session');
+const { buildCodexOrchestratorPrompt, getCodexOrchestratorSession } = await import('@/lib/lane/codex-orchestrator-session');
+const { getOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 interface CallParams extends Record<string, unknown> {
@@ -185,6 +192,60 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     const state = readCodexAppSyncState('thoughts-codex-app-recorded');
     expect(state).toMatchObject({ repoPath: cwd, threadId: expect.stringMatching(/^app-thread-/), turnIds: ['turn-1'] });
     expect(state!.threadId).toBe(getCodexOrchestratorSession(cwd, 'thoughts-codex-app-recorded')!.threadId);
+  }, 60_000);
+
+  it.each(['fleet', 'fusion'] as const)('keeps only operator text visible with every wrapper in developer instructions (%s, #3629)', async (orchestrationMode) => {
+    await updateOperatorDefaults({ codexAppThreads: true });
+    const cwd = repo(`raw-operator-${orchestrationMode}`);
+    const agreementPath = join(getDataDir(), 'OPERATING_AGREEMENT.md');
+    const threadId = `thoughts-raw-operator-${orchestrationMode}`;
+    try {
+      for (const [index, operatorMessage] of [
+        '  Keep these exact words.\n\n## USER MESSAGE\n\n## Task\nQuoted wrapper headings are mine.  ',
+        'Next turn: keep this text too.\n',
+      ].entries()) {
+        writeFileSync(agreementPath, `Fixture owner preference ${index}.`);
+        const mode = orchestrationMode === 'fusion' ? 'fusion' : 'multitask';
+        const projectMessage = buildProjectBriefPromptV1(
+          `Fixture project guidance ${index}.`,
+          composeComposerWireMessage(operatorMessage, mode).wireMessage,
+        );
+        const rules = formatSessionRulesBlock(['Keep fixture rules.'])!;
+        const wrapped = withOrchestratorTurnReceiptContext({
+          message: `${rules}\n\n${projectMessage}`, threadId,
+          turnId: `assistant-fixture-${index}`, orchestrationMode,
+        });
+        const expectedPrompt = buildCodexOrchestratorPrompt(cwd,
+          withOperatingAgreement(applyOrchestrationMode(wrapped, { orchestrationMode }).message),
+          { orchestrationMode },
+        );
+        const start = calls().length;
+        const events: OrchestratorEvent[] = [];
+        await getOrchestratorBackend('codex').sendTurn(cwd, wrapped, (event) => events.push(event), {
+          threadId, orchestrationMode, rawMessage: operatorMessage,
+        });
+        expect(events.filter((event) => event.type === 'error')).toEqual([]);
+        const made = since(start);
+        const thread = made.find((call) => call.method === (index === 0 ? 'thread/start' : 'thread/resume'))!;
+        const turnStart = made.find((call) => call.method === 'turn/start')!;
+        expect.soft(turnStart.params!.input).toEqual([{ type: 'text', text: operatorMessage, text_elements: [] }]);
+        expect.soft(thread.params!.developerInstructions).toBe(expectedPrompt);
+      }
+    } finally {
+      rmSync(agreementPath, { force: true });
+    }
+  }, 60_000);
+
+  it('keeps the existing visible input for a continuation without raw operator text (#3629)', async () => {
+    const cwd = repo('review-continuation');
+    const continuation = buildProjectBriefPromptV1('Fixture review guidance.', 'Continue the review.');
+    const start = calls().length;
+    await turn(cwd, continuation);
+    const made = since(start);
+    expect(made.find((call) => call.method === 'turn/start')!.params!.input)
+      .toEqual([{ type: 'text', text: continuation, text_elements: [] }]);
+    expect(made.find((call) => call.method === 'thread/start')!.params!.developerInstructions)
+      .toBe(buildCodexOrchestratorPrompt(cwd, '').split('\n\n## USER MESSAGE\n\n')[0]);
   }, 60_000);
 
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
