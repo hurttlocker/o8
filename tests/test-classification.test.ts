@@ -31,6 +31,12 @@ describe('test factory classification', () => {
     expect(classifyTestSource('src/lib/math.test.ts', 'expect(1 + 1).toBe(2)')).toEqual([]);
   });
 
+  it('classifies the real stdio peer fixture as a child process owner', () => {
+    const file = 'src/lib/runtimes/shared/stdio-json-rpc.test.ts';
+    expect(classifyTestSource(file, readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')))
+      .toContain('stdio-json-rpc-peer');
+  });
+
   it('writes list-only manifests and rejects missing or stale resource-owning paths', () => {
     const root = mkdtempSync(join(tmpdir(), 'o8-test-classification-'));
     mkdirSync(join(root, 'tests'));
