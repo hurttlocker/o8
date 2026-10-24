@@ -1,10 +1,10 @@
 {
   "schema": "o8/agent-rule-coverage/v1",
   "baseline": {
-    "commit": "f8c0c58bb0a76ea823d78637c1b6d828731682d8",
+    "commit": "5e5a45d8b515c366cba49f9fdae32c11ed466448",
     "path": "AGENTS.md",
-    "bytes": 7287,
-    "sha256": "2ac39cb539983480669eec3dbe14658729aa925b538e4912fdd7568395ffa432",
+    "bytes": 7419,
+    "sha256": "56741ebf3f2a3cc04c1a3798a35e598e07d7671aa13403154a6aaa8071780f16",
     "ruleCount": 30
   },
   "rules": [
@@ -118,8 +118,8 @@
     },
     {
       "id": "R19",
-      "sourceSha256": "f9b09f59793e43db85c2ff1febc5092be4d7171e10b289aed54e0e6370fcdcc1",
-      "sha256": "f9b09f59793e43db85c2ff1febc5092be4d7171e10b289aed54e0e6370fcdcc1",
+      "sourceSha256": "4c2be128fded0653cd942efd90cbe2c31fc7fa93d109f9a75c0f34ce6906fa9a",
+      "sha256": "4c2be128fded0653cd942efd90cbe2c31fc7fa93d109f9a75c0f34ce6906fa9a",
       "destination": ".agents/skills/o8-checks/SKILL.md"
     },
     {
