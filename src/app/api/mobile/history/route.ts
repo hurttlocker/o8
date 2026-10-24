@@ -15,6 +15,7 @@ import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptTool
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { ownedRuntimeTailRole, runtimeTailRole } from './owned-runtime-tail-role';
+import { chatHistoryRevision, pageChatHistoryMessages, parseChatHistoryPageRequest } from '@/lib/llm/chat-history-pagination';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,11 +42,11 @@ function toolCallFromEntry(name: string, text: string): MobileTranscriptToolCall
   };
 }
 
-export async function GET(request: NextRequest) {
+async function readHistory(request: NextRequest, paged: boolean) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
   const rawLimit = request.nextUrl.searchParams.get('limit');
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 6;
-  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 6;
+  const limit = paged ? 10000 : Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 6;
 
   if (!sessionKey) {
     return NextResponse.json({ error: 'sessionKey is required' }, { status: 400 });
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
 
   try {
     if (sessionKey.startsWith('llm-chat:')) {
-      const payload = loadMobileLlmChatHistory(sessionKey, limit);
+      const payload = loadMobileLlmChatHistory(sessionKey, paged ? undefined : limit);
       return NextResponse.json({
         ...payload,
         transcript: mergeDurableMobileTranscriptEntries(sessionKey, payload.transcript),
@@ -273,4 +274,19 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/** Opt-in cursor window over the same normalized payload the web store reads.
+ * Existing non-paged callers keep their exact tail contract. */
+export async function GET(request: NextRequest) {
+  const paged = request.nextUrl.searchParams.get('page') === '1';
+  const response = await readHistory(request, paged);
+  if (!paged || !response.ok) return response;
+  const payload = await response.json() as MobileHistoryResponse;
+  const revision = chatHistoryRevision({ messages: payload.transcript });
+  const pageRequest = parseChatHistoryPageRequest(request.nextUrl.searchParams.get('limit') ?? '100',
+    request.nextUrl.searchParams.get('before'))!;
+  const result = pageChatHistoryMessages(payload.transcript, pageRequest, revision);
+  if (!result.ok) return NextResponse.json(result, { status: 409, headers: response.headers });
+  return NextResponse.json({ ...payload, transcript: result.messages, page: result.page }, { headers: response.headers });
 }

@@ -76,6 +76,7 @@ pub fn entries(current: &[Entry], incoming: Vec<Entry>) -> Vec<Entry> {
                 "thinkingSteps",
                 "thinkingDurationMs",
                 "recalledFacts",
+                "packetHeader",
             ] {
                 if entry.extra.get(key).is_none_or(Value::is_null)
                     && let Some(value) = old.extra.get(key)

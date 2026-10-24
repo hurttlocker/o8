@@ -1,6 +1,6 @@
 //! Small read-only renderer matching the web transcript's line-oriented grammar.
 use regex::{Captures, Regex};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{LazyLock, RwLock},
@@ -16,7 +16,7 @@ fn re(pattern: &str) -> Regex {
     CACHE.write().unwrap().insert(pattern.into(), regex.clone());
     regex
 }
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Run {
     pub style: String,
     pub text: String,
@@ -27,6 +27,8 @@ pub struct Node {
     pub runs: Vec<Run>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 impl Node {
     pub fn notice(text: &str) -> Self {
@@ -37,6 +39,7 @@ impl Node {
                 text: text.into(),
             }],
             language: None,
+            data: None,
         }
     }
 }
@@ -157,16 +160,28 @@ pub fn markdown(source: &str) -> Vec<Node> {
     let mut nodes = Vec::new();
     let mut fence: Option<String> = None;
     let mut code = String::new();
-    for line in source.split('\n') {
+    let lines: Vec<_> = source.split('\n').collect();
+    let mut lines = lines.iter().peekable();
+    while let Some(&line) = lines.next() {
         if line.starts_with("```") {
             if let Some(language) = fence.take() {
                 nodes.push(Node {
-                    kind: "code-block".into(),
+                    kind: if language.eq_ignore_ascii_case("diff") {
+                        "diff-card"
+                    } else {
+                        "code-block"
+                    }
+                    .into(),
                     runs: vec![Run {
                         style: "code".into(),
                         text: code.clone(),
                     }],
-                    language: Some(language),
+                    language: Some(if language.eq_ignore_ascii_case("diff") {
+                        "diff".into()
+                    } else {
+                        language
+                    }),
+                    data: None,
                 });
                 code.clear();
             } else {
@@ -179,6 +194,56 @@ pub fn markdown(source: &str) -> Vec<Node> {
                 code.push('\n');
             }
             code.push_str(line);
+            continue;
+        }
+        if line.contains('|')
+            && lines
+                .peek()
+                .is_some_and(|next| re(r"^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$").is_match(next))
+        {
+            let cells = |line: &str| {
+                line.split('|')
+                    .map(str::trim)
+                    .filter(|cell| !cell.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            let headers: Vec<_> = cells(line)
+                .iter()
+                .map(|cell| {
+                    vec![Run {
+                        style: "text".into(),
+                        text: cell.clone(),
+                    }]
+                })
+                .collect();
+            let aligns: Vec<_> = cells(lines.next().unwrap())
+                .iter()
+                .map(|cell| {
+                    if cell.starts_with(':') && cell.ends_with(':') {
+                        "center"
+                    } else if cell.ends_with(':') {
+                        "right"
+                    } else {
+                        "left"
+                    }
+                })
+                .collect();
+            let mut rows = Vec::new();
+            while lines.peek().is_some_and(|next| next.contains('|')) {
+                rows.push(
+                    cells(lines.next().unwrap())
+                        .iter()
+                        .map(|cell| inline(cell))
+                        .collect::<Vec<_>>(),
+                );
+            }
+            nodes.push(Node {
+                kind: "table".into(),
+                runs: vec![],
+                language: None,
+                data: Some(serde_json::json!({"headers":headers,"aligns":aligns,"rows":rows})),
+            });
             continue;
         }
         let (kind, body) = if line.trim().is_empty() {
@@ -203,17 +268,28 @@ pub fn markdown(source: &str) -> Vec<Node> {
             kind,
             runs: inline(body),
             language: None,
+            data: None,
         });
     }
     if let Some(language) = fence {
         if !code.is_empty() {
             nodes.push(Node {
-                kind: "code-block".into(),
+                kind: if language.eq_ignore_ascii_case("diff") {
+                    "diff-card"
+                } else {
+                    "code-block"
+                }
+                .into(),
                 runs: vec![Run {
                     style: "code".into(),
                     text: code,
                 }],
-                language: Some(language),
+                language: Some(if language.eq_ignore_ascii_case("diff") {
+                    "diff".into()
+                } else {
+                    language
+                }),
+                data: None,
             });
         }
     }

@@ -1,8 +1,11 @@
 # o8 next: live sessions and composer
 
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
-Lists saved orchestrator sessions, bootstraps the selected session's latest 100
-messages over HTTP, then subscribes to its existing WebSocket history stream.
+Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
+session's latest 100 messages over HTTP, then subscribes to its existing WebSocket
+history stream. Load older follows revision-bound cursors and preserves the
+visible anchor and previously shaped rows. Workers use their original session
+keys and remain read-only.
 Operator/agent prose, lists, inline styles, code fences and tool-step groups are
 read-only. Home/End and wheel scrolling work; scrollbar tracks are hidden.
 
@@ -12,12 +15,17 @@ new row layout. GPUI still positions list items and paints the scene. Replacemen
 snapshots and late tool results can invalidate the affected row. Refresh and
 session selection cancel the previous subscription and load a new history.
 
+Packet headers (including mission metadata), handoffs, compaction receipts,
+tables, diff cards and image/PDF/file placeholders now use the same server fields
+as the WebKit renderers. The authored rich recording is compared with production
+React elements and painted through headless GPUI. See the
+[transcript receipts and measurements](evidence/transcript/README.md).
+
 This slice does **not** complete #4405. Disposable provider-session acceptance,
-older-history pagination, runtime-worker discovery and full rich-event parity
-remain open. The tested surface covers text/code/tool history, not media, packet
-headers, handoffs, compaction receipts, tables, diagrams, diff or visualization
-cards. Unsupported content remains labeled or readable as text/code. The composer
-and queue actions are described below.
+diagrams, visualization cards and real font-shaping/GPU/compositor measurements
+remain open. Linux TestAppContext timing uses a no-op text system; its three
+2,000-row runs are not substitutes for the existing macOS measurements. The
+composer and queue actions are described below.
 
 ## Build and use
 
@@ -54,11 +62,16 @@ Responses are bounded to 16 MiB and requests time out after five seconds.
 
 ## Existing contracts
 
-No server route, response shape or authentication policy changes.
+Default server responses and authentication policies remain unchanged. Opt-in
+`page=1` on the existing mobile history GET adds the shared chat-history cursor
+metadata. `before` follows that cursor; a changed revision returns HTTP 409 and
+the viewer offers Refresh. Runtime pages cover history retained by their existing
+adapters; this does not recover histories the runtime has already discarded.
 
 | Purpose | Existing source and contract |
 | --- | --- |
 | Saved session list | `src/app/api/mobile/orchestrator/threads/route.ts`: GET, `limit=500`, `{threads}`; thread id is used unchanged |
+| Runtime worker discovery | `src/app/api/runtime/inventory/route.ts`: GET; merge `{agents}` by original `sessionKey` |
 | Sidebar packet attention | `src/app/api/orchestrator/state/route.ts`: GET; join packets by `orchestratorThreadId` |
 | Saved composer context | `src/app/api/v2/chat-history/route.ts`: GET with `tabId`, `limit=100` |
 | Operator queue | `src/app/api/orchestrator/composer-queue/route.ts`: GET items/capabilities, POST frozen payload/id, PATCH existing id to steer |
@@ -75,10 +88,13 @@ desktop provider's sequence, captured-sequence and boot-id rules. Reconnect uses
 bounded backoff and omits `since` to request a fresh checkpoint. The selected
 session ignores other streams and other session payloads.
 
-`replace: true` replaces the retained window, including an empty window. Other
+`replace: true` replaces the live window, including an empty window. Explicitly
+backfilled rows before an overlapping checkpoint remain retained. Empty or
+disjoint replacement clears the old window and its pagination cursor. Other
 updates use the dashboard's `mergeTranscriptEntries` semantics, preserving
 optimistic local entries and supported metadata while allowing old server history
-to disappear. Retention is capped at the web store's 200 entries. The client never
+to disappear. Unpaged retention is capped at the web store's 200 entries; explicit
+backfill retains the requested older pages. The client never
 assumes that updates append or that completed tool results are immutable.
 
 ## Verification
