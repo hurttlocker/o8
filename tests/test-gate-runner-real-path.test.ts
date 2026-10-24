@@ -62,25 +62,79 @@ describe('split test gate real entry point', () => {
     const fixture = mkdtempSync(join(tmpdir(), 'o8-test-gate-runner-'));
     roots.push(fixture);
     const orderLog = join(fixture, 'order.log');
+    const timingReport = join(fixture, 'timings.json');
+    const processLog = join(fixture, 'processes.jsonl');
     const config = (file: string) => `
+import unitConfig from ${JSON.stringify(join(process.cwd(), 'config/vitest/vitest.unit.config.ts'))};
 export default {
+  ...unitConfig,
   test: {
+    ...unitConfig.test,
+    projects: undefined,
+    maxWorkers: 1,
     root: ${JSON.stringify(fixture)},
+    globalSetup: [],
+    setupFiles: [],
     globals: true,
-    include: [${JSON.stringify(file)}],
-    reporters: process.env.O8_TEST_GATE_REPORT_PATH
-      ? ['default', ['json', { outputFile: process.env.O8_TEST_GATE_REPORT_PATH }]]
-      : ['default'],
+    include: ${JSON.stringify(file === 'unit.test.js'
+      ? ['a-unit.test.js', 'z-unit-isolation.test.js', 'b-browser.test.js', 'y-browser-isolation.test.js']
+      : [file])},
+    exclude: [],
   },
 };
 `;
     writeFileSync(join(fixture, 'unit.config.mjs'), config('unit.test.js'));
     writeFileSync(join(fixture, 'integration.config.mjs'), config('integration.test.js'));
-    writeFileSync(join(fixture, 'unit.test.js'), `
+    writeFileSync(join(fixture, 'fixture-value.js'), "let value = 'clean'; export const read = () => value; export const write = next => { value = next; };\n");
+    writeFileSync(join(fixture, 'fixture-mock.js'), "export const value = 'clean';\n");
+    writeFileSync(join(fixture, 'a-unit.test.js'), `
 import { appendFileSync } from 'node:fs';
-it('unit passes first', () => {
+it('unit passes first', async () => {
   appendFileSync(${JSON.stringify(orderLog)}, 'unit\\n');
+  appendFileSync(${JSON.stringify(processLog)}, JSON.stringify(process.pid) + '\\n');
+  (await import('./fixture-value.js')).write('dirty');
+  vi.doMock('./fixture-mock.js', () => ({ value: 'mocked' }));
+  expect((await import('./fixture-mock.js')).value).toBe('mocked');
+  globalThis.__fixturePoison = true;
+  process.env.O8_FIXTURE_POISON = '1';
+  Object.prototype.fixturePoison = true;
+  process.fixturePoison = true;
+  process.on('o8-fixture-poison', () => {});
+  process.chdir(${JSON.stringify(fixture)});
   expect(2 + 2).toBe(4);
+});
+`);
+    writeFileSync(join(fixture, 'z-unit-isolation.test.js'), `
+import { appendFileSync } from 'node:fs';
+import { read } from './fixture-value.js';
+import { value } from './fixture-mock.js';
+it('keeps module globals and environment isolated between pooled files', () => {
+  appendFileSync(${JSON.stringify(processLog)}, JSON.stringify(process.pid) + '\\n');
+  expect(read()).toBe('clean');
+  expect(value).toBe('clean');
+  expect(globalThis.__fixturePoison).toBeUndefined();
+  expect(process.env.O8_FIXTURE_POISON).toBeUndefined();
+  expect(Object.prototype.fixturePoison).toBeUndefined();
+  expect(process.fixturePoison).toBeUndefined();
+  expect(process.listenerCount('o8-fixture-poison')).toBe(0);
+  expect(process.cwd()).toBe(${JSON.stringify(process.cwd())});
+});
+`);
+    writeFileSync(join(fixture, 'b-browser.test.js'), `// @vitest-environment jsdom
+it('poisons only its disposable browser fixture', () => {
+  document.body.innerHTML = '<p>old document</p>';
+  localStorage.setItem('fixture', 'old storage');
+  Storage.prototype.fixturePoison = true;
+  window.addEventListener('fixture-event', () => { globalThis.fixtureEvent = true; });
+});
+`);
+    writeFileSync(join(fixture, 'y-browser-isolation.test.js'), `// @vitest-environment jsdom
+it('gets fresh browser storage, prototypes, nodes and event listeners', () => {
+  expect(document.body.textContent).toBe('');
+  expect(localStorage.getItem('fixture')).toBeNull();
+  expect(Storage.prototype.fixturePoison).toBeUndefined();
+  window.dispatchEvent(new Event('fixture-event'));
+  expect(globalThis.fixtureEvent).toBeUndefined();
 });
 `);
     writeFileSync(join(fixture, 'integration.test.js'), `
@@ -105,14 +159,71 @@ it('integration fails second', () => {
         O8_TEST_GATE_TEST_MODE: '1',
         O8_TEST_GATE_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',
+        O8_TEST_TIMING_REPORT_PATH: timingReport,
       },
     });
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stdout, result.stderr).toContain('Hermetic fixture: PASS');
     expect(readFileSync(orderLog, 'utf8').trim().split('\n')).toEqual(['unit', 'integration']);
-    expect(result.stdout).toContain('Hermetic fixture: PASS');
     expect(result.stdout).toContain('Integration fixture: FAIL');
     expect(result.stderr).toContain('failure-class=resource_or_integration_failure');
+    const processes = readFileSync(processLog, 'utf8').trim().split('\n');
+    expect(processes).toHaveLength(2);
+    expect(processes[0]).not.toBe(processes[1]);
+    expect(result.stdout).toContain('[test-timing] slowest files');
+    const timings = JSON.parse(readFileSync(timingReport, 'utf8'));
+    expect(timings.files).toEqual([expect.objectContaining({
+      path: 'integration.test.js', tests: 1, state: 'failed',
+      totalMs: expect.any(Number), collectMs: expect.any(Number),
+      setupMs: expect.any(Number), testsMs: expect.any(Number),
+    })]);
+    expect(timings.files[0].totalMs).toBeGreaterThanOrEqual(timings.files[0].testsMs);
+
+    const estimatesPath = join(fixture, 'duration-estimates.json');
+    const update = spawnSync(process.execPath, [
+      'scripts/update-hermetic-durations.mjs', timingReport, estimatesPath,
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+    expect(update.status, update.stderr).toBe(0);
+    const estimates = JSON.parse(readFileSync(estimatesPath, 'utf8'));
+    expect(Object.keys(estimates.slowFiles)).toEqual(['integration.test.js']);
+    expect(estimates.defaultMs).toBeGreaterThan(0);
+    expect(estimates.jsdomMs).toBeGreaterThan(0);
+
+    // Exercise real Vitest sharding with unknown fixture paths as well as the
+    // checked-in timing inventory used in CI. Every fixture must run once.
+    const shardReports: string[] = [];
+    for (const index of [1, 2]) {
+      const reportPath = join(fixture, `shard-${index}.json`);
+      shardReports.push(reportPath);
+      const shard = spawnSync(process.execPath, [
+        'node_modules/vitest/vitest.mjs', 'run', '--config', join(fixture, 'unit.config.mjs'),
+        `--shard=${index}/2`,
+      ], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 15_000,
+        env: { ...fixtureGateEnv(), O8_TEST_GATE_REPORT_PATH: reportPath },
+      });
+      expect(shard.status, shard.stderr).toBe(0);
+    }
+    const files = shardReports.flatMap(path => JSON.parse(readFileSync(path, 'utf8')).testResults);
+    expect(files.map(file => file.name.split('/').pop()).sort())
+      .toEqual(['a-unit.test.js', 'b-browser.test.js', 'y-browser-isolation.test.js', 'z-unit-isolation.test.js']);
+    const inventoryPath = join(fixture, 'inventory.json');
+    writeFileSync(inventoryPath, JSON.stringify({ numTotalTests: 4, testResults: files }));
+    const verifyInventory = (after: string, shards = shardReports) => spawnSync(process.execPath, [
+      'scripts/verify-test-inventory.mjs', inventoryPath, after, ...shards,
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+    expect(verifyInventory(inventoryPath).status).toBe(0);
+    const changedPath = join(fixture, 'changed-inventory.json');
+    for (const change of ['count', 'file', 'skip']) {
+      const changed = JSON.parse(readFileSync(inventoryPath, 'utf8'));
+      if (change === 'count') changed.numTotalTests -= 1;
+      if (change === 'file') changed.testResults[0].name += '.missing';
+      if (change === 'skip') changed.testResults[0].assertionResults[0].status = 'skipped';
+      writeFileSync(changedPath, JSON.stringify(changed));
+      expect(verifyInventory(changedPath).status, change).toBe(1);
+    }
+    expect(verifyInventory(inventoryPath, [shardReports[0], shardReports[0]]).status).toBe(1);
   }, 40_000);
 
   it('gives every resource-owning file a fresh process after an earlier file fails', () => {
