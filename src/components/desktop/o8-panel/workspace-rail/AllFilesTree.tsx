@@ -4,6 +4,7 @@ import { Component, lazy, Suspense, useState, type ReactNode } from 'react';
 import { QuickDocs } from './QuickDocs';
 
 export interface WorkspaceFileTreeProps {
+  active?: boolean;
   repoPath?: string | null;
   selectedFile: string | null;
   dirtyFiles: Set<string>;

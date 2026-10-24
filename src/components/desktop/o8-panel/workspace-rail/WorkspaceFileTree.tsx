@@ -89,9 +89,9 @@ function ToolButton({ label, disabled = false, onClick, children }: { label: str
     onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}>{children}</button>;
 }
 
-export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, onSelectFile }: WorkspaceFileTreeProps) {
+export default function WorkspaceFileTree({ active = true, repoPath, selectedFile, dirtyFiles, onSelectFile }: WorkspaceFileTreeProps) {
   const { workspaceGlass, paletteId } = useTheme();
-  const { directories, loadDirectory } = useWorkspaceFiles(repoPath);
+  const { directories, loadDirectory } = useWorkspaceFiles(repoPath, active);
   const root = directories['.'];
   const [query, setQuery] = useState('');
   const [searchAttempt, setSearchAttempt] = useState(0);
@@ -153,10 +153,10 @@ export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, 
   }, [dirtyFiles, entries, matchingResult, model, onSelectFile, paths, query, searching]);
 
   useEffect(() => {
-    if (searching) return;
+    if (!active || searching) return;
     const available = Math.max(0, 4 - Object.values(directories).filter(directory => directory.loading).length);
     for (const path of expanded.filter(path => !directories[path.slice(0, -1)]).slice(0, available)) void loadDirectory(path.slice(0, -1));
-  }, [directories, expanded, loadDirectory, searching]);
+  }, [active, directories, expanded, loadDirectory, searching]);
   useEffect(() => {
     if (!expandAll || searching) return;
     for (const entry of browsingEntries) {
@@ -168,7 +168,7 @@ export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, 
 
   useEffect(() => {
     const controller = new AbortController();
-    if (!repoPath || !query.trim()) return () => controller.abort();
+    if (!active || !repoPath || !query.trim()) return () => controller.abort();
     const timer = setTimeout(() => {
       const params = new URLSearchParams({ workspace: repoPath, search: query.trim() });
       void fetch(`/api/panel/files?${params}`, { signal: controller.signal }).then(async response => {
@@ -180,14 +180,14 @@ export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, 
       });
     }, 150);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [query, repoPath, searchAttempt]);
+  }, [active, query, repoPath, searchAttempt]);
 
   useEffect(() => {
     if (selection === handledSelection.current) return;
     pendingReveal.current = selection;
   }, [selection]);
   useEffect(() => {
-    if (!pendingReveal.current || !selection || searching || !root || root.loading || root.error) return;
+    if (!active || !pendingReveal.current || !selection || searching || !root || root.loading || root.error) return;
     const parts = selection.split('/');
     let siblings = root.entries;
     for (let index = 0; index < parts.length - 1; index += 1) {
@@ -211,7 +211,7 @@ export default function WorkspaceFileTree({ repoPath, selectedFile, dirtyFiles, 
     } finally { handlers.current.syncing = false; }
     pendingReveal.current = null;
     handledSelection.current = selection;
-  }, [directories, loadDirectory, model, paths, root, searching, selection]);
+  }, [active, directories, loadDirectory, model, paths, root, searching, selection]);
 
   const failedFolders = expanded.filter(path => directories[path.slice(0, -1)]?.error);
   const refresh = () => {

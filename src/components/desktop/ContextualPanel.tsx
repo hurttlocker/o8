@@ -690,7 +690,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   <BottomUtilitySurface
                     kind={tab.kind}
                     tabId={tab.id}
-                    active={tab.id === activeTabId}
+                    active={visible && tab.id === activeTabId}
                     repoPath={repoPath}
                     repoLabel={repoLabel}
                     registeredRepos={registeredRepos}

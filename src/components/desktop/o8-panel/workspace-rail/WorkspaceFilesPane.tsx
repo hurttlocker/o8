@@ -5,7 +5,8 @@ import { AllFilesTree } from './AllFilesTree';
 import { FileViewer } from './FileViewer';
 
 /** File content and its optional explorer share the same mounted selection. */
-export function WorkspaceFilesPane({ repoPath, selectedFile, dirtyFiles, onSelectFile }: {
+export function WorkspaceFilesPane({ active = true, repoPath, selectedFile, dirtyFiles, onSelectFile }: {
+  active?: boolean;
   repoPath?: string | null;
   selectedFile: string | null;
   dirtyFiles: Set<string>;
@@ -32,7 +33,7 @@ export function WorkspaceFilesPane({ repoPath, selectedFile, dirtyFiles, onSelec
     {selectedFile ? <FileViewer repoPath={repoPath} selectedFile={selectedFile} headerAction={toggle} /> : null}
     <div id={treeId} hidden={!treeVisible && Boolean(selectedFile)} style={{ minWidth: 0, minHeight: 0, display: treeVisible || !selectedFile ? 'flex' : 'none',
       borderLeft: split ? '1px solid var(--t-divider-subtle)' : undefined, background: 'transparent' }}>
-      <AllFilesTree repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
+      <AllFilesTree active={active && (treeVisible || !selectedFile)} repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
     </div>
   </div>;
 }
