@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { RepoReadiness, RepoSetupConfig } from './types';
 import { checkRepoOriginConfigured, getRepoOriginConfiguredOverride } from './origin-readiness';
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
+import { PACKET_ENVIRONMENT_SKIP_NOTE } from './environment-policy';
 
 interface RepoReadinessInput {
   localPath: string;
@@ -242,7 +243,9 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
   const value: RepoReadiness = {
     state,
     label: readinessLabel(state),
-    summary,
+    summary: repo.setup.envFiles.length > 0
+      ? `${summary} ${PACKET_ENVIRONMENT_SKIP_NOTE}`
+      : summary,
     dispatchable: true,
     nextAction,
     failedCheck,

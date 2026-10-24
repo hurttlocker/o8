@@ -43,6 +43,7 @@ export function captureLaunchLaneValidation(opts: WorktreeLaunchOptions): ((work
         const event = { ...row, payload: JSON.parse(row.payload_json) as Record<string, unknown> };
         const progress = event.actor === 'system'
           && (event.verb === 'dependency_materialized' || event.verb === 'worktree_preparation_timing'
+            || event.verb === 'environment_files_not_inherited'
             || event.verb === 'workspace_manifest_applied' || event.verb === 'workspace_manifest_failed'
             || event.verb === 'workspace_manifest_skipped'
             || event.verb === 'worktree_provision_queued' || event.verb === 'worktree_provision_started'
