@@ -19,6 +19,38 @@ pub struct Transcript {
     boot: Option<String>,
 }
 impl Transcript {
+    /// The existing sync cursor excludes its last id, even when that assistant
+    /// is still streaming. Refresh the saved tail without dropping backfilled
+    /// rows or racing a newer WebSocket checkpoint. HTTP never advances seq.
+    pub fn checkpoint(&self) -> (u64, Option<String>) {
+        (self.seq, self.boot.clone())
+    }
+    pub fn saved_tail(&mut self, history: History, captured: (u64, Option<String>)) -> bool {
+        if history.session_key != self.key || self.checkpoint() != captured {
+            return false;
+        }
+        let mut next = self.entries.clone();
+        for entry in history.transcript {
+            if let Some(index) = next.iter().position(|current| current.id == entry.id) {
+                next[index] = entry;
+            } else {
+                let timestamp = entry.extra.get("timestamp").and_then(Value::as_f64);
+                let index = timestamp
+                    .and_then(|time| {
+                        next.iter().position(|current| {
+                            current
+                                .extra
+                                .get("timestamp")
+                                .and_then(Value::as_f64)
+                                .is_some_and(|current| current > time)
+                        })
+                    })
+                    .unwrap_or(next.len());
+                next.insert(index, entry);
+            }
+        }
+        self.merge(next, true)
+    }
     /// HTTP send receipts can expose a persisted operator echo before the next
     /// WebSocket batch. Merge only operators so an older HTTP snapshot cannot
     /// overwrite newer streamed agent content or advance its sequence fence.
@@ -176,6 +208,41 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history() {
+        let history = |text: &str| {
+            serde_json::from_value::<History>(
+                serde_json::json!({"sessionKey":"llm-chat:test","transcript":[
+                    {"id":"tail","role":"assistant","text":text,"timestamp":2}
+                ]}),
+            )
+            .unwrap()
+        };
+        let mut transcript = Transcript::new(
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:test","transcript":[
+                    {"id":"older","role":"user","text":"Backfilled context","timestamp":1},
+                    {"id":"tail","role":"assistant","text":"Partial","timestamp":2}
+                ]}),
+            )
+            .unwrap(),
+        );
+        transcript.seq = 7;
+        assert!(transcript.saved_tail(history("Streaming reply"), transcript.checkpoint()));
+        assert_eq!(transcript.entries[0].id, "older");
+        assert_eq!(transcript.entries[1].text, "Streaming reply");
+        assert_eq!(transcript.seq, 7);
+        transcript.apply(&serde_json::json!({"channel":"realtime","event":"batch","data":{"events":[{
+            "stream":"session:llm-chat:test","seq":8,"event":"history.snapshot","data":{"sessionKey":"llm-chat:test","replace":true,"entries":[
+                {"id":"tail","role":"assistant","text":"New checkpoint"}
+            ]}
+        }]}}));
+        assert!(!transcript.saved_tail(history("Stale HTTP response"), (7, None)));
+        assert_eq!(transcript.entries[0].text, "New checkpoint");
+        let old_boot = transcript.checkpoint();
+        transcript.apply(&serde_json::json!({"channel":"system","event":"connected","data":{"bootId":"new-fixture-boot"}}));
+        assert!(!transcript.saved_tail(history("Old boot response"), old_boot));
+    }
     #[test]
     fn recorded_streams_match_web() {
         for case in ["stream", "stream-edges"] {
