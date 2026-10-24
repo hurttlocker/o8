@@ -1,6 +1,7 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
+import { ComposerPopoverVisibilityContext } from '@/components/desktop/thoughts/chat-panel/ComposerPopover';
 
 import { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
 export { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
@@ -43,7 +44,9 @@ export function ChatListColumn({ visible, width, overlay, onClose, children }: {
         zIndex: overlay ? 180 : undefined,
       } as CSSProperties}
     >
-      {children}
+      <ComposerPopoverVisibilityContext value={visible}>
+        {children}
+      </ComposerPopoverVisibilityContext>
     </aside>
   );
 }

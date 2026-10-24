@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { ProjectsSwitcher } from './ProjectsSwitcher';
+import { ChatListColumn } from '@/components/desktop/shell/ChatListColumn';
 
 vi.mock('framer-motion', () => ({ useReducedMotion: () => true, motion: { div: 'div' } }));
 vi.mock('../FloatingSurface', () => ({ FloatingSurface: ({ children }: HTMLAttributes<HTMLDivElement>) => createElement('div', null, children) }));
@@ -49,6 +50,69 @@ function resize(width: number, nameWidth = 68) {
   act(() => [...observers].forEach(callback => callback([], {} as ResizeObserver)));
 }
 describe('adaptive project repository navigation', () => {
+  it('keeps a pending project switch dismissed when the sidebar reopens', async () => {
+    let finish!: (result: boolean) => void;
+    const onProjectSelect = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const renderColumn = (visible: boolean) => act(() => root.render(createElement(ChatListColumn,
+      { visible, overlay: false, width: 320, onClose: vi.fn() },
+      createElement(ProjectsSwitcher, { ...props, onProjectSelect }))));
+    renderColumn(true);
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Switch project"]')!;
+    act(() => trigger.click());
+    act(() => document.querySelector<HTMLButtonElement>('[data-project-choice]')!.click());
+    expect(onProjectSelect).toHaveBeenCalledOnce();
+    expect(trigger.disabled).toBe(true);
+    renderColumn(false);
+    expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+    renderColumn(true);
+    try {
+      expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await act(async () => finish(true));
+    }
+    expect(onProjectSelect).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['projects', false], ['add', false], ['overflow', false],
+    ['projects', true], ['add', true], ['overflow', true],
+  ] as const)('dismisses %s when the retained sidebar closes (overlay=%s)', (menu, overlay) => {
+    const renderColumn = (visible: boolean) => act(() => root.render(createElement('div', null,
+      createElement('button', { 'aria-label': 'Toggle sidebar', onClick: () => renderColumn(!visible) }, 'Chats'),
+      createElement(ChatListColumn, { visible, overlay, width: 320, onClose: () => renderColumn(false) },
+        createElement('div', { 'data-chat-scroll': true }, createElement(ProjectsSwitcher, props))),
+    )));
+    renderColumn(true);
+    resize(260);
+    const scroll = host.querySelector<HTMLElement>('[data-chat-scroll]')!;
+    scroll.scrollTop = 173;
+    const trigger = host.querySelector<HTMLButtonElement>(menu === 'projects' ? '[aria-label="Switch project"]'
+      : menu === 'add' ? '[aria-label="Add repository"]' : '[aria-label="3 more repositories"]')!;
+    act(() => trigger.click());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('[data-composer-overlay]')).not.toBeNull();
+    const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Toggle sidebar"]')!;
+    act(() => { toggle.focus(); toggle.click(); });
+    expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    act(() => toggle.click());
+    expect(host.querySelector('[data-chat-scroll]')).toBe(scroll);
+    expect(scroll.scrollTop).toBe(173);
+    expect(host.querySelector('[aria-label="Switch project"]')?.textContent).toContain('Preview');
+    expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+    act(() => trigger.click());
+    expect(document.querySelector('[data-composer-overlay]')).not.toBeNull();
+    // A responsive boundary can hide the column without a pointer event.
+    renderColumn(false);
+    expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+    expect(document.activeElement?.closest('[inert]')).toBeNull();
+    renderColumn(true);
+    expect(document.querySelector('[data-composer-overlay]')).toBeNull();
+    expect(host.querySelector('[data-chat-scroll]')).toBe(scroll);
+  });
+
   it('offers existing project and repository entry points only after an empty navigation read', () => {
     const onAddRepo = vi.fn();
     const onProjectSelect = vi.fn(async () => true);
