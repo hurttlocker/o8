@@ -1,0 +1,86 @@
+{
+  "linux": {
+    "target": "x86_64-unknown-linux-gnu",
+    "packages": 467,
+    "gplPackages": 0,
+    "newDependencies": [
+      {
+        "name": "streaming-iterator",
+        "version": "0.1.9",
+        "license": "MIT OR Apache-2.0"
+      },
+      {
+        "name": "tree-sitter",
+        "version": "0.25.10",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-json",
+        "version": "0.24.8",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-language",
+        "version": "0.1.9",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-md",
+        "version": "0.5.3",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-rust",
+        "version": "0.24.0",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-typescript",
+        "version": "0.23.2",
+        "license": "MIT"
+      }
+    ]
+  },
+  "macos": {
+    "target": "x86_64-apple-darwin",
+    "packages": 450,
+    "gplPackages": 0,
+    "newDependencies": [
+      {
+        "name": "streaming-iterator",
+        "version": "0.1.9",
+        "license": "MIT OR Apache-2.0"
+      },
+      {
+        "name": "tree-sitter",
+        "version": "0.25.10",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-json",
+        "version": "0.24.8",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-language",
+        "version": "0.1.9",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-md",
+        "version": "0.5.3",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-rust",
+        "version": "0.24.0",
+        "license": "MIT"
+      },
+      {
+        "name": "tree-sitter-typescript",
+        "version": "0.23.2",
+        "license": "MIT"
+      }
+    ]
+  }
+}

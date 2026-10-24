@@ -1,0 +1,15 @@
+Touched TypeScript tests
+ Test Files  3 passed (3)
+      Tests  11 passed (11)
+   Duration  10.86s (transform 1.40s, setup 121ms, import 1.76s, tests 7.81s, environment 719ms)
+
+Full native release suite
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 34.08s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Full npm test (one final run)
+ Test Files  1219 passed | 3 skipped (1222)
+      Tests  8651 passed | 4 skipped (8655)
+   Duration  356.84s (transform 78.18s, setup 33.69s, import 552.21s, tests 345.44s, environment 272.83s)
+
+[rule-check] OK — scanned 2 file(s), zero violations vs origin/main

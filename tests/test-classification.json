@@ -3881,6 +3881,14 @@
       ]
     },
     {
+      "path": "tests/next-diff-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-history-real-path.test.ts",
       "reasons": [
         "child-process",
