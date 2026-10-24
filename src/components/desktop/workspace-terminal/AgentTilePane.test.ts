@@ -8,6 +8,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OrchestratorDataValue } from '../orchestrator-data-context';
 import { SessionTranscriptPane } from '../SessionTranscriptPane';
 import * as actionReceipt from '@/lib/orchestrator/action-receipt';
+import { resetComposerDraftMemoryForTests } from '../thoughts/chat-panel/composer-draft-store';
 
 const context = vi.hoisted(() => ({ value: null as OrchestratorDataValue | null }));
 vi.mock('../orchestrator-data-context', () => ({ useOrchestratorData: () => context.value }));
@@ -57,6 +58,8 @@ function flushAnimationFrame() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  resetComposerDraftMemoryForTests();
   animationFrames = new Map();
   nextAnimationFrame = 1;
   resizeCallbacks = [];
@@ -84,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  resetComposerDraftMemoryForTests();
   host?.remove();
   root = null;
   host = null;
@@ -220,6 +224,104 @@ describe('AgentTilePane live transcript scrolling', () => {
     renderPane('Pinning resumes after the operator returns to the bottom');
     act(flushAnimationFrame);
     expect(scroller.scrollTop).toBe(1_500);
+  });
+});
+
+describe('AgentTilePane unsent worker drafts', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const textarea = () => host!.querySelector<HTMLTextAreaElement>('textarea')!;
+  async function show(sessionKey = 'codex-owned:draft-a') {
+    await act(async () => root!.render(createElement(AgentTilePane, {
+      sessionKey, agent: { name: 'Worker', status: 'running', runtime: 'codex' },
+      focused: true, onClose: vi.fn(), onFocus: vi.fn(),
+    })));
+  }
+  async function type(text: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea(), text);
+      textarea().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  const sends = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/runtime/action');
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => Response.json({ agents: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('retains unsent addressed input after a worker pane is closed and reopened without sending it', async () => {
+    await show(); await type('Check the compact layout before continuing.');
+    await act(async () => root!.render(null)); await show();
+    expect(textarea().value).toBe('Check the compact layout before continuing.');
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('restores the exact unsent input after reloading the draft store', async () => {
+    await show(); await type('  Keep line one.\nKeep line two.  ');
+    await act(async () => root!.render(null));
+    resetComposerDraftMemoryForTests();
+    await show();
+    expect(textarea().value).toBe('  Keep line one.\nKeep line two.  ');
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('isolates drafts by exact session when the same pane changes workers', async () => {
+    await show(); await type('Only for worker A');
+    await show('codex-owned:draft-b'); expect(textarea().value).toBe('');
+    await type('Only for worker B');
+    await show(); expect(textarea().value).toBe('Only for worker A');
+    await show('codex-owned:draft-b'); expect(textarea().value).toBe('Only for worker B');
+    expect(sends()).toHaveLength(0);
+  });
+
+  it('keeps an explicitly cleared draft empty on reopen', async () => {
+    await show(); await type('Discard this draft'); await type('');
+    await act(async () => root!.render(null)); await show();
+    expect(textarea().value).toBe(''); expect(sends()).toHaveLength(0);
+  });
+
+  it('warns when storage fails and retains the draft in memory across pane remounts', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    await show(); await type('Keep this window open.');
+    expect(host!.querySelector('[data-worker-draft-warning]')?.textContent).toContain('Keep this window open');
+    await act(async () => root!.render(null)); await show();
+    expect(textarea().value).toBe('Keep this window open.');
+    expect(host!.querySelector('[data-worker-draft-warning]')?.textContent).toContain('Keep this window open'); expect(sends()).toHaveLength(0);
+  });
+
+  it('retains a refused steer on reopening and still requires explicit submission', async () => {
+    fetchMock.mockImplementation(async () => Response.json({ ok: false, error: 'Session unavailable.' }, { status: 409 }));
+    await show(); await type('Retry this correction deliberately.');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!.click());
+    expect(textarea().value).toBe('Retry this correction deliberately.');
+    await act(async () => root!.render(null)); await show();
+    expect(textarea().value).toBe('Retry this correction deliberately.'); expect(sends()).toHaveLength(1);
+  });
+
+  it('does not let a late refusal replace a newer draft after the pane remounts', async () => {
+    let refuse!: (response: Response) => void;
+    fetchMock.mockImplementation((url: RequestInfo | URL) => String(url) === '/api/runtime/action'
+      ? new Promise<Response>(resolve => { refuse = resolve; }) : Promise.resolve(Response.json({ agents: [] })));
+    await show(); await type('Original correction');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!.click());
+    await act(async () => root!.render(null)); await show(); await type('Newer unsent correction');
+    await act(async () => refuse(Response.json({ ok: false, error: 'Session unavailable.' }, { status: 409 })));
+    expect(textarea().value).toBe('Newer unsent correction');
+    await act(async () => root!.render(null)); await show();
+    expect(textarea().value).toBe('Newer unsent correction'); expect(sends()).toHaveLength(1);
+  });
+
+  it('keeps another session draft when an earlier worker reply arrives after a session change', async () => {
+    await show('codex-owned:draft-b'); await type('Existing worker B correction');
+    let refuse!: (response: Response) => void;
+    fetchMock.mockImplementation((url: RequestInfo | URL) => String(url) === '/api/runtime/action'
+      ? new Promise<Response>(resolve => { refuse = resolve; }) : Promise.resolve(Response.json({ agents: [] })));
+    await show(); await type('Worker A correction');
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!.click());
+    await show('codex-owned:draft-b');
+    expect(textarea().value).toBe('Existing worker B correction');
+    await act(async () => refuse(Response.json({ ok: false, error: 'Session unavailable.' }, { status: 409 })));
+    expect(textarea().value).toBe('Existing worker B correction');
+    expect(sends()).toHaveLength(1);
   });
 });
 
