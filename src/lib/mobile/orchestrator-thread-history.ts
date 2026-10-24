@@ -11,8 +11,8 @@ import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput 
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
 import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
+import { threadSummaryCache } from './orchestrator-thread-summary-cache';
 import {
-  effectiveBackend,
   inferBackendFromSessionIds,
   modelForBackend,
   normalizeAgent,
@@ -45,13 +45,6 @@ type OrchestratorHistoryFileStat = {
   modifiedAt: string;
 };
 
-type CachedHistoryRecord = {
-  mtimeMs: number;
-  size: number;
-  parsed: OrchestratorHistoryRecord;
-};
-
-const historyParseCache = new Map<string, CachedHistoryRecord>();
 let historyWriteVersion = 0;
 
 function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
@@ -144,7 +137,7 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
   const filePath = safeOrchestratorHistoryPath(tabId);
   persistCanonicalChatHistoryRecord(tabId, record);
-  historyParseCache.delete(filePath);
+  threadSummaryCache.delete(filePath);
   historyWriteVersion += 1;
 }
 export function repairFlippedOrchestratorTranscripts(): void {
@@ -160,7 +153,7 @@ function ensureHistoryReady(): void {
 export function repairComposerPreamblePollution(): void {
   repairComposerPreambleHistory(ORCHESTRATOR_HISTORY_DIR, (tabId, record, filePath) => {
     persistCanonicalChatHistoryRecord(tabId, record);
-    historyParseCache.delete(filePath);
+    threadSummaryCache.delete(filePath);
     historyWriteVersion += 1;
   });
 }
@@ -179,7 +172,7 @@ function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
 function listThoughtHistoryFileStats(): OrchestratorHistoryFileStat[] {
   ensureHistoryReady();
   if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) {
-    historyParseCache.clear();
+    threadSummaryCache.clear();
     return [];
   }
 
@@ -208,25 +201,10 @@ function listThoughtHistoryFileStats(): OrchestratorHistoryFileStat[] {
     }
   }
 
-  for (const filePath of historyParseCache.keys()) {
-    if (!livePaths.has(filePath)) historyParseCache.delete(filePath);
+  for (const filePath of threadSummaryCache.keys()) {
+    if (!livePaths.has(filePath)) threadSummaryCache.delete(filePath);
   }
   return stats;
-}
-
-function readCachedHistoryRecord(fileStat: OrchestratorHistoryFileStat): OrchestratorHistoryRecord {
-  const cached = historyParseCache.get(fileStat.filePath);
-  if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
-    return cached.parsed;
-  }
-
-  const parsed = JSON.parse(readFileSync(fileStat.filePath, 'utf-8')) as OrchestratorHistoryRecord;
-  historyParseCache.set(fileStat.filePath, {
-    mtimeMs: fileStat.mtimeMs,
-    size: fileStat.size,
-    parsed,
-  });
-  return parsed;
 }
 
 export function mobileOrchestratorThreadHistoryStatToken(): string {
@@ -247,7 +225,7 @@ async function listThoughtHistoryFileStatsAsync(): Promise<OrchestratorHistoryFi
     entries = await readdirAsync(ORCHESTRATOR_HISTORY_DIR);
   } catch {
     // Dir absent/unreadable — mirror the sync path's !existsSync branch.
-    historyParseCache.clear();
+    threadSummaryCache.clear();
     return [];
   }
 
@@ -274,8 +252,8 @@ async function listThoughtHistoryFileStatsAsync(): Promise<OrchestratorHistoryFi
     }
   }
 
-  for (const filePath of historyParseCache.keys()) {
-    if (!livePaths.has(filePath)) historyParseCache.delete(filePath);
+  for (const filePath of threadSummaryCache.keys()) {
+    if (!livePaths.has(filePath)) threadSummaryCache.delete(filePath);
   }
   return stats;
 }
@@ -299,16 +277,16 @@ export function listMobileOrchestratorThreads(options: {
 
   for (const fileStat of listThoughtHistoryFileStats()) {
     try {
-      const record = readCachedHistoryRecord(fileStat);
+      const thread = threadSummaryCache.read(fileStat);
       // Archived threads are off the active list — the operator archived them to
       // declutter; they must not reappear in the orchestrator history/past-thread
       // surfaces (which is where they were leaking back in).
-      if (record.archivedAt) continue;
-      const threadBackend = effectiveBackend(record);
+      if (!thread) continue;
+      const threadBackend = thread.backend;
       if (backendFilter ? threadBackend !== backendFilter : threadBackend === 'openclaw') {
         continue;
       }
-      threads.push(projectThread(fileStat.tabId, record, fileStat.modifiedAt));
+      threads.push(thread);
     } catch {
       // skip unreadable files
     }

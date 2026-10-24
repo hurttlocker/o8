@@ -5565,6 +5565,12 @@
       ]
     },
     {
+      "path": "tests/session-idle-memory-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/session-merge-restriction-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -6050,6 +6056,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/thread-summary-discovery-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
