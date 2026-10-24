@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
 export function generatedOutputLaunch(mode, args = []) {
   return { command: process.execPath, args: [
-    '--import', fileURLToPath(new URL('../register-server-only-stub.mjs', import.meta.url)),
-    '--import', require.resolve('tsx'),
+    '--import', new URL('../register-server-only-stub.mjs', import.meta.url).href,
+    '--import', pathToFileURL(require.resolve('tsx')).href,
     fileURLToPath(new URL('../generated-output-run.ts', import.meta.url)), mode, ...args,
   ] };
 }
