@@ -404,15 +404,18 @@ export function ChatsTab({
   const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
+  const projectedAgentHistory = useMemo(() => mergeSidebarAgentHistory(
+    sweptThreads.chats, chatGroupBy === 'scheduled' ? [] : agentEntries,
+  ), [agentEntries, chatGroupBy, sweptThreads.chats]);
   const dateSortedChatItems = useMemo(() => {
     return (
-    mergeSidebarAgentHistory(sweptThreads.chats, chatGroupBy === 'scheduled' ? [] : agentEntries).filter((item) => {
+    projectedAgentHistory.filter(item => !item.archivedAt).filter((item) => {
       if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
         isOwnedAutomationSession(session) && sessionIdentity(session).includes(item.tabId));
       return true;
     }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
     );
-  }, [agentEntries, chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
+  }, [chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, projectedAgentHistory]);
   const manualOrder = useSidebarManualOrder(dateSortedChatItems);
   const sortedChatItems = chatGroupBy === 'manual' ? manualOrder.orderedItems : dateSortedChatItems;
   const workingHistoryIds = useMemo(() => {
@@ -479,16 +482,17 @@ export function ChatsTab({
   ));
 
   const flatArchivedLanes = useMemo(
-    () => deriveArchivedLanes(archivedLanes, targetRepos.map((repo) => repo.localPath)),
-    [archivedLanes, targetRepos],
+    () => deriveArchivedLanes(archivedLanes, targetRepos.map((repo) => repo.localPath))
+      .filter(lane => !agentEntries.some(entry => entry.row.laneId === lane.id)),
+    [agentEntries, archivedLanes, targetRepos],
   );
   const combinedArchivedHistory = useMemo(() => {
     const byId = new Map<string, ChatHistoryItem>();
-    for (const item of [...visibleArchivedHistory, ...sweptThreads.swept]) {
+    for (const item of [...visibleArchivedHistory, ...sweptThreads.swept, ...projectedAgentHistory.filter(item => item.archivedAt)]) {
       if (allowedSections.has(historySection(item))) byId.set(item.tabId, item);
     }
     return [...byId.values()].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
-  }, [allowedSections, sweptThreads.swept, visibleArchivedHistory]);
+  }, [allowedSections, projectedAgentHistory, sweptThreads.swept, visibleArchivedHistory]);
   const historyGroups = useMemo(() => {
     const sourceGroups = [
       { key: 'orchestrator' as const, label: 'Orchestrator', items: visibleOrchestratorHistory },
