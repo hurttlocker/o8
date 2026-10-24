@@ -72,6 +72,11 @@ async function mount(strict = false) {
   }
   const app = createElement(O8AuthProvider, null, createElement(Workspace), createElement(AccountTab));
   await act(async () => root.render(strict ? createElement(StrictMode, null, app) : app));
+  await settleAccountModule();
+}
+
+async function settleAccountModule() {
+  await act(async () => { await vi.dynamicImportSettled(); });
 }
 
 it.each(['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000'])(
@@ -142,6 +147,7 @@ it('bounds a pending native initialization without signing out and coalesces ret
   expect(container.textContent).not.toContain('Account unavailable');
   expect(mocks.nativeInit).toHaveBeenCalledOnce();
   await act(async () => resolve(mocks.engine));
+  await settleAccountModule();
   expect(mocks.providers.at(-1)?.Clerk).toBe(mocks.engine);
   expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Sign in to o8')).toBe(true);
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
@@ -155,6 +161,7 @@ it('retries a failed native initialization without falling back to browser cooki
   expect(mocks.providers).toHaveLength(0);
   const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
   await act(async () => retry.click());
+  await settleAccountModule();
   expect(mocks.nativeInit).toHaveBeenCalledTimes(2);
   expect(mocks.providers.at(-1)?.Clerk).toBe(mocks.engine);
   expect(container.textContent).not.toContain('Account unavailable');
@@ -172,6 +179,7 @@ it('keeps ordinary API traffic on the original fetch after recovering native ini
   await mount();
   const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
   await act(async () => retry.click());
+  await settleAccountModule();
   await globalThis.fetch('/api/panel/status');
   expect(nativeFetch).toHaveBeenCalledWith('/api/panel/status', undefined);
   expect(pluginFetch).not.toHaveBeenCalled();
@@ -219,6 +227,7 @@ it.each(['pending', 'rejected'] as const)(
       await act(async () => retry.click());
     }
     await act(async () => resolve(mocks.engine));
+    await settleAccountModule();
     expect(mocks.nativeInit).toHaveBeenCalledTimes(initial === 'pending' ? 1 : 2);
     expect(container.querySelector('textarea')).toBe(textarea);
     expect(textarea.value).toBe(draft);
@@ -239,7 +248,10 @@ it('publishes signed-in and signed-out state without remounting the workspace or
     useEffect(() => { mounts += 1; }, []);
     return createElement('output', null, auth.signedIn ? auth.user?.name : 'Signed out');
   }
-  const render = async () => act(async () => root.render(createElement(O8AuthProvider, null, createElement(Workspace))));
+  const render = async () => {
+    await act(async () => root.render(createElement(O8AuthProvider, null, createElement(Workspace))));
+    await settleAccountModule();
+  };
   await render();
   const output = container.querySelector('output');
   const baseline = mounts;

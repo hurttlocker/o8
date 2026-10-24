@@ -5,6 +5,7 @@ import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { ApiBearerBootstrap } from '@/components/security/ApiBearerBootstrap';
 import { headersIndicateWebMachineRelay } from '@/lib/connect/web-machine-surface';
+import { DashboardClientBoundary } from './DashboardClientBoundary';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,5 +28,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  return <><ApiBearerBootstrap source="meta" />{children}</>;
+  return <><ApiBearerBootstrap source="meta" /><DashboardClientBoundary>{children}</DashboardClientBoundary></>;
 }

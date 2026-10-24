@@ -3,7 +3,7 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 const runtime = globalThis as typeof globalThis & { __o8NextStartupScheduled?: boolean };
 
-/** Cross the route boundary only after this server has served a complete health response. */
+/** Give the document and hydration priority before optional background imports. */
 export function scheduleNextServerStartup(): void {
   if (runtime.__o8NextStartupScheduled) return;
   runtime.__o8NextStartupScheduled = true;
@@ -29,5 +29,9 @@ export function scheduleNextServerStartup(): void {
     }
     setTimeout(() => { void attempt(); }, 1_000).unref?.();
   };
-  setTimeout(() => { void attempt(); }, 0).unref?.();
+  // Health can finish while the loader is navigating. Importing telemetry,
+  // transcript repair and indexers immediately then competes with the document
+  // on this same Node thread. A bounded grace period also preserves automatic
+  // initialization for headless servers that never open a dashboard.
+  setTimeout(() => { void attempt(); }, 2_000).unref?.();
 }

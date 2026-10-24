@@ -2,14 +2,17 @@
 import { Suspense } from 'react';
 import type React from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '../repo-registry/shared';
-import { O8BrowserPane } from '../O8BrowserPane';
-import { WorkspaceFilesPane } from '../o8-panel/workspace-rail/WorkspaceFilesPane';
-import { ReviewPanel } from '../review/ReviewPanel';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { BottomPanelSurfaceKind } from '../ContextualPanel';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { SideChatIntro } from '../o8-panel/SideChatIntro';
+
+// The shell imports the surface menu at boot, even with the bottom panel
+// closed. Load each implementation only when its saved or selected tab mounts.
+const LazyBrowser = retryingLazy(() => import('../O8BrowserPane').then(module => ({ default: module.O8BrowserPane })), { label: 'Browser' });
+const LazyFiles = retryingLazy(() => import('../o8-panel/workspace-rail/WorkspaceFilesPane').then(module => ({ default: module.WorkspaceFilesPane })), { label: 'Files' });
+const LazyReview = retryingLazy(() => import('../review/ReviewPanel').then(module => ({ default: module.ReviewPanel })), { label: 'Review' });
 const LazyOrchestratorTab = retryingLazy(() => import('../workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 // ── CLI Agents (terminal only, no chat modes) ──
@@ -206,7 +209,9 @@ export function BottomUtilitySurface({
 }) {
   if (kind === 'files') {
     return (
-      <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
+      <Suspense fallback={null}>
+        <LazyFiles repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
+      </Suspense>
     );
   }
 
@@ -234,7 +239,9 @@ export function BottomUtilitySurface({
 
   if (kind === 'browser') {
     return (
-      <O8BrowserPane previews={previews} />
+      <Suspense fallback={null}>
+        <LazyBrowser previews={previews} />
+      </Suspense>
     );
   }
 
@@ -249,12 +256,14 @@ export function BottomUtilitySurface({
       );
     }
     return (
-      <ReviewPanel
-        repoPath={repoPath}
-        registeredRepos={registeredRepos}
-        onRepoPathChange={onRepoPathChange}
-        selectedFile={selectedFile}
-      />
+      <Suspense fallback={null}>
+        <LazyReview
+          repoPath={repoPath}
+          registeredRepos={registeredRepos}
+          onRepoPathChange={onRepoPathChange}
+          selectedFile={selectedFile}
+        />
+      </Suspense>
     );
   }
 

@@ -1,6 +1,6 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { WorkspaceBootLoaderClaim } from './workspace-terminal/workspace-boot-loader-claim';
@@ -8,7 +8,7 @@ import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
 import { AccountBlock } from './account-block/AccountBlock';
 import { FixedReportCard } from './FixedReportCard';
-import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
 import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
@@ -33,6 +33,8 @@ import {
   type AgentPanelProps,
   useAgentPanelState,
 } from './agent-panel';
+
+const LazyLeftPanelProjectFocus = retryingLazy(() => import('./repo-focus/LeftPanelProjectFocus').then(module => ({ default: module.LeftPanelProjectFocus })), { label: 'Project focus' });
 
 const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
 const MINI_FLAT_BUTTON_BG = 'transparent';
@@ -244,22 +246,24 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             WebkitAppRegion: 'drag' as unknown as string,
           } as CSSProperties}
         />
-        <LeftPanelProjectFocus
-          project={leftPanelFocus.view.project}
-          repos={leftPanelFocus.view.repos}
-          selectedRepoPath={leftPanelFocus.view.selectedRepo?.localPath ?? null}
-          workingRepoPath={workingRepoPath ?? null}
-          onSelectRepoPath={leftPanelFocus.setSelectedRepoPath}
-          onWorkInRepo={handleWorkInFocusedRepo}
-          onBack={leftPanelFocus.clearFocus}
-          packets={orchestratorPackets}
-          missionState={orchestratorMissionState}
-          ideWorkspaceSessions={ideWorkspaceSessions}
-          activeSessionKey={activeSessionKey}
-          onSelectSession={onSelectSession}
-          onOpenHistoryChat={onOpenHistoryChat}
-          onOpenSpecInWorkspace={onOpenSpecInWorkspace}
-        />
+        <Suspense fallback={null}>
+          <LazyLeftPanelProjectFocus
+            project={leftPanelFocus.view.project}
+            repos={leftPanelFocus.view.repos}
+            selectedRepoPath={leftPanelFocus.view.selectedRepo?.localPath ?? null}
+            workingRepoPath={workingRepoPath ?? null}
+            onSelectRepoPath={leftPanelFocus.setSelectedRepoPath}
+            onWorkInRepo={handleWorkInFocusedRepo}
+            onBack={leftPanelFocus.clearFocus}
+            packets={orchestratorPackets}
+            missionState={orchestratorMissionState}
+            ideWorkspaceSessions={ideWorkspaceSessions}
+            activeSessionKey={activeSessionKey}
+            onSelectSession={onSelectSession}
+            onOpenHistoryChat={onOpenHistoryChat}
+            onOpenSpecInWorkspace={onOpenSpecInWorkspace}
+          />
+        </Suspense>
         <ConnectionPill />
         <FixedReportCard />
         <UpdateCard quiet={navigationRail} />
