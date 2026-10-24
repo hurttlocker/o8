@@ -167,7 +167,7 @@ export async function runBroadcast(
     if (
       (clear && (rest.length !== 1 || rest[0] !== '--clear'))
       || (!clear && titleArgs.length !== 1)
-      || (issueValue !== null && (!Number.isSafeInteger(issue) || issue < 1))
+      || (issue !== null && (!Number.isSafeInteger(issue) || issue < 1))
     ) {
       throw new CliError(
         'invalid_args',

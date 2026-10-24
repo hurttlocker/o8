@@ -207,6 +207,12 @@ Produces `cli/dist/o8.mjs` — a single Node 22+ ESM bundle. Run directly via
 npx tsc --noEmit -p cli/tsconfig.json
 ```
 
+This strict project includes CLI tests and resolves shared `@/` imports against
+the root source tree. Its libraries cover Node 22's ES2023 APIs and the web types
+used by fetch tests and shared application contracts; the bundle targets Node 22.
+`tests/cli-standalone-real-path.test.ts` runs this compiler entry point and checks
+the bundled artifact and setup commands against an isolated HTTP fixture.
+
 ## See also
 
 - Epic [#926](https://github.com/o8-run/o8/issues/926) — full
