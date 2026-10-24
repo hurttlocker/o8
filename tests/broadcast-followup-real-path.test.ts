@@ -25,7 +25,15 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 // A spectator is a minted token record, not a bare hash in the projection file.
 const { getSpectatorTokenStore } = await import('@/lib/broadcast/spectator-token-store');
-const SPECTATOR_TOKEN = getSpectatorTokenStore().mint({ label: 'broadcast follow-up' }).bearer;
+const { readActiveSpectatorTokenHashes, writeActiveSpectatorTokenHashes } = await import('@/lib/broadcast/spectator-token-file');
+const SPECTATOR_TOKEN = getSpectatorTokenStore().mint({
+  label: 'broadcast follow-up',
+  repoGrants: [
+    '/tmp/broadcast-redaction-route',
+    '/tmp/broadcast-payload-bound',
+    '/tmp/broadcast-scan-bound',
+  ],
+}).bearer;
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
 const broadcastPost = await import('@/app/api/broadcast/post/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
@@ -34,12 +42,12 @@ const { decodeBroadcastCursor } = await import('@/lib/broadcast/events');
 const { getSqlite } = await import('@/lib/db');
 const { appendEvent, createLane } = await import('@/lib/lane/registry');
 
-function spectatorRequest(path: string): NextRequest {
+function spectatorRequest(path: string, token = SPECTATOR_TOKEN): NextRequest {
   return new NextRequest(`http://localhost:3001${path}`, {
     method: 'GET',
     headers: {
       host: 'localhost:3001',
-      authorization: `Bearer ${SPECTATOR_TOKEN}`,
+      authorization: `Bearer ${token}`,
     },
   });
 }
@@ -62,6 +70,44 @@ afterEach(() => {
 });
 
 describe('Broadcast follow-up bounds and redaction through real routes', () => {
+  it('uses a canonical spectator with explicit grants for every fixture repository', async () => {
+    const response = await broadcastEvents.GET(spectatorRequest('/api/broadcast/events?limit=1'));
+    expect(response.status).toBe(200);
+    expect(getSpectatorTokenStore().resolveBearer(SPECTATOR_TOKEN)).toMatchObject({
+      repoGrants: [
+        '/tmp/broadcast-payload-bound',
+        '/tmp/broadcast-redaction-route',
+        '/tmp/broadcast-scan-bound',
+      ],
+      revokedAt: null,
+    });
+  });
+
+  it('refuses a projection-only credential through both reader routes without granting canonical authority', async () => {
+    const token = 'o8sp_projection_only_fixture';
+    const projection = [...readActiveSpectatorTokenHashes()];
+    const hash = createHash('sha256').update(token).digest('hex');
+    writeActiveSpectatorTokenHashes([...projection, hash]);
+    try {
+      expect(readActiveSpectatorTokenHashes().has(hash)).toBe(true);
+      expect(getSpectatorTokenStore().resolveBearer(token)).toBeNull();
+      for (const [route, path] of [
+        [broadcastEvents, '/api/broadcast/events?limit=1'],
+        [broadcastSnapshot, '/api/broadcast/snapshot?events=1'],
+      ] as const) {
+        const response = await route.GET(spectatorRequest(path, token));
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          error: { code: 'broadcast_reader_forbidden' },
+        });
+      }
+    } finally {
+      writeActiveSpectatorTokenHashes(projection);
+    }
+    const response = await broadcastSnapshot.GET(spectatorRequest('/api/broadcast/snapshot?events=1'));
+    expect(response.status).toBe(200);
+  });
+
   it('redacts sensitive keys plus live operator, device, and short secret environment values', async () => {
     const shortOperatorToken = 'op!42x';
     const shortEnvironmentSecret = 'ev!44z';
