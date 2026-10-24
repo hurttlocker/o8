@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { assertPreRunAdmission } from '@/lib/lane/pre-run-cancellation';
 import { advanceCorrectionStop } from '@/lib/db/worker-correction-fences';
 import { getSqlite } from '@/lib/db';
 import type { OwnedSessionRecord } from './types';
@@ -15,6 +16,7 @@ export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promis
 
 /** Assert only the surrounding action guard, including before lane attachment. */
 export function assertOwnedActionGuard(): void {
+  assertPreRunAdmission();
   actionGuard.getStore()?.(null);
 }
 
@@ -24,6 +26,7 @@ export function withOwnedActionAdmission<T>(input: Admission, action: () => Prom
 }
 
 export function assertOwnedActionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
+  assertPreRunAdmission();
   actionGuard.getStore()?.(session, preparedRunId);
   const expected = admission.getStore();
   if (!expected) return;

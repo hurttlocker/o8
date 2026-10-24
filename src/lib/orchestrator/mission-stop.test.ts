@@ -149,24 +149,28 @@ describe('stopMission', () => {
       {
         packetId: 'running',
         status: 'stopped',
+        stoppedFrom: 'running',
         laneId: runningLane.id,
         note: 'Stopped.',
       },
       {
         packetId: 'queued-never-launched',
         status: 'stopped',
+        stoppedFrom: 'queued',
         laneId: null,
         note: 'Queued packet held before any lane launched.',
       },
       {
         packetId: 'already-terminal',
         status: 'already-terminal',
+        stoppedFrom: 'awaiting_review',
         laneId: null,
         note: 'Packet is already terminal (awaiting_review).',
       },
       {
         packetId: 'failed-stop',
         status: 'stop-failed',
+        stoppedFrom: 'running',
         laneId: failedStopLane.id,
         note: 'Worker remained live after SIGINT, SIGTERM, and SIGKILL.',
       },
@@ -231,6 +235,7 @@ describe('stopMission', () => {
     expect(result.packets).toEqual([{
       packetId: 'terminal-runs',
       status: 'already-terminal',
+      stoppedFrom: 'archived',
       laneId: null,
       note: 'Packet is already terminal (archived). Stopped 1 packet-managed run.',
     }]);

@@ -58,11 +58,12 @@ const setupRoute = await import('@/app/api/setup/agent/route');
 const missionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const dispatchRoute = await import('@/app/api/orchestrator/dispatch/route');
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
+const stopRoute = await import('@/app/api/orchestrator/stop-mission/route');
 const mcpRoute = await import('@/app/api/mcp/route');
 const { panelGateMiddleware } = await import('@/middleware');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
-const { WorktreeManager } = await import('@/lib/worktree/manager');
+const { WorktreeManager, WorktreeRebaseConflictError } = await import('@/lib/worktree/manager');
 let port = 0;
 const dispatches: Promise<unknown>[] = [];
 const creationBodies: Record<string, unknown>[] = [];
@@ -82,6 +83,7 @@ const server = createServer(async (req, res) => {
       : req.url === '/api/setup/agent' ? await setupRoute.POST(request)
       : req.url === '/api/orchestrator/create-mission' ? await missionRoute.POST(request)
       : req.url === '/api/orchestrator/reset-packet' ? await resetRoute.POST(request)
+      : req.url === '/api/orchestrator/stop-mission' ? await stopRoute.POST(request)
       : dispatch ? await dispatch
       : new Response('Unknown fixture route', { status: 404 });
     if (req.url === '/api/orchestrator/create-mission' && dropCreationResponse) {
@@ -113,6 +115,7 @@ const count = () => (getSqlite().prepare('SELECT COUNT(*) AS count FROM missions
 beforeAll(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
+  vi.stubEnv('O8_API_PORT', String(port));
   writeFileSync(join(dataDir, 'api-port'), String(port));
   payload(await call('o8_setup', { action: 'open', path: repoPath }));
 });
@@ -152,6 +155,219 @@ it('keeps distinct explicit keys and omitted keys as separate deliberate mission
   expect(new Set(results.map(result => result.missionId)).size).toBe(4);
   expect(count()).toBe(before + 4);
 });
+
+// #4069: exercise the CLI/MCP while real dispatch owns the mission-store lock.
+it.each(['stop-launching', 'stop-provisioning', 'reset-provisioning', 'retry-provisioning',
+  'stop-watchdog', 'reset-watchdog', 'stop-rebase-rejection', 'reset-ready-publication', 'reset-packet-lease',
+  'stop-packet-lease', 'reset-ready-replacement'] as const)(
+  'cancels %s before releasing a blocked provisioner', async (action) => {
+    const { runMission } = await import('../cli/src/commands/mission');
+    const lanes = await import('@/lib/lane/registry');
+    const control = await import('@/lib/orchestrator/control-plane');
+    const runtimeActions = await import('@/lib/runtime/actions');
+    const launchSurface = runtimeActions.launchRuntimeSurface;
+    let runtimeCompletion: Promise<unknown> | undefined;
+    vi.spyOn(runtimeActions, 'launchRuntimeSurface').mockImplementation((...args) => {
+      const completion = launchSurface(...args);
+      runtimeCompletion = completion;
+      return completion;
+    });
+    const created = payload(await create({ issues_inline: [{ title: `Cancel ${action}`, body: 'Owned fixture.' }] }));
+    const packetId = created.packets[0].id;
+    const beforeLaunches = launches.mock.calls.length;
+    const held = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    const prototype = WorktreeManager.prototype as unknown as {
+      resetTrackedWorkspaceChanges(path: string): Promise<void>;
+      updateMetaStatus(id: string, status: string): Promise<void>;
+    };
+    const isLaunching = action === 'stop-launching' || action === 'stop-rebase-rejection';
+    let started = false;
+    let isEntered = false;
+    let preparedPath: string | undefined;
+    let laneId = '';
+    const block = async () => { isEntered = true; await held.promise; };
+    if (isLaunching) {
+      const original = WorktreeManager.prototype.create;
+      vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (this: InstanceType<typeof WorktreeManager>, ...args) {
+        started = true;
+        try {
+          await block();
+          if (action === 'stop-rebase-rejection') throw new WorktreeRebaseConflictError({
+            baseBranch: 'main', conflictFiles: ['README.md'], worktreePath: repoPath, branch: 'fixture-conflict',
+          });
+          return await original.apply(this, args);
+        }
+        finally { finished.resolve(); }
+      });
+    } else {
+      const original = prototype.resetTrackedWorkspaceChanges;
+      vi.spyOn(prototype, 'resetTrackedWorkspaceChanges').mockImplementation(async function (this: typeof prototype, path) {
+        preparedPath = path;
+        await original.call(this, path);
+        if (!action.startsWith('reset-ready')) await block();
+      });
+      if (action.startsWith('reset-ready')) {
+        const update = prototype.updateMetaStatus;
+        vi.spyOn(prototype, 'updateMetaStatus').mockImplementation(async function (this: typeof prototype, id, status) {
+          await update.call(this, id, status);
+          if (status === 'ready') await block();
+        });
+      }
+      if (action === 'reset-ready-replacement') {
+        const cleanup = WorktreeManager.prototype.cleanup;
+        vi.spyOn(WorktreeManager.prototype, 'cleanup').mockImplementationOnce(async function (this: InstanceType<typeof WorktreeManager>, id, options) {
+          const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+          await withWorktreeMetaTransaction(repoPath, async transaction => {
+            const entry = (await transaction.readAll())[id];
+            await transaction.save(id, { ...entry, createdAt: entry.createdAt + 1, laneId: 'newer-fixture-generation' });
+          });
+          return cleanup.call(this, id, options);
+        });
+      }
+      const createOriginal = WorktreeManager.prototype.create;
+      vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (this: InstanceType<typeof WorktreeManager>, ...args) {
+        started = true;
+        try { return await createOriginal.apply(this, args); }
+        finally { finished.resolve(); }
+      });
+    }
+    let operation: Promise<unknown> | undefined;
+    let dispatched: Promise<McpToolResult> | undefined;
+    const output: string[] = [];
+    let receipt: unknown;
+    let failure: unknown;
+    try {
+      const dispatch = () => call('dispatch_mission', { missionId: created.missionId });
+      const { withPacketLifecycleMutationLock } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
+      dispatched = action.endsWith('packet-lease') ? withPacketLifecycleMutationLock(packetId, dispatch) : dispatch();
+      await vi.waitFor(() => expect(isEntered).toBe(true), { timeout: 10_000 });
+      const lane = lanes.findLatestLaneByPacket(packetId)!;
+      laneId = lane.id;
+      expect(lane).toMatchObject({ status: 'launching', sessionKey: null });
+      if (action.endsWith('watchdog')) {
+        const { enforceWedgeTimeouts, WEDGE_LAUNCHING_MS } = await import('@/lib/lane/wedge-timeouts');
+        enforceWedgeTimeouts(Date.now() + WEDGE_LAUNCHING_MS + 1000);
+        expect(lanes.getLane(lane.id)?.status).toBe('awaiting_orchestrator');
+      }
+      expect(existsSync(join(dataDir, 'orchestrator-state.json.lock'))).toBe(true);
+      if (action.startsWith('stop')) {
+        vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { output.push(String(chunk)); return true; });
+        operation = runMission({ human: false, verbose: false }, 'stop', ['--mission', created.missionId]).then(code => {
+          expect(code).toBe(0);
+          receipt = JSON.parse(output.find(line => line.includes('o8/cli/mission.stop/v1'))!).mission;
+        });
+      } else {
+        operation = call('reset_packet', { packetId, clearWorktree: action.startsWith('reset') }).then(result => { receipt = payload(result); });
+      }
+      operation = operation.catch(error => { failure = error; });
+      // A cancellation must acknowledge while the provisioner is still blocked.
+      await vi.waitFor(() => expect(receipt ?? failure).toBeDefined(), { timeout: 3000 });
+      if (failure) throw failure;
+      if (action.startsWith('stop')) expect(receipt).toMatchObject({ packets: [{ packetId, status: 'stopped',
+        stoppedFrom: isLaunching ? 'launching' : 'provisioning' }] });
+      else expect(receipt).toMatchObject({ reset: true, packetId });
+      expect(control.readOrchestratorControlPlaneState().packets[0]).toMatchObject({ queueState: 'held' });
+      expect(lanes.getLane(lane.id)?.status).toBe(action.startsWith('stop') ? 'paused' : 'archived');
+    } finally {
+      held.resolve();
+      await Promise.allSettled([operation, dispatched, runtimeCompletion, ...(started ? [finished.promise] : [])]);
+      expect.soft(launches.mock.calls.length - beforeLaunches).toBe(0);
+    }
+    expect(launches.mock.calls.length - beforeLaunches).toBe(0);
+    expect(control.readOrchestratorControlPlaneState().packets[0].queueState).toBe('held');
+    expect(lanes.getLane(laneId)?.status).toBe(action.startsWith('stop') ? 'paused' : 'archived');
+    if (preparedPath) expect(existsSync(preparedPath)).toBe(action === 'reset-ready-replacement');
+    if (action === 'reset-ready-replacement') expect(readFileSync(join(preparedPath!, 'README.md'), 'utf8')).toBe('fixture\n');
+  }, 30_000,
+);
+
+it('reports queued as the stopped-from state through mission stop CLI', async () => {
+  const created = payload(await create({ issues_inline: [{ title: 'Stop queued packet', body: 'Owned fixture.' }] }));
+  const control = await import('@/lib/orchestrator/control-plane');
+  const queued = control.readOrchestratorControlPlaneState();
+  Object.assign(queued.packets[0], { queueState: 'queued', status: 'queued', blockedReason: null, holdIntent: null });
+  control.writeOrchestratorControlPlaneState(queued);
+  const { runMission } = await import('../cli/src/commands/mission');
+  const output: string[] = [];
+  vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { output.push(String(chunk)); return true; });
+  expect(await runMission({ human: false, verbose: false }, 'stop', ['--mission', created.missionId])).toBe(0);
+  const receipt = JSON.parse(output.find(line => line.includes('o8/cli/mission.stop/v1'))!).mission;
+  expect(receipt.packets).toMatchObject([{ packetId: created.packets[0].id, status: 'stopped', stoppedFrom: 'queued' }]);
+});
+
+it('stops both packets after a timed-out retry creates a duplicate, including the provisioning queue', async () => {
+  const { runMission } = await import('../cli/src/commands/mission');
+  const lanes = await import('@/lib/lane/registry');
+  // Model a legacy caller that loses the create response and retries with a
+  // fresh correlation key. Both persisted packets must remain stoppable.
+  const body = { repoPath, runtime: 'codex', issues: [{ number: 90_000_004_069, title: 'Duplicate cancellation fixture', body: 'Owned fixture.', url: '' }] };
+  const known = new Set((getSqlite().prepare('SELECT id FROM missions').all() as Array<{ id: string }>).map(row => row.id));
+  dropCreationResponse = true;
+  await expect(fetch(`http://127.0.0.1:${port}/api/orchestrator/create-mission`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...body, clientMutationId: 'duplicate-lost-response' }),
+  })).rejects.toThrow();
+  const originalId = (getSqlite().prepare('SELECT id FROM missions').all() as Array<{ id: string }>).find(row => !known.has(row.id))!.id;
+  const originalPacket = readMissionRegistryEntry(originalId)!.mission.packets[0];
+  const retryResponse = await fetch(`http://127.0.0.1:${port}/api/orchestrator/create-mission`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    // Legacy inline retries allocate another synthetic number for the same task.
+    body: JSON.stringify({ ...body, issues: [{ ...body.issues[0], number: body.issues[0].number + 1 }], clientMutationId: 'duplicate-new-retry-key' }),
+  });
+  expect(retryResponse.status).toBe(201);
+  const duplicate = (await retryResponse.json()).result;
+  expect(duplicate.missionId).not.toBe(originalId);
+  expect(duplicate.packets[0].id).not.toBe(originalPacket.id);
+  expect(duplicate.packets[0].title).toBe(originalPacket.title);
+  const held = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const finished: Promise<unknown>[] = [];
+  const prototype = WorktreeManager.prototype as unknown as { resetTrackedWorkspaceChanges(path: string): Promise<void> };
+  let isEntered = false;
+  const reset = prototype.resetTrackedWorkspaceChanges;
+  vi.spyOn(prototype, 'resetTrackedWorkspaceChanges').mockImplementation(async function (this: typeof prototype, path) {
+    await reset.call(this, path); isEntered = true; entered.resolve(); await held.promise;
+  });
+  const originalCreate = WorktreeManager.prototype.create;
+  vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(function (this: InstanceType<typeof WorktreeManager>, ...args) {
+    const completion = originalCreate.apply(this, args);
+    finished.push(completion);
+    return completion;
+  });
+  const beforeLaunches = launches.mock.calls.length;
+  const pending: Promise<unknown>[] = [];
+  const output: string[] = [];
+  try {
+    pending.push(call('dispatch_mission', { missionId: originalId }));
+    await vi.waitFor(() => expect(isEntered).toBe(true), { timeout: 10_000 });
+    pending.push(call('dispatch_mission', { missionId: duplicate.missionId }));
+    await vi.waitFor(() => expect(lanes.findLatestLaneByPacket(duplicate.packets[0].id)?.lastEventLabel)
+      .toMatch(/^worktree_provision_queued:/), { timeout: 10_000 });
+    vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { output.push(String(chunk)); return true; });
+    for (const missionId of [duplicate.missionId, originalId]) {
+      let stopped = false;
+      let failure: unknown;
+      const stop = runMission({ human: false, verbose: false }, 'stop', ['--mission', missionId]).then(() => { stopped = true; }, error => { failure = error; });
+      pending.push(stop);
+      await vi.waitFor(() => expect(stopped || failure).toBeTruthy(), { timeout: 3000 });
+      if (failure) throw failure;
+    }
+    const receipts = output.filter(line => line.includes('o8/cli/mission.stop/v1')).map(line => JSON.parse(line).mission);
+    expect(receipts.map(receipt => receipt.packets[0])).toMatchObject([
+      { packetId: duplicate.packets[0].id, status: 'stopped', stoppedFrom: 'queued' },
+      { packetId: originalPacket.id, status: 'stopped', stoppedFrom: 'provisioning' },
+    ]);
+  } finally {
+    held.resolve();
+    await Promise.allSettled([...pending, ...finished]);
+    expect.soft(launches.mock.calls.length - beforeLaunches).toBe(0);
+  }
+  for (const [missionId, packetId] of [[originalId, originalPacket.id], [duplicate.missionId, duplicate.packets[0].id]]) {
+    expect(readMissionRegistryEntry(missionId)!.mission.packets.find(packet => packet.id === packetId)).toMatchObject({ operatorStopped: true, queueState: 'held' });
+    expect(lanes.findLatestLaneByPacket(packetId)).toMatchObject({ status: 'paused', sessionKey: null });
+  }
+}, 30_000);
 
 it('returns ids before slow provisioning finishes and never dispatches an exact replay again', async () => {
   const before = count();

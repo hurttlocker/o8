@@ -1,4 +1,5 @@
 import { assertLaunchAttachment } from '@/lib/lane/commands-launch-admission';
+import { withPreRunLaunchCancellation } from '@/lib/lane/pre-run-cancellation';
 import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,6 +54,13 @@ function recordLaunchFailure(
 }
 
 export async function launchSession(
+  command: LaunchSessionCommand,
+  actor: LaneEventActor,
+): Promise<LaneCommandResult> {
+  return withPreRunLaunchCancellation(command.laneId, () => launchSessionInner(command, actor));
+}
+
+async function launchSessionInner(
   command: LaunchSessionCommand,
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {

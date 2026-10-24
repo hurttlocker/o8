@@ -94,6 +94,7 @@ interface MissionStopResult {
   packets: Array<{
     packetId: string;
     status: string;
+    stoppedFrom?: string;
     laneId: string | null;
     note?: string;
     [key: string]: unknown;
@@ -548,7 +549,7 @@ async function runMissionStop(mode: OutputMode, rest: string[]): Promise<number>
       ['packets', String(result.packets.length)],
       ...result.packets.map((item) => [
         `  · ${item.packetId}`,
-        `${item.status}${item.laneId ? ` · ${item.laneId}` : ''}${item.note ? ` · ${item.note}` : ''}`,
+        `${item.status}${item.stoppedFrom ? ` · from ${item.stoppedFrom}` : ''}${item.laneId ? ` · ${item.laneId}` : ''}${item.note ? ` · ${item.note}` : ''}`,
       ] as [string, string]),
     ]);
   } else {

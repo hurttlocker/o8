@@ -386,6 +386,7 @@ export type LaneEventVerb =
   | 'worktree_provision_failed'
   | 'worktree_provision_queued'
   | 'worktree_provision_started'
+  | 'pre_run_cancelled'
   | 'environment_files_not_inherited'
   | 'artifact_admission_retry'
   // Cleanup positively confirmed the tracked child directory was gone. This
