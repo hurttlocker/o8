@@ -39,7 +39,7 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet diff [id]     the packet's code diff vs base (committed + uncommitted)
   packet commit -m ".." stage + commit the current worktree with an explicit pathspec
   packet heartbeat [id] update a packet lane heartbeat
-  packet review [id]   approve + merge; cite --coverage and --process-evidence, or use --waive-missing-contract <reason> for an uncaptured default contract
+  packet review [id]   approve + merge; cite --coverage and --process-evidence; --supplement-process-evidence completes an existing clean review; --waive-missing-contract <reason> covers an uncaptured default contract
   packet park [id]     remove a verified review-ready workspace while preserving immutable review
   packet restore [id]  restore a parked workspace to its exact reviewed state
   packet close [id]    close without merging (--reason adopted_elsewhere|superseded|spec_changed|wontfix)

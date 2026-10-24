@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
   const limit = parseLimit(params.get('limit'));
   const cursor = parseCursor(params.get('cursor'));
   const tail = parseTail(params.get('tail'));
+  const fullHistory = !tail || params.get('history') === 'complete';
 
   if (!packetId && !sessionKey) {
     return NextResponse.json(
@@ -60,8 +61,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const readback = packetId
-      ? await readPacketTranscriptEvents(packetId)
-      : { packetId: '', ...(await readSessionTranscriptEvents(sessionKey)) };
+      ? await readPacketTranscriptEvents(packetId, fullHistory)
+      : { packetId: '', ...(await readSessionTranscriptEvents(sessionKey, fullHistory)) };
 
     if (readback.unsupportedReason) {
       return NextResponse.json(

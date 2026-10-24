@@ -2,6 +2,12 @@ import { formatPacketTaskContractForReview } from '@/lib/orchestrator/packet-tas
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
 import { REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1 } from './outcome-ownership';
 
+const REVIEWER_LIMITATIONS = [
+  'Tool failures are reviewer limitations, not packet defects. Do not request changes solely because your transcript, scope, preview, or verification tool is unavailable.',
+  'If code and file-backed coverage clear, approve with unverified process items. Record each as a severity "note", status "accepted", description starting "Reviewer limitation:" in submit_review findings or the structured verdict. Name the failed tool, error and affected constraint IDs. Never invent process citations.',
+  'The deterministic merge gate still requires process evidence at the reviewed HEAD. The operator can supply it with `o8 packet review --approve --supplement-process-evidence --expected-sha <HEAD> --coverage <R>=<path> --process-evidence <P>=<source>:<reference>`. This completes the existing review without resetting its second pass. Missing code coverage and concrete defects still require changes.',
+].join('\n');
+
 export interface BlindSecondPassPromptInputV1 {
   laneLabel: string;
   branch: string;
@@ -30,6 +36,7 @@ export function buildBlindSecondPassPromptV1(input: BlindSecondPassPromptInputV1
     contractArmed ? formatPacketTaskContractForReview(input.taskContract) : null,
     contractArmed ? '' : null,
     REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1,
+    REVIEWER_LIMITATIONS,
     '',
     '## Required verification protocol',
     `Worktree: ${input.cwd}`,
@@ -140,10 +147,10 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
       ? '`[ ] <ID> <sub-requirement> - gap <reason>`'
       : '`[ ] <sub-requirement> - gap <reason>`',
     contractArmed && input.taskContract?.processConstraints?.length
-      ? 'PROCESS checklist - assess every process constraint ID from transcript, lane events, or command observations. Mark unavailable evidence as unverified and request changes; never cite a changed file as proof of an unrelated process action.'
+      ? 'PROCESS checklist - assess every process constraint ID from transcript, lane events, or command observations. Mark unavailable process evidence as a Reviewer limitation: and leave it unverified for the operator; never cite a changed file as proof of an unrelated process action.'
       : null,
     contractArmed && input.taskContract?.processConstraints?.length && input.lane.packetId
-      ? `Retrieve the packet's persisted worker evidence with o8_packet_transcript(${JSON.stringify({ packetId: input.lane.packetId, tail: true, limit: 50 })}). Paginate with cursor and limit when the required evidence is outside that tail. Cite concrete event sequences for process constraints. If the tool or evidence is unavailable, mark it unverified and request changes; do not guess transcript paths or assume the previous reviewer session's context is available.`
+      ? `Retrieve the packet's persisted worker evidence with o8_packet_transcript(${JSON.stringify({ packetId: input.lane.packetId, tail: true, limit: 50 })}). Paginate with cursor and limit when the required evidence is outside that tail. Cite concrete event sequences for process constraints. If the tool or evidence is unavailable, record a Reviewer limitation: with the affected process IDs; do not guess transcript paths or assume the previous reviewer session's context is available.`
       : null,
     contractArmed ? '' : null,
     contractArmed ? 'MINIMALITY trace - map every changed file or bounded change unit to task-contract requirement IDs:' : null,
@@ -159,7 +166,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
       : 'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or any COMPLETENESS site is uncovered. Request changes instead.',
     'When any COMPLETENESS site is uncovered, list EVERY uncovered `SITE:` line in the request-changes findings so the next worker round receives the full set.',
     contractArmed
-      ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per file-backed requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched. For every process constraint include a separate processEntries item `{ constraintId, source: "transcript"|"lane-event"|"command", reference }` citing a concrete turn, event, or command observation. If evidence is unavailable, say unverified and request changes. reviewedHeadSha must equal contractCoverageEvidence.headSha.'
+      ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per file-backed requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched. For every process constraint include a separate processEntries item `{ constraintId, source: "transcript"|"lane-event"|"command", reference }` citing a concrete turn, event, or command observation. If process evidence is unavailable, record a Reviewer limitation: and omit that process entry; the operator must supply its citation before merge. reviewedHeadSha must equal contractCoverageEvidence.headSha.'
       : null,
     'To clear an intentional global write, cite the file:line that proves the global destination is correct.',
     'Where the change has observable output (a file written, a command stdout, a function return), PREFER to run it in the worktree and inspect the ACTUAL output over reasoning about the diff.',
@@ -181,6 +188,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     input.selfReviewSection,
     '',
     REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1,
+    REVIEWER_LIMITATIONS,
     '',
     deviationsSection,
     '',

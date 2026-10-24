@@ -27,6 +27,7 @@ interface ReviewArgs {
   }>;
   processEntries: Array<{ constraintId: string; source: 'transcript' | 'lane-event' | 'command'; reference: string }>;
   missingContractWaiverReason: string | null;
+  supplementProcessEvidence: boolean;
 }
 
 interface OperatorResponse<T> {
@@ -40,7 +41,7 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
     command: 'review',
     valueFlags: ['expected-sha', 'commit-message', 'idempotency-key', 'contract-version', 'waive-missing-contract'],
     repeatableValueFlags: ['coverage', 'process-evidence'],
-    booleanFlags: ['approve'],
+    booleanFlags: ['approve', 'supplement-process-evidence'],
   });
 
   const rawContractVersion = args.values['contract-version']?.trim();
@@ -119,6 +120,7 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
     coverageEntries,
     processEntries,
     missingContractWaiverReason,
+    supplementProcessEvidence: args.booleans.has('supplement-process-evidence'),
   };
 }
 
@@ -184,6 +186,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     packetId,
     approved: true,
     findings: [],
+    ...(args.supplementProcessEvidence ? { supplementProcessEvidence: true } : {}),
     reviewedHeadSha: args.expectedHeadSha ?? undefined,
     contractCoverageEvidence: args.coverageEntries.length > 0 ? {
       contractVersion: args.contractVersion ?? 1,

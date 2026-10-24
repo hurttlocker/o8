@@ -693,8 +693,8 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
 }
 
 // Cap any oversized string field on a transcript event so a single large
-// tool_result payload can't flood the caller's context. The route already
-// bounds the raw tail (256KB) + window (200 events); this bounds per-event size.
+// tool_result payload can't flood the caller's context. The route bounds the
+// response window to 200 events; this bounds per-event size.
 const PER_EVENT_TEXT_CAP = 2000;
 function capTranscriptEvent(event: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -727,6 +727,7 @@ export async function handleTranscript(args: Record<string, unknown>): Promise<M
 
     const qs = new URLSearchParams();
     qs.set('packetId', packetId);
+    qs.set('history', 'complete');
     if (tail) qs.set('tail', 'true');
     if (cursor !== undefined) qs.set('cursor', String(cursor));
     if (limit !== undefined) qs.set('limit', String(limit));
