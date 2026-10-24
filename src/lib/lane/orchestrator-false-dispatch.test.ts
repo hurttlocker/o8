@@ -113,6 +113,19 @@ describe('launchesWorker (#2936)', () => {
     expect(launchesWorker('mcp__operator__create_mission', { issues: ['2936'], dispatch: false })).toBe(false);
   });
 
+  it('counts deferred dispatches so a successful launch cannot trigger a duplicate retry', () => {
+    for (const name of ['cortex_launch_agent', 'create_mission', 'dispatch_mission', 'rerun_with_feedback']) {
+      const count = Number(launchesWorker('mcp__operator__o8_tool_call', { name, arguments: '{}' }));
+      expect(count).toBe(1);
+      expect(isFalseDispatchTurn({ completedResult: true, error: null, launchAgentCallCount: count,
+        assistantText: 'I launched the worker.' })).toBe(false);
+    }
+    expect(launchesWorker('mcp__operator__o8_tool_call', { name: 'create_mission', arguments: '{"dispatch":false}' })).toBe(false);
+    for (const args of ['[]', 'null', '{']) {
+      expect(launchesWorker('mcp__operator__o8_tool_call', { name: 'create_mission', arguments: args })).toBe(false);
+    }
+  });
+
   it.each([
     'mcp__operator__retry_packet',
     'mcp__operator__steer_packet',

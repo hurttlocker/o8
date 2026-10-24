@@ -11,8 +11,9 @@ import { entriesForSurface, type ToolRegistry } from './registry';
 
 export function toClaudeServersMap(r: ToolRegistry): Record<string, OrchestratorMcpServerConfig> {
   const out: Record<string, OrchestratorMcpServerConfig> = {};
-  for (const { name, config } of entriesForSurface(r, 'claude-orchestrator')) {
-    out[name] = config;
+  for (const { name, config, entry } of entriesForSurface(r, 'claude-orchestrator')) {
+    out[name] = entry.deferredTools && config.type === 'stdio'
+      ? { ...config, env: { ...config.env, O8_MCP_TOOL_LOADING: 'deferred' } } : config;
   }
   return out;
 }

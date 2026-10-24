@@ -6,6 +6,8 @@ import { createInterface } from 'node:readline';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { withVisualizationContext } from './visualization-context';
+import { deferredMcpRequest } from './deferred-tools';
+import type { McpTool } from './operator-handlers/shared';
 
 type JsonRpcId = number | string | null;
 
@@ -39,7 +41,7 @@ function send(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-async function forward(message: unknown): Promise<void> {
+async function request(message: unknown): Promise<unknown> {
   const token = readTrimmed(join(getDataDir(), 'ws-token'));
   const response = await fetch(`${resolveApiBase()}/api/mcp`, {
     method: 'POST',
@@ -58,7 +60,22 @@ async function forward(message: unknown): Promise<void> {
   if (!response.ok) {
     throw new Error(`o8 MCP host returned HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ''}`);
   }
-  if (text.trim()) send(JSON.parse(text));
+  if (text.trim()) return JSON.parse(text);
+}
+
+async function forward(message: unknown): Promise<void> {
+  if (message && typeof message === 'object' && !Array.isArray(message) && 'method' in message) {
+    const projected = await deferredMcpRequest(message as Parameters<typeof deferredMcpRequest>[0], async () => {
+      const response = await request({ jsonrpc: '2.0', id: requestId(message), method: 'tools/list' }) as
+        { result?: { tools?: McpTool[] }; error?: unknown };
+      if (!Array.isArray(response?.result?.tools)) throw new Error('Unable to read the o8 tool catalog');
+      return response.result.tools;
+    });
+    if (projected.response) { send(projected.response); return; }
+    message = projected.message;
+  }
+  const response = await request(message);
+  if (response !== undefined) send(response);
 }
 
 const rl = createInterface({ input: process.stdin, terminal: false });
