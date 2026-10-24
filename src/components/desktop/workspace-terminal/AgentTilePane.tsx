@@ -87,7 +87,8 @@ export function resolveAgentTileStatus(
 ): VisualStatus {
   const normalizedReason = blockedReason?.trim().toLowerCase() ?? '';
   if (FAILED_BLOCK_REASONS.has(normalizedReason)) return 'error';
-  const states = [packetStatus, agentStatus].map((value) => classifyAgentTileStatus(value));
+  if (packetStatus) return classifyAgentTileStatus(packetStatus);
+  const states = [agentStatus].map((value) => classifyAgentTileStatus(value));
   if (states.includes('error')) return 'error';
   if (states.includes('review')) return 'review';
   if (states.includes('waiting')) return 'waiting';
@@ -99,8 +100,8 @@ function visualStatusFromTerminalState(state: TerminalStatusState): VisualStatus
   switch (state) {
     case 'working': return 'running';
     case 'blocked': return 'waiting';
-    case 'review-ready':
-    case 'complete': return 'review';
+    case 'review-ready': return 'review';
+    case 'complete': return 'idle';
     case 'failed': return 'error';
     case 'idle':
     case 'unknown': return 'idle';
@@ -316,7 +317,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const modelLabel = resolvedModel?.trim() || null;
   const taskLabel = agent?.currentTask?.trim() || packet?.title?.trim() || packet?.summary?.trim() || null;
   const attention = workerAttention(packet?.status ?? agent?.status, packet?.blockedReason);
-  const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
+  const statusEvidence = packet ? packet.statusEvidence : agent?.statusEvidence;
   const status = useMemo(
     () => statusEvidence
       ? visualStatusFromTerminalState(statusEvidence.state)
@@ -479,7 +480,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     >
       <WorkerPaneHeader title={displayTitle} branch={packet?.branchTarget} issueNumber={packet?.issue?.number}
         runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status}
-        statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence) : STATUS_META[status].label}
+        statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence)
+          : packet?.status === 'archived' ? 'Archived' : packet?.status === 'released' ? 'Complete' : STATUS_META[status].label}
         actions={<>
           <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} size={24} />
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} size={24} />

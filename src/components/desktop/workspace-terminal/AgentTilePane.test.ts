@@ -515,3 +515,24 @@ it('keeps a worker question answerable with only its state pill beside the compo
   expect(row.querySelectorAll('button')).toHaveLength(0);
   expect(host!.querySelector('textarea')!.disabled).toBe(false);
 });
+
+
+it('refreshes a mounted pane from review through running, closed and archived packet states', () => {
+  const sessionKey = 'codex-owned:state-refresh';
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ agents: [] })));
+  const packet = { id: 'state-refresh', title: 'Continue the task', status: 'awaiting_review',
+    completionSummary: 'Earlier worker outcome', lane: { sessionKey } } as OrchestratorPacket;
+  context.value = { agents: [{ sessionKey, name: 'Worker', status: 'reviewing', runtime: 'codex',
+    statusEvidence: { sessionId: sessionKey, runtime: 'codex', state: 'review-ready', authority: 'runtime-event',
+      observedAt: '2026-10-21T12:00:00.000Z', summary: 'Earlier worker outcome', evidence: [] } }],
+    missionState: { packets: [packet] } } as unknown as OrchestratorDataValue;
+  const render = () => act(() => root?.render(createElement(SessionTranscriptPane, { sessionKey })));
+  render();
+  expect(host?.querySelector('[data-worker-outcome]')?.textContent).toContain('Earlier worker outcome');
+  for (const [status, label] of [['running', 'Running'], ['released', 'Complete'], ['archived', 'Archived']] as const) {
+    context.value = { ...context.value, missionState: { packets: [{ ...packet, status }] } } as OrchestratorDataValue;
+    render();
+    expect(host?.querySelector('[data-worker-pane-header] [aria-label]')?.getAttribute('aria-label')).toBe(label);
+    if (status === 'running') expect(host?.querySelector('[data-worker-outcome]')).toBeNull();
+  }
+});

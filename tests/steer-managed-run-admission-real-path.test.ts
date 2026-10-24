@@ -1,9 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { AgentTilePane } from '@/components/desktop/workspace-terminal/AgentTilePane';
+import { PacketRow } from '@/components/desktop/repo-focus/tabs/AgentRows';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+
+vi.mock('@/components/desktop/workspace-terminal/SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
 
 const perform = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/runtime/actions', () => ({ performRuntimeAction: perform }));
@@ -114,6 +120,40 @@ describe('steered-turn managed-run admission through production routes', () => {
       hint: expect.stringContaining('reset'),
     });
     expect(findManagedRun(`run${sequence}heldWorker`)).toBeNull();
+  });
+
+  it('refreshes the rendered worker badge and outcome after steering a reviewing lane', async () => {
+    const { packet, lane, sessionKey } = fixture();
+    packet.completionSummary = 'Earlier worker outcome';
+    packet.queueState = 'queued';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packet.id}`, repoPath: packet.workspaceTargetPath, packets: [packet] });
+    const agent = { name: 'Worker', status: 'reviewing', runtime: 'claude-code',
+      statusEvidence: { sessionId: sessionKey, runtime: 'claude-code' as const, state: 'review-ready' as const,
+        authority: 'runtime-event' as const, observedAt: '2026-10-21T12:00:00.000Z', summary: 'Earlier worker outcome', evidence: [] } };
+    const render = (current: OrchestratorPacket) => renderToStaticMarkup(createElement(AgentTilePane, {
+      sessionKey, agent, packet: current, focused: true, onClose() {}, onFocus() {},
+    }));
+    expect(render(packet)).toContain('Earlier worker outcome');
+    expect((await steer(packet.id)).status).toBe(200);
+    expect(getLane(lane.id)?.status).toBe('running');
+    closeDb();
+    const refreshed = await stateRoute.GET(new NextRequest('http://localhost/api/orchestrator/state', {
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(refreshed.status).toBe(200);
+    const { mission } = await refreshed.json() as { mission: { packets: OrchestratorPacket[] } };
+    const hydrated = mission.packets.find(candidate => candidate.id === packet.id)!;
+    expect(render(hydrated)).toContain('aria-label="working · lane"');
+    // Packet snapshots restored from persistence do not carry the route's
+    // transient status evidence. The current packet must still beat old discovery.
+    const current = readOrchestratorControlPlaneState().packets.find(candidate => candidate.id === packet.id)!;
+    expect(current.status, current.blockedReason ?? '').toBe('running');
+    const html = render(current);
+    expect(html.includes('aria-label="Running"')).toBe(true);
+    expect(html).not.toContain('Earlier worker outcome');
+    expect(html).not.toContain('Review the finished work');
+    expect(renderToStaticMarkup(createElement(PacketRow, { packet: current, active: false }))).toContain('aria-label="running"');
   });
 
   it('admits a delayed steer after the previous turn exits', async () => {
