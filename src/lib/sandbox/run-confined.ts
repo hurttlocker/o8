@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn } from '@/lib/providers/child-process';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -111,8 +112,7 @@ function runSupervised(command: string[], options: ConfinedRunOptions, env: Node
 export async function runConfinedProcess(root: string, file: string, args: string[],
   options: ConfinedRunOptions): Promise<ConfinedRunResult> {
   const tmp = await mkdtemp(join(await realpath(tmpdir()), 'o8-confined-'));
-  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: tmp, XDG_CACHE_HOME: join(tmp, 'cache'),
-    npm_config_cache: join(tmp, 'npm'), npm_config_update_notifier: 'false', JITI_FS_CACHE: join(tmp, 'jiti') };
+  const env: NodeJS.ProcessEnv = childEnvironment({ env: { TMPDIR: tmp, XDG_CACHE_HOME: join(tmp, 'cache'), npm_config_cache: join(tmp, 'npm'), npm_config_update_notifier: 'false', JITI_FS_CACHE: join(tmp, 'jiti') } });
   const execOptions = { cwd: options.cwd, env, timeout: options.timeout, maxBuffer: options.maxBuffer, windowsHide: true };
   const unconfined = async () => {
     try {

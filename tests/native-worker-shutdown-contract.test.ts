@@ -44,10 +44,12 @@ describe('native shutdown registration boundary for detached packet workers', ()
     expect(shell).toMatch(/api_port, sidecar_lifecycle::kill_tracked_children/);
     expect(read('src-tauri/src/restart_job_drain.rs')).toContain('cleanup();');
     const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
-    expect(worker).toContain('detached: true,');
-    expect(worker).toContain("stdio: [stdinFd ?? 'ignore', stdoutFd, stderrFd]");
+    const launch = read('src/lib/runtimes/shared/owned-session/credential-spawn.ts');
+    expect(worker).toContain('const child = spawnCredentialCheckedChild({');
+    expect(launch).toContain('detached: true,');
+    expect(launch).toContain("stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd]");
     expect(worker).toContain('child.unref()');
-    expect(worker).not.toContain('register_child');
+    expect(`${worker}\n${launch}`).not.toContain('register_child');
   });
 
   it('requires detached identity only for the detached preparation path, preserving bridge opt-out', () => {

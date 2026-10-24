@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { relative, resolve } from 'node:path';

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { spawn, type ExecFileOptions } from 'node:child_process';
+import { spawn, type ExecFileOptions } from '@/lib/providers/child-process';
 import path from 'node:path';
 
 import type { WorktreeMaterializationIdentity } from './materialization-identity';

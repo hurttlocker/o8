@@ -1,5 +1,6 @@
 /** One owner/recovery protocol for launch readers, installers and restart writers. */
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { statSync } from 'node:fs';
 import { isMetadataLockProcessIdentity, probeMetadataLockProcessIdentitySync, sameMetadataLockProcessIdentity,
   type MetadataLockProcessIdentity, type MetadataLockProcessProbe } from '@/lib/worktree/metadata-lock-process-identity';
@@ -24,7 +25,7 @@ function probeWorkOwner(pid: number): MetadataLockProcessProbe {
   if (probe.identity.platform === 'darwin') {
     try {
       const started = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], {
-        encoding: 'utf8', timeout: 2_000, env: { ...process.env, TZ: 'UTC', LANG: 'C', LC_ALL: 'C' },
+        encoding: 'utf8', timeout: 2_000, env: childEnvironment({ env: { TZ: 'UTC', LANG: 'C', LC_ALL: 'C' } }),
       }).trim().replace(/\s+/g, ' ');
       const seconds = Date.parse(`${started} UTC`) / 1_000;
       if (!Number.isSafeInteger(seconds) || seconds <= 0) throw new Error('Invalid process start time');

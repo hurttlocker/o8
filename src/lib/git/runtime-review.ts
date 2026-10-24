@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 import { parseRecentCommits } from '@/lib/git/recent-commits';

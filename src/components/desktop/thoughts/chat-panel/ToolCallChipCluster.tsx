@@ -188,6 +188,8 @@ function isToolOnlyEntry(entry: MobileTranscriptEntry): boolean {
  * merged entry keeps the first entry's identity, and any entry with its own
  * text/thinking/media terminates the run.
  */
+const toolOnlyRuns = new WeakMap<MobileTranscriptEntry, { entries: MobileTranscriptEntry[]; merged: MobileTranscriptEntry }>();
+
 export function mergeAdjacentToolOnlyEntries(entries: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
   let merged: MobileTranscriptEntry[] | null = null;
   for (let i = 0; i < entries.length; i += 1) {
@@ -199,10 +201,14 @@ export function mergeAdjacentToolOnlyEntries(entries: MobileTranscriptEntry[]): 
         run.push(entries[i]);
       }
       if (merged === null) merged = entries.slice(0, entries.indexOf(entry));
-      merged.push({
-        ...run[0],
-        toolCalls: run.flatMap((e) => e.toolCalls ?? []),
-      });
+      const cached = toolOnlyRuns.get(entry);
+      if (cached && cached.entries.length === run.length && run.every((item, index) => item === cached.entries[index])) {
+        merged.push(cached.merged);
+      } else {
+        const combined = { ...entry, toolCalls: run.flatMap(item => item.toolCalls ?? []) };
+        toolOnlyRuns.set(entry, { entries: run, merged: combined });
+        merged.push(combined);
+      }
       continue;
     }
     if (merged !== null) merged.push(entry);

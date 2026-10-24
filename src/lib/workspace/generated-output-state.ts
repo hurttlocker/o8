@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
@@ -230,7 +231,7 @@ export async function generatedOutputRevision(workspace: WorktreeMaterialization
     const untrackedArgs = ['ls-files', '--others', '--exclude-standard', '-z',
       ...(excluded.length ? ['--', '.', ...excluded] : [])];
     const options = { cwd: workspace.canonicalPath, timeout: 10_000, maxBuffer: 1024 ** 2,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } };
+      env: childEnvironment({ env: { GIT_OPTIONAL_LOCKS: '0' } }) };
     const head = (await materializationAwareExecFile('git', ['rev-parse', '--verify', 'HEAD^{commit}'], options)).stdout.trim();
     const tree = (await materializationAwareExecFile('git', ['rev-parse', '--verify', 'HEAD^{tree}'], options)).stdout.trim();
     const status = (await materializationAwareExecFile('git', statusArgs, options)).stdout;

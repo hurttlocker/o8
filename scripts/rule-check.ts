@@ -18,7 +18,10 @@ async function main(): Promise<void> {
         'Scans files that differ between <ref> (default: main) and the current',
         'worktree against the CLAUDE.md invariants: className, padding shorthand,',
         'rgba whites, emoji, icon-library imports, 800-line ceiling, hardcoded',
-        'ports, hardcoded /Users paths.',
+        'ports, hardcoded /Users paths, and child-process environment boundaries.',
+        'Process rules scan complete changed src files: only the central typed',
+        'wrapper may import child_process values; launches must not inherit raw',
+        'process.env outside the environment builder.',
         '',
         'Exits 0 when clean, 1 when any violation is detected.',
       ].join('\n'));

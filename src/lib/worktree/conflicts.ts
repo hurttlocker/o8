@@ -9,7 +9,7 @@ import { resolveGitBinary } from '@/lib/git/binary';
  * @see https://github.com/o8-run/o8/issues/69
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import type { WorktreeInfo } from './types';
 

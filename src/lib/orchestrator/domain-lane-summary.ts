@@ -7,6 +7,21 @@ export function preferRuntimeRecoveryMessage(reason: string | null | undefined, 
     ? recovery ?? reason : reason;
 }
 
+export function applyLanePendingStatus(packet: OrchestratorPacket, lane: DomainLaneSummary): boolean {
+  if (lane.status === 'merging') {
+    packet.status = 'awaiting_review';
+    packet.blockedReason = 'Merge in progress';
+    return true;
+  }
+  if (lane.status === 'launching' && lane.provisioningQueuePosition) {
+    packet.status = 'launching';
+    packet.lastEventLabel = 'worktree_provision_queued';
+    packet.blockedReason = `Queued for provisioning (position ${lane.provisioningQueuePosition}).`;
+    return true;
+  }
+  return false;
+}
+
 export interface DomainLaneSummary {
   laneId: string;
   packetId: string;
@@ -14,6 +29,7 @@ export interface DomainLaneSummary {
   sessionKey: string | null;
   lastEventLabel: string | null;
   failureMessage?: string | null;
+  provisioningQueuePosition?: number | null;
   authRecoveryRequired?: boolean;
   recovery?: OrchestratorPacket['recovery'];
   contextObservation?: PacketContextObservation;

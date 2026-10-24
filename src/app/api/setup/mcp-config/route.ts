@@ -34,7 +34,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
 import { getCliAccessStatus } from '@/lib/access-points/cli-status';
 import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';

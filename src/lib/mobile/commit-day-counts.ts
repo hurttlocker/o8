@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import type { MobileCommitDayCounts } from '@/lib/mobile/types';
 
@@ -72,7 +73,7 @@ export async function collectRepoCommitTimes(
         windowsHide: true,
         timeout: 10_000,
         maxBuffer: 8 * 1024 * 1024,
-        env: { ...process.env, LC_ALL: 'C' },
+        env: childEnvironment({ env: { LC_ALL: 'C' } }),
       },
     );
     return stdout

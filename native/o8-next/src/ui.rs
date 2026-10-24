@@ -1,12 +1,14 @@
 use crate::{
     client::{Client, Session},
-    model::{Row, render_tree},
-    text::{Node, Run},
+    model::Row,
+    retained::{RetainedRow, RowState},
+    stream::Transcript,
+    transport::{self, Incoming, Subscription},
 };
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
-    ListState, Render, StyledText, TextRun, Window, WindowBounds, WindowHandle, WindowOptions,
-    canvas, div, font, list, point, prelude::*, px, rgb, size,
+    ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
+    list, point, prelude::*, px, rgb, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -22,7 +24,9 @@ struct Surface {
     client: Client,
     sessions: Vec<Session>,
     selected: Option<String>,
-    rows: Rc<Vec<Row>>,
+    rows: Rc<Vec<Rc<RefCell<RowState>>>>,
+    transcript: Option<Transcript>,
+    subscription: Option<Subscription>,
     list: ListState,
     focus: FocusHandle,
     notice: String,
@@ -36,6 +40,8 @@ impl Surface {
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
+        self.subscription = None;
+        self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
@@ -44,7 +50,7 @@ impl Surface {
         let client = self.client.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { client.history(&id).map(|h| render_tree(&h.transcript)) });
+            .spawn(async move { client.history(&id) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -52,10 +58,13 @@ impl Surface {
                     return;
                 }
                 match result {
-                    Ok(rows) => {
-                        this.list = ListState::new(rows.len(), ListAlignment::Top, px(400.));
-                        this.rows = Rc::new(rows);
-                        this.notice = this.snapshot_label();
+                    Ok(history) => {
+                        let key = history.session_key.clone();
+                        let transcript = Transcript::new(history);
+                        this.install_rows(transcript.rows.clone());
+                        this.transcript = Some(transcript);
+                        this.subscription = Some(transport::subscribe(this.client.clone(), key));
+                        this.notice = "Connecting live stream · read-only".into();
                     }
                     Err(error) => this.notice = error,
                 }
@@ -63,6 +72,73 @@ impl Surface {
             });
         })
         .detach();
+    }
+    fn install_rows(&mut self, next: Vec<Row>) {
+        let old = &self.rows;
+        let initial = old.is_empty();
+        let prefix = old
+            .iter()
+            .zip(&next)
+            .take_while(|(a, b)| a.borrow().row == **b)
+            .count();
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(next[prefix..].iter().rev())
+            .take_while(|(a, b)| a.borrow().row == **b)
+            .count();
+        let mut states = Vec::with_capacity(next.len());
+        for row in next {
+            let retained = old.iter().find(|state| state.borrow().row == row).cloned();
+            states.push(retained.unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row)))));
+        }
+        self.list
+            .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
+        self.rows = Rc::new(states);
+        if initial {
+            self.list = self.list.clone().measure_all();
+        }
+    }
+    fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        let follow_tail = !self.rows.is_empty()
+            && self
+                .list
+                .bounds_for_item(self.rows.len() - 1)
+                .is_some_and(|bounds| {
+                    let viewport = self.list.viewport_bounds();
+                    bounds.bottom() <= viewport.bottom() + px(1.)
+                        && bounds.bottom() >= viewport.top()
+                });
+        let messages: Vec<_> = self
+            .subscription
+            .as_ref()
+            .map(|s| s.receiver.try_iter().take(64).collect())
+            .unwrap_or_default();
+        let mut changed = false;
+        for message in messages {
+            match message {
+                Incoming::Frame(frame) => {
+                    if let Some(transcript) = &mut self.transcript {
+                        changed |= transcript.apply(&frame);
+                    }
+                }
+                Incoming::Status(status) => {
+                    self.notice = status.into();
+                    cx.notify();
+                }
+            }
+        }
+        if changed {
+            self.install_rows(self.transcript.as_ref().unwrap().rows.clone());
+            if follow_tail && !self.rows.is_empty() {
+                self.list.scroll_to(ListOffset {
+                    item_ix: self.rows.len() - 1,
+                    offset_in_item: px(0.),
+                });
+            }
+            cx.notify();
+        }
+        changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -107,6 +183,8 @@ impl Surface {
                             this.select(id, cx);
                         } else {
                             this.generation += 1;
+                            this.subscription = None;
+                            this.transcript = None;
                             this.selected = None;
                             this.rows = Rc::new(vec![]);
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
@@ -122,206 +200,16 @@ impl Surface {
     }
     fn navigate(&mut self, end: bool, cx: &mut Context<Self>) {
         if !self.rows.is_empty() {
-            self.list
-                .scroll_to_reveal_item(if end { self.rows.len() - 1 } else { 0 });
+            self.list.scroll_to(ListOffset {
+                item_ix: if end { self.rows.len() - 1 } else { 0 },
+                offset_in_item: px(0.),
+            });
         }
         self.key_revision += 1;
         cx.notify();
     }
 }
 
-fn text_run(run: &Run) -> TextRun {
-    let mut face = font(if run.style == "code" {
-        "Menlo"
-    } else {
-        ".AppleSystemUIFont"
-    });
-    face.weight = if run.style == "strong" {
-        gpui::FontWeight::MEDIUM
-    } else {
-        gpui::FontWeight::LIGHT
-    };
-    if run.style == "em" {
-        face.style = gpui::FontStyle::Italic;
-    }
-    TextRun {
-        len: run.text.len(),
-        font: face,
-        color: rgb(if run.style == "link" {
-            0x8cb4e8
-        } else {
-            0xe8ecf2
-        })
-        .into(),
-        background_color: if run.style == "code" {
-            Some(rgb(0x242a33).into())
-        } else {
-            None
-        },
-        underline: None,
-        strikethrough: if run.style == "strike" {
-            Some(gpui::StrikethroughStyle {
-                thickness: px(1.),
-                color: None,
-            })
-        } else {
-            None
-        },
-    }
-}
-fn node(node: &Node) -> gpui::AnyElement {
-    if node.kind == "break" {
-        return div().h(px(6.)).into_any_element();
-    }
-    if node.kind == "rule" {
-        return div()
-            .h(px(1.))
-            .my(px(12.))
-            .bg(rgb(0x343b45))
-            .into_any_element();
-    }
-    let code = node.kind == "code-block";
-    let mut container = div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .min_w_0()
-        .text_size(px(if code { 12. } else { 13. }))
-        .line_height(px(19.5));
-    if code {
-        container = container
-            .p(px(10.))
-            .my(px(8.))
-            .rounded(px(6.))
-            .bg(rgb(0x16191e))
-            .child(
-                div()
-                    .text_size(px(10.))
-                    .text_color(rgb(0x8a93a0))
-                    .child(node.language.clone().unwrap_or_default()),
-            );
-    }
-    if node.kind.starts_with('h') {
-        container = container.mt(px(8.)).mb(px(4.));
-    }
-    let prefix = if node.kind == "ul" {
-        "• ".into()
-    } else if let Some(n) = node.kind.strip_prefix("ol:") {
-        format!("{n} ")
-    } else if node.kind == "quote" {
-        "│ ".into()
-    } else {
-        String::new()
-    };
-    let mut runs = Vec::new();
-    if !prefix.is_empty() {
-        runs.push(Run {
-            style: "text".into(),
-            text: prefix,
-        });
-    }
-    runs.extend(node.runs.clone());
-    // Explicit line elements preserve code indentation/newlines and permit wrapping.
-    let mut line = Vec::<Run>::new();
-    for run in runs {
-        for (i, part) in run.text.split('\n').enumerate() {
-            if i > 0 {
-                container = container.child(styled_line(&line));
-                line.clear();
-            }
-            if !part.is_empty() {
-                line.push(Run {
-                    style: run.style.clone(),
-                    text: part.into(),
-                });
-            }
-        }
-    }
-    container.child(styled_line(&line)).into_any_element()
-}
-fn styled_line(runs: &[Run]) -> gpui::AnyElement {
-    if runs.is_empty() {
-        return div().h(px(19.5)).into_any_element();
-    }
-    div()
-        .min_w_0()
-        .child(
-            StyledText::new(runs.iter().map(|r| r.text.as_str()).collect::<String>())
-                .with_runs(runs.iter().map(text_run).collect()),
-        )
-        .into_any_element()
-}
-fn row(row: &Row, index: usize, painted: Rc<RefCell<BTreeSet<usize>>>) -> gpui::AnyElement {
-    let mut container = div()
-        .id(gpui::ElementId::Name(row.id().to_owned().into()))
-        .flex()
-        .flex_col()
-        .px(px(24.))
-        .py(px(8.))
-        .w_full()
-        .min_w_0();
-    match row {
-        Row::Message { role, nodes, .. } => {
-            container = container.child(
-                div()
-                    .text_size(px(9.5))
-                    .text_color(rgb(0x8a93a0))
-                    .mb(px(4.))
-                    .child(
-                        if role == "user" {
-                            "Operator"
-                        } else if role == "assistant" {
-                            "Agent"
-                        } else {
-                            role
-                        }
-                        .to_owned(),
-                    ),
-            );
-            container = container.children(nodes.iter().map(node));
-        }
-        Row::Activity { steps, .. } => {
-            container = container.child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(rgb(0x8a93a0))
-                    .child("Work details"),
-            );
-            let mut previous = None;
-            for step in steps {
-                if previous != Some(step.group) {
-                    container = container.child(div().h(px(4.)));
-                    previous = Some(step.group);
-                }
-                container = container.child(div().text_size(px(11.)).font_family("Menlo").child(
-                    format!("{} · {}", step.status, crate::text::sanitize(&step.command)),
-                ));
-                if let Some(reason) = &step.reason {
-                    container = container.child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(rgb(0xb7bfca))
-                            .child(crate::text::sanitize(reason)),
-                    );
-                }
-            }
-        }
-    }
-    container
-        .relative()
-        .child(
-            canvas(
-                |_, _, _| (),
-                move |_, _, _, _| {
-                    painted.borrow_mut().insert(index);
-                },
-            )
-            .absolute()
-            .w(px(1.))
-            .h(px(1.)),
-        )
-        .into_any_element()
-}
 impl Render for Surface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = self.rows.clone();
@@ -425,7 +313,12 @@ impl Render for Surface {
                             )
                             .child(
                                 list(self.list.clone(), move |index, _, _| {
-                                    row(&rows[index], index, painted_rows.clone())
+                                    RetainedRow {
+                                        state: rows[index].clone(),
+                                        index,
+                                        painted: painted_rows.clone(),
+                                    }
+                                    .into_any_element()
                                 })
                                 .flex_1(),
                             ),
@@ -448,6 +341,7 @@ fn frame(
     cx: &mut App,
     key: Option<&str>,
     scroll: Option<usize>,
+    require_tail: bool,
 ) -> (f64, f64) {
     let start = Instant::now();
     let cost = cx
@@ -458,14 +352,30 @@ fn frame(
             }
             if let Some(index) = scroll {
                 view.update(cx, |v, cx| {
-                    v.list.scroll_to_reveal_item(index);
+                    v.list.scroll_to(ListOffset {
+                        item_ix: index,
+                        offset_in_item: px(0.),
+                    });
                     cx.notify();
                 });
+            }
+            if require_tail {
+                view.read(cx).painted_rows.borrow_mut().clear();
             }
             let draw = Instant::now();
             window.refresh();
             window.draw(cx).clear();
             let cost = draw.elapsed().as_secs_f64() * 1000.;
+            if require_tail {
+                let surface = view.read(cx);
+                assert!(
+                    surface
+                        .painted_rows
+                        .borrow()
+                        .contains(&(surface.rows.len() - 1)),
+                    "changed tail must paint in the timed first scene"
+                );
+            }
             window.refresh();
             window.draw(cx).clear();
             cost
@@ -489,6 +399,7 @@ pub fn launch(
     offscreen: bool,
     unattended: bool,
     benchmark: Option<String>,
+    stream_benchmark: Option<(String, u64)>,
     started: Instant,
 ) {
     (if offscreen { Application::headless() } else { Application::new() }).run(move |cx: &mut App| {
@@ -498,13 +409,30 @@ pub fn launch(
             titlebar: Some(gpui::TitlebarOptions { title: Some("o8 next".into()), ..Default::default() }),
             ..Default::default() }, |window, cx| cx.new(|cx| {
                 let focus = cx.focus_handle(); focus.focus(window);
-                let mut surface = Surface { client, sessions, selected, rows: Rc::new(rows), list: ListState::new(row_count, ListAlignment::Top, px(400.)), focus,
+                let mut surface = Surface { client, sessions, selected, rows: Rc::new(rows), transcript:None, subscription:None, list: ListState::new(row_count, ListAlignment::Top, px(400.)), focus,
                     notice: String::new(), generation: 0, list_generation: 0, key_revision: 0, painted: Rc::new(Cell::new(u64::MAX)), painted_rows: Rc::new(RefCell::new(BTreeSet::new())) };
                 surface.notice = surface.snapshot_label();
                 surface.load_sessions(cx);
                 surface
             })).expect("GPUI window");
         cx.on_window_closed(|cx| { if cx.windows().is_empty() { cx.quit(); } }).detach();
+        cx.spawn(async move |cx| {
+            let mut measurement=stream_benchmark.map(|(path,through)| LiveMeasurement::new(path,through));
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_millis(10)).await;
+                let result=cx.update(|cx| {
+                    let before:Vec<_>=if measurement.is_some() { handle.read(cx).unwrap().rows.iter().map(|s| (s.clone(),s.borrow().layouts)).collect() } else { vec![] };
+                    let changed=handle.update(cx,|surface,_,cx| surface.poll_stream(cx)).unwrap();
+                    if let Some(m)=&mut measurement {
+                        if changed { m.frame(handle,cx,&before); }
+                        let seq=handle.read(cx).unwrap().transcript.as_ref().map(|t| t.seq).unwrap_or(0);
+                        if seq>=m.through { m.finish(handle,cx);cx.quit();return true; }
+                    }
+                    false
+                });
+                if result.unwrap_or(true) { break; }
+            }
+        }).detach();
         if unattended {
             cx.spawn(async move |cx| {
                 for i in 0..70 {
@@ -524,17 +452,17 @@ pub fn launch(
                 }
                 assert!(ready, "session list and selected history must load through the interactive path");
                 cx.update(|cx| {
-                    frame(handle, cx, None, None);
+                    frame(handle, cx, None, None, false);
                     let row_count = handle.read(cx).unwrap().rows.len();
                     assert!(handle.read(cx).unwrap().painted_rows.borrow().contains(&0), "first content row must reach paint");
                     let cold = started.elapsed().as_secs_f64()*1000.;
                     let idle = rss(); let mut keys = Vec::<Value>::new(); let mut scrolls = Vec::<Value>::new();
                     for i in 0..20 {
-                        let (latency, _) = frame(handle, cx, Some(if i%2 == 0 { "end" } else { "home" }), None);
+                        let (latency, _) = frame(handle, cx, Some(if i%2 == 0 { "end" } else { "home" }), None, false);
                         let painted = handle.read(cx).unwrap().painted.get(); assert_eq!(painted, i+1, "input must reach paint callback");
                         keys.push(json!(latency));
                     }
-                    for i in 0..50 { let (_, cost) = frame(handle, cx, None, Some(if i%2 == 0 { row_count.saturating_sub(1) } else { 0 })); scrolls.push(json!(cost)); }
+                    for i in 0..50 { let (_, cost) = frame(handle, cx, None, Some(if i%2 == 0 { row_count.saturating_sub(1) } else { 0 }), false); scrolls.push(json!(cost)); }
                     assert!(handle.read(cx).unwrap().painted_rows.borrow().contains(&(row_count-1)), "last content row must reach paint after End/scroll");
                     let result = json!({"endpoint":"GPUI CPU scene paint callback; no GPU submission or presentation", "keyToFrameMs":keys, "scrollFrameMs":scrolls,
                         "streamFrameMs":null, "idleMemoryMiB":idle, "coldStartMs":cold, "rows":row_count, "paintedRows":handle.read(cx).unwrap().painted_rows.borrow().len(), "sessions":handle.read(cx).unwrap().sessions.len(), "offscreen":offscreen});
@@ -543,4 +471,81 @@ pub fn launch(
             }).detach();
         }
     });
+}
+
+struct LiveMeasurement {
+    path: String,
+    through: u64,
+    frames: Vec<f64>,
+    keys: Vec<f64>,
+    unchanged_relayouts: usize,
+}
+impl LiveMeasurement {
+    fn new(path: String, through: u64) -> Self {
+        Self {
+            path,
+            through,
+            frames: vec![],
+            keys: vec![],
+            unchanged_relayouts: 0,
+        }
+    }
+    fn frame(
+        &mut self,
+        handle: WindowHandle<Surface>,
+        cx: &mut App,
+        before: &[(Rc<RefCell<RowState>>, usize)],
+    ) {
+        let last = handle.read(cx).unwrap().rows.len().saturating_sub(1);
+        // Dispatch before the first paint of this pending stream revision.
+        // End keeps the changed tail in the measured viewport.
+        let key = (self.keys.len() < 20).then_some("end");
+        let (latency, cost) = frame(handle, cx, key, Some(last), true);
+        self.frames.push(cost);
+        if key.is_some() {
+            let surface = handle.read(cx).unwrap();
+            assert_eq!(
+                surface.painted.get(),
+                surface.key_revision,
+                "stream-load input must reach paint"
+            );
+            self.keys.push(latency);
+        }
+        for state in handle.read(cx).unwrap().rows.iter() {
+            let current = state.borrow();
+            if let Some((old, count)) = before
+                .iter()
+                .find(|(old, count)| *count > 0 && old.borrow().row == current.row)
+            {
+                assert!(
+                    Rc::ptr_eq(old, state),
+                    "unchanged row state must retain identity"
+                );
+                assert!(
+                    current.layouts >= *count,
+                    "layout counters must never reset"
+                );
+                self.unchanged_relayouts += current.layouts - *count;
+            }
+        }
+    }
+    fn finish(&self, handle: WindowHandle<Surface>, cx: &mut App) {
+        assert_eq!(self.keys.len(), 20);
+        assert!(
+            self.frames.len() >= 40,
+            "replay must paint distinct streaming updates"
+        );
+        assert_eq!(
+            self.unchanged_relayouts, 0,
+            "unchanged completed rows must reuse their text layouts"
+        );
+        let surface = handle.read(cx).unwrap();
+        let transcript = surface.transcript.as_ref().unwrap();
+        let result = json!({"endpoint":"GPUI CPU scene paint callback; no GPU submission or presentation","streamFrameMs":self.frames,
+            "keyToFrameWhileStreamingMs":self.keys,"unchangedRowRelayouts":self.unchanged_relayouts,"streamTailPaintAcknowledged":true,"lastSeq":transcript.seq,
+            "rows":surface.rows.len(),"paintedRows":surface.painted_rows.borrow().len(),"offscreen":true,"finalTree":transcript.rows,
+            "rowLayoutCounts":surface.rows.iter().map(|s| {let s=s.borrow();json!({"id":s.row.id(),"layouts":s.layouts})}).collect::<Vec<_>>()});
+        fs::write(&self.path, serde_json::to_vec_pretty(&result).unwrap())
+            .expect("stream metrics file");
+    }
 }

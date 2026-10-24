@@ -17,7 +17,7 @@
 
 import 'server-only';
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 import { defaultClaudeBin } from '@/lib/claude-code/one-shot-repl';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';

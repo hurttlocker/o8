@@ -33,7 +33,7 @@ type ProfileResponse = {
 };
 
 const SOURCE_OPTIONS: Array<{ value: ClaudeCodeModelSource; label: string; detail: string }> = [
-  { value: 'native', label: 'Existing Claude connection', detail: 'Use the existing Claude Code login or inherited gateway.' },
+  { value: 'native', label: 'Existing Claude connection', detail: 'Use the existing Claude Code login. API keys require My API key billing.' },
   { value: 'openrouter', label: 'OpenRouter', detail: 'Use OpenRouter models, billed to your API key.' },
   { value: 'codex-subscription', label: 'Codex subscription (experimental)', detail: 'Unofficial local compatibility connection; uses Codex subscription quota.' },
 ];

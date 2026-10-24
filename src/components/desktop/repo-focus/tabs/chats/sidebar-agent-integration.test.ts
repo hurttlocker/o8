@@ -81,10 +81,14 @@ it('pins and unpins through the worker menu and restores the pin after remount',
   expect(JSON.parse(localStorage.getItem(SIDEBAR_AGENT_PINS_KEY)!)).toEqual([]);
 });
 
-it('retains an old pinned completion but never resurrects an operator-archived worker', async () => {
+it('keeps an old pinned completion in Archived and removes an operator-archived worker', async () => {
   lanes = [{ ...lanes[2], lastEventAt: new Date(Date.now() - 3 * 86_400_000).toISOString() }];
   localStorage.setItem(SIDEBAR_AGENT_PINS_KEY, JSON.stringify(['lane:completed']));
-  await render(); expect(row('completed')).not.toBeNull();
+  await render();
+  expect(row('completed')).toBeNull();
+  await act(async () => button('Archived').click());
+  expect(row('completed')).not.toBeNull();
+  expect(row('completed')?.closest('[aria-label="Pinned conversations"]')).toBeNull();
   lanes = [{ ...lanes[0], archivedByOperator: true }];
   await act(async () => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
   expect(row('completed')).toBeNull();
@@ -105,4 +109,16 @@ it('keeps clear-finished reachable from the view menu without clearing live work
   expect(row('running')).not.toBeNull();
   expect(row('completed')).toBeNull(); expect(row('failed')).toBeNull();
   expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/lanes/archive-terminal' && init?.method === 'POST')).toBe(true);
+});
+
+
+it('moves an exact saved worker return path to Archived while retaining the parent chat', async () => {
+  lanes = [{ ...lanes[2], sessionKey: 'llm-chat:thoughts-worker' }];
+  history.push({ ...history[0], tabId: 'thoughts-worker', title: 'Closed worker transcript' });
+  await render();
+  expect(host.querySelector('[aria-label="Recents conversations"]')?.textContent).toContain('Regular chat');
+  expect(host.querySelector('[aria-label="Recents conversations"]')?.textContent).not.toContain('Closed worker transcript');
+  await act(async () => button('Archived').click());
+  expect(host.textContent).toContain('Closed worker transcript');
+  expect(row('completed')).toBeNull();
 });

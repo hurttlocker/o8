@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { openWorkspaceFile } from '@/lib/fs/workspace-file';
 

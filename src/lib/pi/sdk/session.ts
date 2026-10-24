@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Context, Model } from '@earendil-works/pi-ai';
@@ -110,7 +111,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,
     // No inherited provider keys, NODE_OPTIONS, user extension paths or proxy variables.
-    env: { NODE_ENV: 'production', HOME: stateDir, USERPROFILE: stateDir, PI_OFFLINE: '1', NO_COLOR: '1' } });
+    env: providerSpawnEnvironment({ NODE_ENV: 'production', HOME: stateDir, USERPROFILE: stateDir, PI_OFFLINE: '1', NO_COLOR: '1' }, { inject: false }) });
   let run: AbortController | undefined;
   // Set only by abort(), so a timeout or a worker exit is never reported as the operator's Stop.
   let operatorStopped = false;

@@ -315,11 +315,18 @@ async function post(req: Request) {
   return withPacketManagedRunLifecycleLock(packetId, () => {
     const admission = inspectPacketManagedRunAdmission(packetId);
     if (!admission.allowed) {
+      const hint = admission.reason === 'packet_not_found'
+        ? 'Inspect the packet ID and dispatch a valid packet before retrying o8 run.'
+        : admission.reason === 'packet_held'
+          ? 'Ask the operator to inspect the hold and reset the packet before dispatching a new turn.'
+          : 'Ask the operator to use rerun_with_feedback to start a new turn before retrying o8 run.';
       return NextResponse.json({
         ok: false,
         error: 'packet_not_accepting_managed_runs',
         reason: admission.reason,
         packetStatus: admission.status,
+        message: `Packet ${packetId} is ${admission.status ?? 'missing'} and cannot start managed runs. ${hint}`,
+        hint,
       }, { status: 409 });
     }
     return commitRegistration();

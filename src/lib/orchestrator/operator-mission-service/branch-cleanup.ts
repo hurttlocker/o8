@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { cleanupLaneWorktree } from '@/lib/lane/worktree-cleanup';

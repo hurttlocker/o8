@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, forwardRef, useRef } from 'react';
+import { Fragment, forwardRef, memo, useRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
@@ -17,6 +17,7 @@ import { noteUserScroll } from '@/lib/tts/scroll-follow';
 import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
 import { VisualizationFrame } from '@/components/desktop/visualizations/VisualizationFrame';
 import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
+import type { VisualizationReference } from '@/lib/visualizations/types';
 
 import { TranscriptTurns } from '../../transcript/TranscriptTurns';
 import { TranscriptNavigator } from '../../transcript/TranscriptNavigator';
@@ -125,7 +126,7 @@ interface ChatMessageListProps {
   onTaskArtifactDeliver?: (input: TaskArtifactDeliverInput) => boolean;
 }
 
-export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
+export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
   displayMessages: rawDisplayMessages,
   logLabel,
   displayWaiting,
@@ -279,67 +280,22 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
         <TranscriptTurns busy={displayWaiting} repoPath={repoPath} summary={turnSummary} turnContent={turnContent}
           entries={items.map(item => item.kind === 'msg' ? item.msg : item.entries[0])}
-          nodes={items.map((item) => {
-          if (item.kind === 'mission-group') {
-            const isLastGroup = item.lastIndex === displayMessages.length - 1 && !displayWaiting;
-            return (
-              <MissionCompleteGroupCard
-                key={`mission-group-${item.entries[0].id}`}
-                entries={item.entries.map((e) => ({ key: e.id, event: e.statusEvent!, timestampLabel: e.timestampLabel }))}
-                isLast={isLastGroup}
-              />
-            );
-          }
-          const { msg, index } = item;
-          const isLatestAssistant = index === lastAssistantIndex;
-          const showChipsHere = isLatestAssistant
-            && hasSuggestedReplies
-            && msg.id === suggestedReplyMessageId
-            && onSelectSuggestion
-            && onDismissSuggestions;
-          // Collide pre-roll — render the faint proposals card instead of the
-          // default message body (the entry carries no assistant text of its own).
-          if (msg.collide) {
-            return (
-              <Fragment key={msg.id}>
-                <CollideProposalCard collide={msg.collide} />
-              </Fragment>
-            );
-          }
-          if (msg.type === 'handoff' && msg.handoff) {
-            return <HandoffTranscriptCard key={msg.id} handoff={msg.handoff} timestampLabel={msg.timestampLabel} />;
-          }
-          const showsPersistedReceipt = msg.role === 'assistant' && Boolean(msg.receipt);
-          return (
-            <Fragment key={msg.id}>
-              {showsPersistedReceipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
-              <div data-o8-message-id={msg.id} style={{ minWidth: 0 }}>
-                <DesktopAgentMessage
-                  entry={msg}
-                  isLast={index === displayMessages.length - 1 && !displayWaiting}
-                  isStreaming={isLatestAssistant && !!displayWaiting}
-                  repoPath={repoPath}
-                  onRetryDelivery={onRetryDelivery}
-                  visualizations={msg.role === 'assistant' ? visualsByIndex.get(index) : undefined}
-                  userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />}
-                />
-              </div>
-              {renderTaskArtifacts(index)}
-              {msg.role !== 'assistant' ? renderVisualizations(index) : null}
-              {showChipsHere ? (
-                <SuggestedReplies
-                  chips={suggestedReplies ?? []}
-                  disabled={displayWaiting}
-                  onSelect={onSelectSuggestion}
-                  onDismiss={onDismissSuggestions}
-                  collapsed={suggestedRepliesCollapsed}
-                  onRestore={onRestoreSuggestions}
-                  isPlaceholder={suggestedRepliesPending}
-                />
-              ) : null}
-            </Fragment>
-          );
-        })} />
+          nodes={items.map(item => {
+            const msg = item.kind === 'msg' ? item.msg : item.entries[0];
+            const index = item.kind === 'msg' ? item.index : item.lastIndex;
+            return <ChatMessageItem key={msg.id} msg={msg}
+              missionEntries={item.kind === 'mission-group' ? item.entries : undefined}
+              isLast={index === displayMessages.length - 1 && !displayWaiting}
+              isStreaming={index === lastAssistantIndex && displayWaiting}
+              repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
+              visualizations={visualsByIndex.get(index)} artifacts={taskArtifactsByIndex.get(index)}
+              taskArtifactThreadBusy={taskArtifactsByIndex.has(index) && taskArtifactThreadBusy} onTaskArtifactDeliver={onTaskArtifactDeliver}
+              showChips={Boolean(index === lastAssistantIndex && hasSuggestedReplies && msg.id === suggestedReplyMessageId)}
+              displayWaiting={index === lastAssistantIndex && displayWaiting} suggestedReplies={suggestedReplies}
+              onSelectSuggestion={onSelectSuggestion} onDismissSuggestions={onDismissSuggestions}
+              suggestedRepliesCollapsed={suggestedRepliesCollapsed} onRestoreSuggestions={onRestoreSuggestions}
+              suggestedRepliesPending={suggestedRepliesPending} />;
+          })} />
 
         {renderTaskArtifacts(-1)}
         {bottomContent}
@@ -399,4 +355,45 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       </div>
     </div></div>
   );
-});
+}));
+
+interface ChatMessageItemProps extends Pick<ChatMessageListProps,
+  'repoPath' | 'onRetryDelivery' | 'composerQueue' | 'taskArtifactThreadBusy' | 'onTaskArtifactDeliver'
+  | 'suggestedReplies' | 'onSelectSuggestion' | 'onDismissSuggestions' | 'suggestedRepliesCollapsed'
+  | 'onRestoreSuggestions' | 'suggestedRepliesPending'> {
+  msg: MobileTranscriptEntry;
+  missionEntries?: MobileTranscriptEntry[];
+  isLast: boolean;
+  isStreaming: boolean;
+  visualizations?: VisualizationReference[];
+  artifacts?: TaskArtifactView[];
+  showChips: boolean;
+  displayWaiting: boolean;
+}
+
+function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, repoPath, onRetryDelivery, composerQueue,
+  visualizations, artifacts, taskArtifactThreadBusy, onTaskArtifactDeliver, showChips, displayWaiting,
+  suggestedReplies, onSelectSuggestion, onDismissSuggestions, suggestedRepliesCollapsed,
+  onRestoreSuggestions, suggestedRepliesPending,
+}: ChatMessageItemProps) {
+  if (missionEntries) return <MissionCompleteGroupCard
+    entries={missionEntries.map(entry => ({ key: entry.id, event: entry.statusEvent!, timestampLabel: entry.timestampLabel }))}
+    isLast={isLast} />;
+  if (msg.collide) return <CollideProposalCard collide={msg.collide} />;
+  if (msg.type === 'handoff' && msg.handoff) return <HandoffTranscriptCard handoff={msg.handoff} timestampLabel={msg.timestampLabel} />;
+  return <Fragment>
+    {msg.role === 'assistant' && msg.receipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
+    <div data-o8-message-id={msg.id} style={{ minWidth: 0 }}>
+      <DesktopAgentMessage entry={msg} isLast={isLast} isStreaming={isStreaming}
+        repoPath={repoPath} onRetryDelivery={onRetryDelivery}
+        visualizations={msg.role === 'assistant' ? visualizations : undefined}
+        userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />} />
+    </div>
+    {onTaskArtifactDeliver ? artifacts?.map(entry => <TaskArtifactCard key={entry.artifact.id}
+      artifactId={entry.artifact.id} threadBusy={taskArtifactThreadBusy ?? false} onDeliverToThread={onTaskArtifactDeliver} />) : null}
+    {msg.role !== 'assistant' ? visualizations?.map(reference => <VisualizationFrame key={reference.id} reference={reference} />) : null}
+    {showChips && onSelectSuggestion && onDismissSuggestions ? <SuggestedReplies
+      chips={suggestedReplies ?? []} disabled={displayWaiting} onSelect={onSelectSuggestion} onDismiss={onDismissSuggestions}
+      collapsed={suggestedRepliesCollapsed} onRestore={onRestoreSuggestions} isPlaceholder={suggestedRepliesPending} /> : null}
+  </Fragment>;
+}

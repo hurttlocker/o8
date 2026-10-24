@@ -38,6 +38,16 @@ power settings. The complete CPU-limited cohort above is retained. Unthrottled
 reference-host acceptance remains open. Document rendering, frontend hydration
 and remaining workspace restoration are the next measured costs.
 
+## Source history
+
+The measured source pair is base `64f95f691` and implementation `7c99f420b`.
+While the artifacts were building, [#4437](https://github.com/o8-run/o8/pull/4437)
+independently landed the same request-time route-loading setting on main. The
+branch refresh preserves that setting unchanged. This PR's additional runtime
+change is the primary workspace import; it also retains the route-loading
+regression and the combined measurements. These numbers precede the refresh to
+main `1834e625c`; current-main budget acceptance remains open.
+
 ## Mechanic
 
 Next's default production startup walks and imports every route, including

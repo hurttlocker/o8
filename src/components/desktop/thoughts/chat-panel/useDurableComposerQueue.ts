@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
@@ -162,5 +162,6 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
   }, [cancelRecord, serialize]);
   const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
     Boolean(target && findPendingComposerSend(target, { text, images }));
-  return { items, transcriptItems, promoting, steerableIds: saved?.key === scopeKey && saved.steerableIds ? new Set(saved.steerableIds) : undefined, canSteer: saved?.key === scopeKey && saved.backend === backend && saved.canSteer, steer, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
+  const steerableIds = useMemo(() => saved?.key === scopeKey && saved.steerableIds ? new Set(saved.steerableIds) : undefined, [saved, scopeKey]);
+  return { items, transcriptItems, promoting, steerableIds, canSteer: saved?.key === scopeKey && saved.backend === backend && saved.canSteer, steer, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
 }

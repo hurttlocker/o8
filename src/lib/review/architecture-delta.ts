@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';

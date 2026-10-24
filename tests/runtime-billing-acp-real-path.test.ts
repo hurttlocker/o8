@@ -1,0 +1,34 @@
+import { afterAll, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => undefined) }));
+vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('No attached MCP fixture'); } }));
+const { makeAcpBackend } = await import('@/lib/lane/orchestrator-backends/acp');
+const keys = await import('@/app/api/v2/keys/route');
+const billing = await import('@/app/api/runtime/billing/route');
+const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
+const peer = `let buffer='';const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',chunk=>{buffer+=chunk;let index;while((index=buffer.indexOf('\\n'))>=0){const m=JSON.parse(buffer.slice(0,index));buffer=buffer.slice(index+1);if(m.method==='initialize')send({jsonrpc:'2.0',id:m.id,result:{protocolVersion:1}});else if(m.method==='session/new')send({jsonrpc:'2.0',id:m.id,result:{sessionId:'fixture-session'}});else if(m.method==='session/prompt'){send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'fixture-session',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:JSON.stringify({pid:process.pid,key:process.env.OPENAI_API_KEY||null,alias:process.env.CODEX_API_KEY||null})}}}});send({jsonrpc:'2.0',id:m.id,result:{stopReason:'end_turn'}});}else if(m.id)send({jsonrpc:'2.0',id:m.id,result:{}});}});`;
+vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 72).toString('base64url'));
+vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+const children = new Set<number>();
+afterAll(() => { for (const pid of children) try { process.kill(pid, 'SIGTERM'); } catch { /* Already retired. */ } vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+it.each(['muse', 'opencode'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
+  const backend = makeAcpBackend({ id: runtimeId, label: 'Billing fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
+  const mode = async (mode: string) => expect((await billing.POST(request('runtime/billing', { runtimeId, mode }))).status).toBe(200);
+  const save = async () => expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-acp-key' }))).status).toBe(200);
+  const turn = async () => {
+    const events: OrchestratorEvent[] = [];
+    await backend.sendTurn(process.cwd(), 'fixture', event => events.push(event), { threadId: 'billing-fixture' });
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    const text = events.filter((event): event is Extract<OrchestratorEvent, { type: 'text' }> => event.type === 'text').map(event => event.text).join('');
+    const result = JSON.parse(text) as { pid: number; key: string | null; alias: string | null }; children.add(result.pid); return result;
+  };
+  await mode('subscription'); await save(); const subscription = await turn();
+  expect(subscription.key).toBeNull(); expect(subscription.alias).toBeNull();
+  const authorizedKey = 'fixture-acp-key';
+  await mode('api'); const api = await turn(); expect(api.key).toBe(authorizedKey); expect(api.pid).not.toBe(subscription.pid);
+  expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
+  const removed = await turn(); expect(removed.key).toBeNull(); expect(removed.alias).toBeNull(); expect(removed.pid).not.toBe(api.pid);
+  await save(); const restored = await turn(); expect(restored.key).toBe(authorizedKey);
+  await mode('subscription'); const switched = await turn(); expect(switched.key).toBeNull(); expect(switched.pid).not.toBe(restored.pid);
+}, 30_000);

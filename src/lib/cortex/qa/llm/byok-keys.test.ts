@@ -11,7 +11,7 @@ afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { force: true, recursive:
 function siblingWrite(key: string | null) {
   execFileSync(process.execPath, ['-e', 'require("node:fs").writeFileSync(process.argv[1], process.argv[2])', join(state.dir, '.env.local'), key ? `OPENROUTER_API_KEY=${key}\n` : '']);
 }
-it('refreshes a hydrated credential after another process replaces and removes it', async () => {
+it('refreshes a stored credential after another process replaces and removes it', async () => {
   const { resolveOpenRouterKey } = await import('./byok-keys');
   siblingWrite('fixture-first');
   expect(await resolveOpenRouterKey()).toBe('fixture-first');
@@ -19,7 +19,7 @@ it('refreshes a hydrated credential after another process replaces and removes i
   expect(await resolveOpenRouterKey()).toBe('fixture-second');
   siblingWrite(null);
   expect(await resolveOpenRouterKey()).toBeNull();
-  expect(process.env.OPENROUTER_API_KEY).toBeUndefined();
+  expect(process.env.OPENROUTER_API_KEY).toBe('');
 });
 it('preserves an explicit ambient credential when the saved key changes', async () => {
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-shell');
@@ -38,8 +38,8 @@ it('stops resolving any OpenRouter key while another process has turned the conn
   expect(await resolveOpenRouterKey()).toBe('fixture-stored');
   siblingConnection(false);
   expect(await resolveOpenRouterKey()).toBeNull();
-  // The injected value leaves this process so later child processes cannot inherit it.
-  expect(process.env.OPENROUTER_API_KEY).toBeUndefined();
+  // Stored credentials never enter ambient server state.
+  expect(process.env.OPENROUTER_API_KEY).toBe('');
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-shell');
   expect(await resolveOpenRouterKey()).toBeNull();
   expect(process.env.OPENROUTER_API_KEY).toBe('fixture-shell');

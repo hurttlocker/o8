@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { homedir } from 'node:os';
 import { createDashTmuxSessionSync, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
 import { resolveTmuxBinary } from '@/lib/ws-server/pty-support';

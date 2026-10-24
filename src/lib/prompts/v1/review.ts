@@ -205,11 +205,16 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     input.mechanicalChecksSummary ? `${input.mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
     `${input.mergeGateSection && input.mechanicalChecksSummary ? '6' : input.mergeGateSection || input.mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
     '',
-    'After reviewing, FIRST record your verdict by calling submit_review with',
-    'approved=true only if all required traces clear; otherwise call it with approved=false and findings. This writes the durable',
-    'review record that authorizes merge/PR for the current HEAD. THEN call',
-    `lane_command with verb "merge" (or "create_pr") for lane "${input.lane.id}".`,
-    'A merge or PR with no recorded approved review will surface an operator',
-    'approval card instead of auto-continuing.',
+    input.lane.packetId
+      ? `After reviewing, FIRST record your verdict by calling submit_review with packetId "${input.lane.packetId}", findings, and reviewedHeadSha from \`git rev-parse HEAD\`.`
+      : 'This lane has no packet ID. Report the verdict and an Operator follow-up: to bind the lane to a packet before recording or merging it.',
+    input.lane.packetId
+      ? 'Set approved=true only if all required traces clear; otherwise set approved=false with findings. Never attempt a merge after a rejected or unrecorded verdict.'
+      : null,
+    input.lane.packetId
+      ? `Only after the approved verdict is recorded, and only when the requested next action is a merge, call approve_and_merge(${JSON.stringify({ packetId: input.lane.packetId, expectedHeadSha: '<reviewed HEAD>' })}). Report any returned blockers without claiming the merge succeeded.`
+      : null,
+    'PR creation and draft-to-ready changes require an operator follow-up. If either action was requested, include a separate finding with severity "note" and description starting "Operator follow-up:" that names the outstanding action and PR when known. Include it in submit_review findings (or the structured verdict fallback) so it appears on the review card; prose alone is insufficient.',
+    'Use status "deferred" and approved=false if that missing action blocks the required outcome; otherwise use status "accepted" for the handoff. Do not claim the PR was created or marked ready, and do not merge when the requested outcome is PR publication only.',
   ].filter((value): value is string => value !== null && value !== undefined).join('\n');
 }

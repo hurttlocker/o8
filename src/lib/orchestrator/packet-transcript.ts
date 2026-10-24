@@ -2,7 +2,7 @@ import { access, open, readdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
-import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
+import { getOwnedCodexSessionIdentityId, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
@@ -144,6 +144,16 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
     try {
       const sources = await getOwnedCodexTelemetrySources(sessionKey);
       if (!sources) return { raw: '', runtime: 'codex' };
+      // Exec stdout omits event times. Its bound rollout retains the original
+      // event timestamps and call identities, including after the pane reopens.
+      if (sources.threadId) try {
+        const identityId = await getOwnedCodexSessionIdentityId(sessionKey);
+        const rolloutPath = await getCodexRolloutPath(`codex:${sources.threadId}`, identityId ?? undefined);
+        const raw = rolloutPath ? await readRawTail(rolloutPath) : '';
+        if (raw.trim()) return { raw, runtime: 'codex' };
+      } catch {
+        // A missing runtime inventory must not hide the owned stdout fallback.
+      }
       const tail = await readOwnedRunStdouts(sources.stdoutPaths);
       return { raw: tail.raw, runtime: 'codex', fallbackTimestamp: tail.modifiedAt };
     } catch {

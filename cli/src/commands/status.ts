@@ -3,8 +3,8 @@
  * merges, pending approvals.
  *
  * Strict no-new-endpoints: pulls from /api/lanes (active=true + active=false)
- * and /api/panel/approvals. Recent merges are completed lanes ordered by
- * updatedAt desc.
+ * and /api/panel/approvals. Packet workers use /api/lanes?view=live for a
+ * read-only occupancy view. Recent merges are completed lanes ordered by updatedAt desc.
  */
 
 import { apiFetch } from '../api.js';
@@ -119,6 +119,24 @@ const RUNNING_STATUSES = new Set([
 
 export async function runStatus(mode: OutputMode): Promise<number> {
   const cfg = resolveConfig();
+
+  if (cfg.source?.token === 'worker') {
+    const response = await apiFetch<{ lanes: Array<Pick<Lane, 'id' | 'packetId' | 'status' | 'worktreePath'>> }>(
+      cfg, '/api/lanes', { query: { view: 'live' } },
+    );
+    if (!response.data) throw new Error('Live lane status is unavailable.');
+    const activeLanes = response.data.lanes;
+    if (mode.human) {
+      printHumanHeading('o8 status');
+      for (const lane of activeLanes) {
+        process.stdout.write(`  ${lane.status} ${lane.id} ${lane.packetId ?? '-'} ${lane.worktreePath ?? '-'}\n`);
+      }
+      if (activeLanes.length === 0) process.stdout.write('  No active lanes.\n');
+    } else {
+      printJson({ schema: 'o8/cli/worker-status/v1', activeLanes });
+    }
+    return 0;
+  }
 
   const [activeRes, allRes, approvalsRes, missionRes, panelStatusRes, operatorRes] = await Promise.all([
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),

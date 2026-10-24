@@ -66,6 +66,9 @@ beforeAll(async () => {
     if (boundary.invalidateLane) registry.setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'launch_stalled');
     if (boundary.humanDecision) registry.setLaneStatus(lane.id, 'awaiting_human', 'user', 'operator_review');
     if (boundary.spoofManifestReceipt) {
+      for (let heartbeat = 0; heartbeat < 501; heartbeat += 1) {
+        registry.appendEvent(lane.id, 'worktree_provision_queued', 'system', { packetId, position: 1 });
+      }
       registry.appendEvent(lane.id, 'workspace_manifest_applied', 'orchestrator', { state: 'completed' });
     }
   });
@@ -198,7 +201,7 @@ describe('launch provisioning through mission HTTP entry points', () => {
       const expectedVerb = outcome === 'failed'
         ? 'workspace_manifest_failed'
         : outcome === 'skipped' ? 'workspace_manifest_skipped' : 'workspace_manifest_applied';
-      expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({
+      expect(registry.getLaneEvents(lane.id, 1000)).toContainEqual(expect.objectContaining({
         verb: expectedVerb, actor: 'system',
       }));
       if (outcome === 'human' || outcome === 'spoofed') {

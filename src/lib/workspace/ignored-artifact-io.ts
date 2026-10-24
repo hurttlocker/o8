@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ARTIFACT_PROTOCOL_SCRIPT } from '@/lib/workspace/ignored-artifact-protocol';
@@ -63,7 +63,7 @@ function git(args) {
   verifyRoot();
   const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
-  return execFileSync(process.argv[3], args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+  return withO8ChildPolicy(freshEnv => execFileSync(process.argv[3], args, { encoding: 'utf8', env: freshEnv, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }), { env });
 }
 function readRevision() {
   try {
@@ -113,6 +113,7 @@ async function capture(input) {
   }
   const excluded = input.rebuildablePaths.map(safeRelative);
   const copied = input.copiedEnvironment;
+  const references = input.environmentReferences || {};
   const entries = [];
   const seen = new Set();
   const started = Date.now();
@@ -128,6 +129,7 @@ async function capture(input) {
       client ??= await connectArtifactNode(workerScript, '.', rootIdentity, rootIdentity.canonicalPath,
         started + 10000, async () => { throw new Error('Capture cannot publish restore receipts.'); });
       const captured = await client.request({ action: 'capture', path: relative, originalPath: relative,
+        referenceTarget: Object.prototype.hasOwnProperty.call(references, relative) ? references[relative] : null,
         copiedBound, copiedHash: copiedBound ? copied[relative] : null, remainingBytes: 32 * 1024 * 1024 - bytes });
       if (captured.entry) entries.push(captured.entry);
       if (captured.stat.kind === 'directory') {
@@ -309,6 +311,7 @@ export function captureIgnoredArtifacts(input: {
   treeSha: string;
   rebuildablePaths: string[];
   copiedEnvironment: Record<string, string | null>;
+  environmentReferences?: Record<string, string>;
   discardSource?: boolean;
   requireCleanSource?: true;
 }): Promise<IgnoredArtifactCapture> {

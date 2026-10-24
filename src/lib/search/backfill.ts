@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDb, getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { getRuntime } from '@/lib/runtimes';
+import type { getRuntime } from '@/lib/runtimes';
 import type { RuntimeId } from '@/lib/runtimes/types';
 import { syncChatHistorySearchRecord, type SearchableChatHistoryRecord } from '@/lib/search/conversations';
 import { syncTranscriptSearchDocument } from '@/lib/search/transcripts';
@@ -195,7 +195,7 @@ export async function runPacketTranscriptSearchBackfill(options?: {
   console.info('[search] transcript backfill started', { cursor: cursor.at || null });
 
   const itemLimit = options?.maxItems ?? MAX_TRANSCRIPTS_PER_BOOT;
-  const resolveRuntime = options?.resolveRuntime ?? getRuntime;
+  let resolveRuntime = options?.resolveRuntime;
   while (attempted < itemLimit) {
     const candidates = transcriptCandidates(cursor).slice(0, itemLimit - attempted);
     if (candidates.length === 0) {
@@ -219,6 +219,8 @@ export async function runPacketTranscriptSearchBackfill(options?: {
 
     for (const candidate of candidates) {
       attempted += 1;
+      // Empty or completed backfills must not pin every worker adapter at boot.
+      resolveRuntime ??= (await import('@/lib/runtimes')).getRuntime;
       const runtime = resolveRuntime(candidate.runtime as RuntimeId);
       try {
         if (!runtime?.capabilities.readTranscript) throw new Error(`runtime unavailable: ${candidate.runtime}`);

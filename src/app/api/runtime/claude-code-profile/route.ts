@@ -1,3 +1,4 @@
+import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
@@ -36,7 +37,7 @@ async function responseBody() {
     effectiveModel: selectedClaudeCodeWorkerModelSync(),
     openrouterConfigured: Boolean(await resolveClaudeCodeWorkerGatewayKey()),
     codexProxy,
-    billing: profile.source === 'openrouter'
+    billing: profile.source !== 'codex-subscription' && runtimeBillingMode('claude-code') === 'api'
       ? 'api'
       : profile.source === 'codex-subscription'
         ? 'codex-subscription'
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'codexModel must be a valid model id.' }, { status: 400 });
   }
   const repoSkillAllowlist = normalizeClaudeCodeRepoSkillAllowlist(body.repoSkillAllowlist);
+  if (body.source === 'openrouter' && runtimeBillingMode('claude-code') !== 'api') return NextResponse.json({ ok: false, error: 'Set Who pays to My API key in the Claude Code runtime settings first.' }, { status: 409 });
   if (body.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
     return NextResponse.json({
       ok: false,

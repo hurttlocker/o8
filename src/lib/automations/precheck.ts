@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn } from '@/lib/providers/child-process';
 
 import { redactBroadcastText } from '@/lib/broadcast/redaction';
 import { forceKillTreeWindows } from '@/lib/runtimes/shared/owned-session/helpers';
@@ -76,7 +77,7 @@ export async function runBoundedAutomationPrecheck(input: {
     try {
       child = spawn(input.command, {
         cwd: input.cwd,
-        env: process.env,
+        env: childEnvironment(),
         shell: true,
         windowsHide: true,
         detached: process.platform !== 'win32',

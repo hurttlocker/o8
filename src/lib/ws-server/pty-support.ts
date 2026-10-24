@@ -8,7 +8,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync } from '@/lib/providers/child-process';
 
 /** A clean env for spawned PTYs: inherits process.env, pins TERM/locale/PATH, drops the parent terminal identity. */
 export function sanitizePtyEnv(): Record<string, string> {

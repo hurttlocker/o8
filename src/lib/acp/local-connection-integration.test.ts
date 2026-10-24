@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const state = vi.hoisted(() => ({ dir: '' }));
+vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => state.dir }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => {} }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('Fixture has no tools'); } }));
 import { localAcpProcessLaunch, saveLocalAcpConnection } from './local-connection';
 import { probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
-import { acpBackend } from '@/lib/lane/orchestrator-backends/acp';
+import { acpBackend, makeAcpBackend } from '@/lib/lane/orchestrator-backends/acp';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { normalizeOrchestratorTurnModel } from '@/lib/orchestrator/turn-model-selection';
 import { prepareOrchestratorTurn } from '@/components/desktop/thoughts/use-orchestrator-stream/turn-option-resolution';
@@ -82,7 +83,8 @@ async function residentTurn(threadId: string, model: string) {
   const output = text?.type === 'text' ? JSON.parse(text.text) as { sessionId: string; model: string; turns: string[]; modelWrites: string[] } : null;
   return { events, output };
 }
-beforeEach(() => { vi.stubEnv('O8_ACP_COMMAND', ''); vi.stubEnv('OPENROUTER_API_KEY', 'fixture-old'); });
+beforeEach(() => {
+  vi.stubEnv('HOME', state.dir); vi.stubEnv('O8_ACP_COMMAND', ''); vi.stubEnv('OPENROUTER_API_KEY', 'fixture-old'); });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force: true }); });
 
 it('replaces cached models when the configured agent changes, including optional enumeration', async () => {
@@ -107,12 +109,14 @@ it('refreshes an unused child after the connection changes and excludes unchecke
   expect(events.some(event => event.type === 'done')).toBe(true);
 });
 
-it('uses the latest opted-in key when hydration happened after ensureSession but before sendTurn', async () => {
+it('uses the latest opted-in key for a concrete runtime when hydration happened after ensureSession but before sendTurn', async () => {
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('opencode', 'api');
+  const keyedBackend = makeAcpBackend({ id: 'opencode', label: 'Concrete ACP fixture', resolveLaunch: () => localAcpProcessLaunch() });
   connect('default', true);
-  acpBackend.ensureSession(state.dir, 'default', 'key-change');
+  keyedBackend.ensureSession(state.dir, 'default', 'key-change');
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-new');
   const events: OrchestratorEvent[] = [];
-  await acpBackend.sendTurn(state.dir, 'fixture', event => events.push(event), { threadId: 'key-change' });
+  await keyedBackend.sendTurn(state.dir, 'fixture', event => events.push(event), { threadId: 'key-change' });
   expect(events.filter(event => event.type === 'text')).toEqual([{ type: 'text', text: JSON.stringify({ label: 'default', key: 'fixture-new' }) }]);
   expect(events.some(event => event.type === 'done')).toBe(true);
 });

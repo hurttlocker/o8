@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkerEventTime } from './WorkerEventTime';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { renderLLMMarkdown } from '@/components/desktop/LLMMarkdown';
 import { DesktopAgentMessage } from '@/components/desktop/DesktopAgentMessage';
@@ -24,6 +25,7 @@ export function WorkerProse({ entry, repoPath, onRunInTerminal }: {
       fontSize: 13, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.5, overflowWrap: 'anywhere',
       paddingTop: operator ? 5 : 0, paddingRight: operator ? 9 : 0, paddingBottom: operator ? 5 : 0, paddingLeft: operator ? 9 : 0,
       borderRadius: operator ? 8 : 0, background: operator ? 'var(--t-chat-surface-input-bg)' : 'transparent' }}>
+      <WorkerEventTime timestamp={entry.timestamp} />
       {renderLLMMarkdown(sanitizeTranscriptText(entry.text), { compact: true, onRunInTerminal })}
     </div>
   </div>;

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireReleaseLock,
   performShipPreflight,
@@ -11,6 +11,7 @@ import {
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
@@ -27,7 +28,7 @@ function fixture() {
     sentryDsn: 'https://synthetic@example.invalid/1',
   }));
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    NODE_ENV: 'test',
     HOME: home,
     APPLE_SIGNING_IDENTITY: 'Developer ID test',
     APPLE_ID: 'test@example.invalid',
@@ -56,6 +57,48 @@ function passingRun(head: string) {
 }
 
 describe('ship preflight', () => {
+  it('accepts and verifies a profile without reading the fallback credentials or reporting profile output', () => {
+    const { root, head, env } = fixture();
+    env.APPLE_KEYCHAIN_PROFILE = 'synthetic-profile';
+    for (const name of ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID']) {
+      Object.defineProperty(env, name, { get() { throw new Error('fallback credential read'); } });
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const run = vi.fn((command: string, args: string[]) => command === 'xcrun'
+      ? { status: 0, stdout: 'synthetic-profile private-history', stderr: 'private-diagnostic' }
+      : passingRun(head)(command, args));
+    const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+    expect(receipt.credentialNames).toEqual(['APPLE_SIGNING_IDENTITY', 'APPLE_KEYCHAIN_PROFILE']);
+    expect(run).toHaveBeenCalledWith('xcrun', ['notarytool', 'history', '--keychain-profile', 'synthetic-profile'],
+      expect.objectContaining({ timeoutMs: 15_000 }));
+    expect(JSON.stringify(receipt)).not.toMatch(/synthetic-profile|private-history|private-diagnostic/);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['exit', 'throw'])('fails closed on profile verification %s without leaking diagnostics', (failure) => {
+    const { root, head, env } = fixture();
+    env.APPLE_KEYCHAIN_PROFILE = 'synthetic-profile';
+    const run = (command: string, args: string[]) => {
+      if (command !== 'xcrun') return passingRun(head)(command, args);
+      if (failure === 'throw') throw new Error('synthetic-profile not-a-real-secret');
+      return { status: 1, stdout: 'synthetic-profile', stderr: 'not-a-real-secret' };
+    };
+    let message = '';
+    try { performShipPreflight({ root, version: '0.1.999', env, run }); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('could not verify notarytool Keychain profile');
+    expect(message).not.toMatch(/synthetic-profile|not-a-real-secret/);
+  });
+
+  it('warns on the environment fallback without printing credential values or invoking profile verification', () => {
+    const { root, head, env } = fixture();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const run = vi.fn(passingRun(head));
+    const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/APPLE_PASSWORD.*environment.*APPLE_KEYCHAIN_PROFILE/));
+    expect(JSON.stringify({ receipt, warnings: warn.mock.calls })).not.toMatch(/not-a-real-secret|test@example.invalid|TEAMTEST|Developer ID test/);
+    expect(run.mock.calls.some(([command]) => command === 'xcrun')).toBe(false);
+  });
+
   it('refuses to build when the desktop release configuration is missing', () => {
     const { root, head, env } = fixture();
     rmSync(join(root, 'o8.release.json'));

@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Entry {
     pub id: String,
     pub role: String,
     pub text: String,
     #[serde(rename = "toolCalls", default)]
-    pub tools: Vec<Value>,
+    pub tools: Option<Vec<Value>>,
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
@@ -50,6 +50,13 @@ impl Row {
 /// The ordering/deduplication boundary in workerTranscriptBlocks. Tools preceding
 /// prose form a block; a result with the same id updates its original step.
 pub fn render_tree(entries: &[Entry]) -> Vec<Row> {
+    render_tree_cached(entries, &[], &[])
+}
+
+/// Completed prose keeps its parsed nodes while tools can still receive results.
+pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row]) -> Vec<Row> {
+    let previous: HashMap<_, _> = previous.iter().map(|e| (&e.id, e)).collect();
+    let cached: HashMap<_, _> = old_rows.iter().map(|r| (r.id(), r)).collect();
     let mut rows = Vec::new();
     let mut pending = Vec::new();
     let mut indices = HashMap::<String, usize>::new();
@@ -65,7 +72,7 @@ pub fn render_tree(entries: &[Entry]) -> Vec<Row> {
     // Retain step indices until all result-only updates have arrived.
     let mut blocks = Vec::<(usize, Vec<usize>)>::new();
     for entry in entries {
-        for (index, tool) in entry.tools.iter().enumerate() {
+        for (index, tool) in entry.tools.as_deref().unwrap_or(&[]).iter().enumerate() {
             let id = tool["id"]
                 .as_str()
                 .filter(|s| !s.is_empty())
@@ -97,6 +104,12 @@ pub fn render_tree(entries: &[Entry]) -> Vec<Row> {
                 blocks.push((rows.len(), pending.clone()));
             }
             flush(&mut rows, &mut pending, &steps);
+            if previous.get(&entry.id).is_some_and(|old| **old == *entry)
+                && let Some(row @ Row::Message { .. }) = cached.get(entry.id.as_str())
+            {
+                rows.push((*row).clone());
+                continue;
+            }
             let special = entry
                 .extra
                 .get("type")

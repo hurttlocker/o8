@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFile, execSync, spawn } from 'child_process';
+import { execFile, execSync, spawn } from '@/lib/providers/child-process';
 import type { Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,8 +14,37 @@ const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || null;
 const IGNORE = new Set(['.git', 'node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store', '.pnpm-store', '.cache']);
 
 // Response cache — file tree doesn't change every second
-const filesCache = new Map<string, { data: unknown; ts: number }>();
+// Retain serialized responses, never a request's tree object graph. Both limits
+// matter: a single large workspace can dwarf many small ones.
+const filesCache = new Map<string, { body: string; bytes: number; ts: number }>();
+let filesCacheBytes = 0;
+const FILES_CACHE_MAX_ENTRIES = 32;
+const FILES_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 const FILES_CACHE_TTL_MS = 15_000;
+
+function dropCachedTree(key: string): void {
+  filesCacheBytes -= filesCache.get(key)?.bytes ?? 0;
+  filesCache.delete(key);
+}
+
+function cacheTree(root: string, body: string): void {
+  const now = Date.now();
+  for (const [key, entry] of filesCache) {
+    if (key === root || now - entry.ts >= FILES_CACHE_TTL_MS) dropCachedTree(key);
+  }
+  // UTF-16 storage upper bound, including the retained key.
+  const bytes = (body.length + root.length) * 2;
+  if (bytes > FILES_CACHE_MAX_BYTES) return;
+  while (filesCache.size >= FILES_CACHE_MAX_ENTRIES || filesCacheBytes + bytes > FILES_CACHE_MAX_BYTES) {
+    dropCachedTree(filesCache.keys().next().value!);
+  }
+  filesCache.set(root, { body, bytes, ts: now });
+  filesCacheBytes += bytes;
+}
+
+function treeResponse(body: string): NextResponse {
+  return new NextResponse(body, { headers: { 'content-type': 'application/json' } });
+}
 const MAX_DEPTH = 3;
 const MAX_FLAT_FILES = 20_000;
 const MAX_SEARCH_RESULTS = 500;
@@ -250,12 +279,14 @@ export async function GET(request: Request) {
   // Return cached if fresh
   const cached = filesCache.get(root);
   if (cached && (Date.now() - cached.ts) < FILES_CACHE_TTL_MS) {
-    return NextResponse.json(cached.data);
+    filesCache.delete(root);
+    filesCache.set(root, cached);
+    return treeResponse(cached.body);
   }
 
   const tree = await buildTree(root, '', 0);
   const changedFiles = Array.from(getChangedFiles(root));
-  const result = { tree, root, changedFiles };
-  filesCache.set(root, { data: result, ts: Date.now() });
-  return NextResponse.json(result);
+  const body = JSON.stringify({ tree, root, changedFiles });
+  cacheTree(root, body);
+  return treeResponse(body);
 }

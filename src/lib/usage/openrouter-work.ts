@@ -18,6 +18,10 @@ import { getDb, usageLogs } from '@/lib/db';
 
 export type OpenRouterCostBasis = 'reported' | 'estimated' | 'unlabeled' | 'unknown';
 
+const COST_BASIS_PRIORITY: Record<OpenRouterCostBasis, number> = {
+  unknown: 0, unlabeled: 1, estimated: 2, reported: 3,
+};
+
 export interface OpenRouterWorkTotals {
   calls: number;
   failedCalls: number;
@@ -148,16 +152,25 @@ export function summarizeOpenRouterWork(options: { since: Date }): OpenRouterWor
     .where(and(eq(usageLogs.provider, 'openrouter'), gte(usageLogs.createdAt, since)))
     .orderBy(usageLogs.createdAt)
     .all();
-  const seenGenerations = new Set<string>();
-  const bySource = new Map<string, OpenRouterWorkTotals>();
-  const byModel = new Map<string, OpenRouterWorkTotals>();
+  const selected = new Map<string, { row: UsageRow; metadata: Record<string, unknown> }>();
   for (const row of rows) {
     const metadata = metadataOf(row);
     const generationId = typeof metadata.generationId === 'string' && metadata.generationId ? metadata.generationId : null;
-    if (generationId) {
-      if (seenGenerations.has(generationId)) { summary.duplicateRows += 1; continue; }
-      seenGenerations.add(generationId);
+    const key = generationId ? `generation:${generationId}` : `row:${row.id}`;
+    const previous = selected.get(key);
+    if (previous) {
+      summary.duplicateRows += 1;
+      // Later provider evidence replaces an estimate or unknown cost, while
+      // a weaker duplicate cannot downgrade an already reported generation.
+      if (COST_BASIS_PRIORITY[openRouterCostBasis(metadata)]
+        <= COST_BASIS_PRIORITY[openRouterCostBasis(previous.metadata)]) continue;
     }
+    selected.set(key, { row, metadata });
+  }
+  const bySource = new Map<string, OpenRouterWorkTotals>();
+  const byModel = new Map<string, OpenRouterWorkTotals>();
+  const chronological = [...selected.values()].sort((a, b) => a.row.createdAt.localeCompare(b.row.createdAt));
+  for (const { row, metadata } of chronological) {
     add(summary.totals, row, metadata);
     const source = sourceOf(row, metadata);
     if (!bySource.has(source)) bySource.set(source, emptyTotals());

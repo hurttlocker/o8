@@ -72,6 +72,30 @@ describe('thread detail remote preview entry and ownership', () => {
     expect(requests('POST')).toHaveLength(2);
   });
 
+  it.each(['back', 'attempt'] as const)('stops the service when reconnect and %s navigation occur in one render', async (navigation) => {
+    await render(); await click('Remote preview');
+    const reconnect = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === 'Reconnect')!;
+    const back = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === 'Back')!;
+    await act(async () => {
+      reconnect.click();
+      if (navigation === 'back') back.click();
+      else root.render(createElement(ThreadDetail, {
+        task: remoteTask(3), active: true, evidenceRevision: 0, onBack: () => {}, actions: null,
+      }));
+    });
+    expect(requests('DELETE').at(-1)?.body).toEqual({ id: 'listener', serviceJobId: 'review-service', keepService: false });
+    expect(requests('POST')).toHaveLength(1);
+  });
+
+  it('reuses the owned service for an ordinary reconnect and stops it on Back', async () => {
+    await render(); await click('Remote preview');
+    await click('Reconnect');
+    expect(requests('DELETE')[0].body).toEqual({ id: 'listener', serviceJobId: 'review-service', keepService: true });
+    expect(requests('POST').at(-1)?.body).toEqual({ jobId: 'result-job', attempt: 2, serviceJobId: 'review-service' });
+    await click('Back');
+    expect(requests('DELETE').at(-1)?.body.keepService).toBe(false);
+  });
+
   it.each([
     ['attempt', () => remoteTask(3)],
     ['task', () => remoteTask(2, 'another-task')],

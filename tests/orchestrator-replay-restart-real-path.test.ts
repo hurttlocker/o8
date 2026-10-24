@@ -121,7 +121,11 @@ const emit = (value) => console.log(JSON.stringify(value));
 const prompt = process.argv.join('\\n');
 const text = prompt.includes('second turn') ? 'Second reply after restart.' : 'First reply.';
 emit({ type: 'thread.started', thread_id: 'scripted-codex-replay' });
-emit({ type: 'item.completed', item: { type: 'agent_message', text } });
+if (prompt.includes('stream-heavy replay fixture')) {
+  const { existsSync } = await import('node:fs');
+  for (let i = 0; i < 12; i++) emit({ type: 'item.completed', item: { type: 'agent_message', text: 'chunk-' + i + ':' + 'x'.repeat(4 * 1024) } });
+  while (!existsSync(${JSON.stringify(join(root, 'release-stream'))})) await new Promise(resolve => setTimeout(resolve, 25));
+} else emit({ type: 'item.completed', item: { type: 'agent_message', text } });
 emit({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
 `);
   chmodSync(fakeCli, 0o755);
@@ -158,6 +162,7 @@ Server.prototype.listen = function (...args) {
     CORTEX_IDE_DB_PATH: join(dataDir, 'cortex-ide.db'),
     CORTEX_IDE_OWNED_CODEX_ROOT: join(root, 'owned-codex'),
     O8_CODEX_BIN: fakeCli, O8_SUBSCRIPTION_PROFILE: 'both',
+    O8_ORCHESTRATOR_REPLAY_BYTE_LIMIT: String(16 * 1024),
     ...(process.env.O8_TEST_FILE_MARKER ? { O8_TEST_FILE_MARKER: process.env.O8_TEST_FILE_MARKER } : {}),
     O8_API_PORT: String(address.port), O8_WS_PORT: String(wsPort),
     NEXT_ORIGIN: `http://127.0.0.1:${address.port}`,
@@ -178,6 +183,38 @@ afterAll(async () => {
 });
 
 describe('orchestrator replay cursor across a ws-server restart (#3665)', () => {
+  it('bounds an unfinished stream by bytes and replays the exact recorded tail (#4422)', async () => {
+    const threadId = `thoughts-replay-heavy-${Date.now()}`;
+    const first = await connect(threadId, 0);
+    first.socket.send(buildOrchestratorSendPayload({
+      repoPath, threadId, clientMessageId: 'heavy-turn',
+      wireMessage: 'stream-heavy replay fixture', displayMessage: 'stream-heavy replay fixture',
+      permissionMode: 'plan', orchestrationMode: 'fleet', pickedMode: 'multitask',
+      model: 'gpt-6.1-sol', backend: 'codex',
+    }));
+    try {
+      await waitFor(() => first.events.some((event) => String(event.data?.text).includes('chunk-11:') || event.event === 'error' || (event.data?.status === 'ready' && !event.data?.snapshot)), 'recorded heavy stream');
+      expect(first.events.some((event) => String(event.data?.text).includes('chunk-11:'))).toBe(true);
+      const recorded = first.events.filter((event) => typeof event.seq === 'number');
+      const replay = await connect(threadId, 0);
+      const lastSeq = recorded.at(-1)?.seq;
+      await waitFor(() => replay.events.some((event) => event.seq === lastSeq), 'replay tail to arrive');
+      const replayed = replay.events.filter((event) => typeof event.seq === 'number');
+      const size = replayed.reduce((sum, event) => sum + Buffer.byteLength(JSON.stringify(event), 'utf8'), 0);
+      console.log(`[replay-memory] orchestrator retained ${size} bytes from ${recorded.length} recorded envelopes`);
+      expect(size).toBeLessThanOrEqual(16 * 1024);
+      expect(replayed.length).toBeGreaterThan(0);
+      expect(replayed).toEqual(recorded.slice(-replayed.length));
+      const cursor = Number(replayed.at(-2)?.seq);
+      const resumed = await connect(threadId, cursor);
+      await waitFor(() => resumed.events.some((event) => event.seq === lastSeq), 'cursor replay tail to arrive');
+      expect(resumed.events.filter((event) => typeof event.seq === 'number')).toEqual(replayed.filter((event) => Number(event.seq) > cursor));
+    } finally {
+      writeFileSync(join(root, 'release-stream'), 'release');
+      await waitFor(() => first.events.some((event) => event.event === 'status' && event.data?.status === 'ready' && !event.data?.snapshot), 'heavy turn completion');
+    }
+  }, 60_000);
+
   it('delivers the next turn to a view that kept its cursor through the restart', async () => {
     const threadId = `thoughts-replay-restart-${Date.now()}`;
     // The client's replay cursor, carried across reconnects as the desktop stream does.

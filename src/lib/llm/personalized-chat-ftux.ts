@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 // Old Cortex Go binary removed — cortexRecall no longer available
@@ -76,7 +77,7 @@ async function safeExec(command: string, args: string[], timeoutMs = 1_500) {
       windowsHide: true,
       timeout: timeoutMs,
       maxBuffer: 256 * 1024,
-      env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' },
+      env: childEnvironment({ env: { GH_NO_UPDATE_NOTIFIER: '1' } }),
     });
     return `${stdout}\n${stderr}`.trim();
   } catch (error) {

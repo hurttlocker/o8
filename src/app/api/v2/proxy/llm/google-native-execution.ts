@@ -1,4 +1,5 @@
-import { execFile as execFileCallback, spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile as execFileCallback, spawn } from '@/lib/providers/child-process';
 import { promises as fs } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -521,7 +522,7 @@ async function executeShell(argumentsValue: Record<string, unknown>, repoRoot: s
       encoding: 'utf8',
       timeout: SHELL_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
     const output = truncateOutput([stdout, stderr].filter(Boolean).join('\n').trim() || '(command completed with no output)', MAX_SHELL_OUTPUT);
     return {
@@ -594,14 +595,7 @@ async function executeGithub(argumentsValue: Record<string, unknown>, repoRoot: 
     const child = spawn('gh', validated.args, {
       windowsHide: true,
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        FORCE_COLOR: '0',
-        GH_NO_UPDATE_NOTIFIER: '1',
-        GH_PAGER: 'cat',
-        NO_COLOR: '1',
-        PAGER: 'cat',
-      },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: 'cat', NO_COLOR: '1', PAGER: 'cat' } }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

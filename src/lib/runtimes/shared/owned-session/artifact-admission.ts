@@ -14,7 +14,7 @@ const heldRoots = new AsyncLocalStorage<Map<string, { active: boolean; admitted:
 export class OwnedArtifactAdmissionError extends Error {
   readonly code = 'owned_artifact_admission_held';
   readonly sideEffect = 'none' as const;
-  constructor(reason: string) {
+  constructor(public readonly reason: string) {
     super(`Owned artifact admission held: ${reason}. Retained evidence was not removed; read, stop, archive and recovery remain available. Review retained artifacts before starting another run.`);
     this.name = 'OwnedArtifactAdmissionError';
   }
@@ -152,18 +152,34 @@ export async function withOwnedArtifactRootLock<T>(root: string, operation: () =
   }
 }
 
-export function withOwnedArtifactAdmission<T>(root: string, operation: () => Promise<T>): Promise<T> {
-  return withOwnedArtifactRootLock(root, async () => {
-    const canonical = await canonicalRoot(root);
-    const authority = heldRoots.getStore()!.get(canonical)!;
-    if (!authority.admitted) {
-      try { await measureArtifacts(canonical); }
-      catch (error) {
-        if (error instanceof OwnedArtifactAdmissionError) throw error;
-        throw new OwnedArtifactAdmissionError('retained artifact accounting could not be verified');
-      }
-      authority.admitted = true;
+export async function withOwnedArtifactAdmission<T>(
+  root: string,
+  operation: () => Promise<T>,
+  onRetry?: (attempt: number, cause: string) => void,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    let operationStarted = false;
+    try {
+      return await withOwnedArtifactRootLock(root, async () => {
+        const canonical = await canonicalRoot(root);
+        const authority = heldRoots.getStore()!.get(canonical)!;
+        if (!authority.admitted) {
+          try { await measureArtifacts(canonical); }
+          catch (error) {
+            if (error instanceof OwnedArtifactAdmissionError) throw error;
+            throw new OwnedArtifactAdmissionError('retained artifact accounting could not be verified');
+          }
+          authority.admitted = true;
+        }
+        operationStarted = true;
+        return operation();
+      });
+    } catch (error) {
+      if (operationStarted || !(error instanceof OwnedArtifactAdmissionError) || attempt >= 3
+        || (error.reason !== 'artifact accounting changed; retry after writers settle'
+          && error.reason !== 'another lifecycle operation owns this runtime root')) throw error;
+      onRetry?.(attempt + 1, error.message);
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
     }
-    return operation();
-  });
+  }
 }

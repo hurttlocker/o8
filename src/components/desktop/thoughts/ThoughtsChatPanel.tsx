@@ -3,7 +3,7 @@
 import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
 import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
-import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
+import { TranscriptPlan, useTranscriptActions } from './chat-panel/transcript-presentation';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
@@ -1105,9 +1105,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     return prependHistoryMessages(historyMessages);
   }, [prependHistoryMessages]);
 
+  const getTranscriptScrollContainer = useCallback(() => chatEndRef.current?.closest('.thoughts-scroll') as HTMLElement | null, []);
   const { startBackfill, cancelBackfill, onScroll: loadOlderHistoryOnScroll } = useThreadHistoryBackfill({
     fetchPage: fetchOlderThreadPage,
-    getScrollContainer: () => chatEndRef.current?.closest('.thoughts-scroll') as HTMLElement | null,
+    getScrollContainer: getTranscriptScrollContainer,
     onPrepend: prependThreadHistoryPage,
   });
 
@@ -1304,17 +1305,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
 
   // Memoize so a render triggered by composer state (input typing) doesn't
   // hand ChatMessageList a fresh `topContent` ref each keystroke.
-  const transcriptTopContent = useMemo(() => displayPlanText ? (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 0,
-      }}
-    >
-      <CollapsiblePlanCard key={`plan-${threadId ?? 'active'}`} text={displayPlanText} />
-    </div>
-  ) : null, [displayPlanText, threadId]);
+  const transcriptTopContent = useMemo(() => displayPlanText ? <TranscriptPlan text={displayPlanText} threadId={threadId} /> : null, [displayPlanText, threadId]);
 
   useEffect(() => {
     onChromeChange({
@@ -1931,6 +1922,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   const threadWorkers = useThreadWorkers({ threadId: isOrchestratorMode ? threadId : null, repoPath: resolvedRepoPath, busy: displayWaiting, agents });
   const workerGroups = projectThreadWorkerGroups({ entries: isOrchestratorMode ? displayMessages : [], packets: isOrchestratorMode ? threadWorkerPackets : [], sessions: threadWorkers, busy: displayWaiting });
   const workerScouts = [...workerGroups.groups.values(), workerGroups.unattributed].flatMap(group => group.scouts);
+  const { selectTranscriptSuggestion, retryTranscriptDelivery, deliverTranscriptArtifact, composerQueue } = useTranscriptActions({ sendNow, retry: orchStream.retryPendingSend, deliver: deliverTaskArtifactAction,
+    queue: { items: durable.transcriptItems, canSteer: durable.canSteer, onSteer: id => { void durable.steer(id); }, onCancel: sendBuffer.cancelQueued, removing: durable.removing, promoting: durable.promoting, steerableIds: durable.steerableIds } });
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (<WorkerDisclosureProvider key={`${resolvedRepoPath}:${threadId}`}>
     <div
@@ -1982,7 +1975,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
             ref={chatEndRef}
             displayMessages={displayMessages}
             displayWaiting={displayWaiting}
-            composerQueue={{ items: durable.transcriptItems, canSteer: durable.canSteer, onSteer: id => { void durable.steer(id); }, onCancel: sendBuffer.cancelQueued, removing: durable.removing, promoting: durable.promoting, steerableIds: durable.steerableIds }}
+            composerQueue={composerQueue}
             repoPath={resolvedRepoPath}
             activeTargetLabel={activeTargetLabel}
             activeTargetColor={activeTargetColor}
@@ -1998,15 +1991,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
             suggestedReplies={chipsForLastAssistant}
             suggestedRepliesCollapsed={suggestedRepliesCollapsed}
             suggestedRepliesPending={suggestedRepliesPending}
-            onSelectSuggestion={(chip) => { sendNow(chip); }}
+            onSelectSuggestion={selectTranscriptSuggestion}
             onDismissSuggestions={dismissSuggestedReplies}
             onRestoreSuggestions={restoreSuggestedReplies}
             turnSummary={turnSummary}
-            onRetryDelivery={orchStream.retryPendingSend}
+            onRetryDelivery={retryTranscriptDelivery}
             onScroll={loadOlderHistoryOnScroll}
             taskArtifacts={taskArtifacts}
             taskArtifactThreadBusy={orchStream.status === 'busy'}
-            onTaskArtifactDeliver={deliverTaskArtifactAction}
+            onTaskArtifactDeliver={deliverTranscriptArtifact}
           />
         </div>
         {!composeFirst ? transcriptSideRail : null}

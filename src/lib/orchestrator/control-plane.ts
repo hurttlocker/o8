@@ -373,6 +373,9 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         lastEventLabel: currentAuthExit
           ? CODEX_AUTH_RECOVERY_LANE_LABEL
           : runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
+        provisioningQueuePosition: lane.status === 'launching' && !lane.sessionKey
+          && /^worktree_provision_queued:\d+$/.test(lane.lastEventLabel ?? '')
+          ? Number(lane.lastEventLabel!.split(':')[1]) : null,
         failureMessage,
         authRecoveryRequired: Boolean(currentAuthExit),
         recovery,

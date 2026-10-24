@@ -1,9 +1,11 @@
 import { laneGit } from '@/lib/lane/lane-git';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import type { Lane } from '@/lib/lane/types';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES, FILE_SIZE_WAIVERS } from '@/lib/orchestrator/dispatch';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
+import { readHeadSha } from '@/lib/lane/head-sha-lock';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,14 +44,21 @@ function parseOriginalLineCount(currentLineCount: number, diffOutput: string) {
 }
 
 export async function getOversizedChangedFilesForLane(
-  lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>,
+  lane: Pick<Lane, 'id' | 'baseBranch' | 'worktreePath' | 'repoPath'>,
 ) {
   if (!lane.worktreePath) {
     return [];
   }
 
+  const cwd = lane.worktreePath;
+  const headSha = await readHeadSha(cwd, lane.repoPath);
+  // Resolve outside the best-effort file reads: a missing saved base must
+  // refuse governance, never silently substitute local main or an empty diff.
+  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha,
+    args => laneGit(cwd, lane.repoPath, args));
+  const range = `${diffBase.mergeBase ?? diffBase.comparisonRef}...${headSha}`;
   try {
-    const result = await laneGit(lane.worktreePath, lane.repoPath, ['diff', '--name-only', `${lane.baseBranch}...HEAD`], { maxBuffer: 4 * 1024 * 1024 });
+    const result = await laneGit(cwd, lane.repoPath, ['diff', '--name-only', range], { maxBuffer: 4 * 1024 * 1024 });
     const changedFiles = Array.from(new Set(
       String(result.stdout)
         .split('\n')
@@ -66,7 +75,7 @@ export async function getOversizedChangedFilesForLane(
         });
         let diffOutput = '';
         try {
-          const diffResult = await laneGit(lane.worktreePath!, lane.repoPath, ['diff', '--numstat', `${lane.baseBranch}...HEAD`, '--', filePath], { maxBuffer: 256 * 1024 });
+          const diffResult = await laneGit(cwd, lane.repoPath, ['diff', '--numstat', range, '--', filePath], { maxBuffer: 256 * 1024 });
           diffOutput = String(diffResult.stdout);
         } catch {
           diffOutput = '';

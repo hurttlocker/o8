@@ -295,6 +295,7 @@ describe('agent message bus real path', () => {
     expect(sendCodex).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: 'codex-receiver-session', sessionKey: 'codex-thread-receiver' }),
       expect.stringContaining('[o8 agent inbox]'),
+      expect.any(Function),
     );
     expect(sendCodex.mock.calls[0]?.[1]).not.toContain(text);
 
@@ -354,6 +355,7 @@ describe('agent message bus real path', () => {
     expect(sendCodex).toHaveBeenCalledWith(
       expect.objectContaining({ agentId, sessionKey: 'codex:coalesced-receiver' }),
       expect.stringContaining('[o8 agent inbox]'),
+      expect.any(Function),
     );
     expect(sendCodex.mock.calls[0]?.[1]).not.toContain('First update.');
 

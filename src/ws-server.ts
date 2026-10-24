@@ -1,4 +1,5 @@
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
+import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 /**
  * Unified WebSocket server for o8 mobile.
@@ -44,12 +45,11 @@ import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-import { markThreadActionDelivered } from '@/lib/task-artifacts/service';
 import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -175,6 +175,7 @@ import {
   resolveOrchestratorRepoPath,
 } from './lib/orchestrator/repo-path';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
+import { RealtimeReplayLog } from '@/lib/realtime/replay-log';
 import {
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
@@ -1008,6 +1009,7 @@ interface TerminalAttachment {
 }
 
 interface InternalTerminalSpawnPayload {
+  resolvedEnvironment?: boolean;
   sessionName?: string;
   shellCommand?: string;
   cwd?: string;
@@ -1682,28 +1684,16 @@ function spawnManagedCommandPty(
   cols: number,
   rows: number,
   envOverrides?: Record<string, string>,
+  resolvedEnvironment = false,
 ) {
   if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
-  const shell = resolvePreferredShell();
-  const env = {
-    ...sanitizePtyEnv(),
-    ...(envOverrides ?? {}),
-    CORTEX_TERMINAL_SESSION_NAME: sessionName,
-  };
-
-  console.log(`[ws-server] Spawning managed PTY session: ${shell} -lc <command> (${sessionName})`);
-  return terminalHost.spawn({
-    file: shell,
-    args: ['-l', '-c', shellCommand],
-    name: 'xterm-256color',
-    cols,
-    rows,
-    cwd,
-    env,
-  });
+  const launch = managedCommandLaunch(resolvePreferredShell(), shellCommand, sanitizePtyEnv(), {
+    ...(envOverrides ?? {}), CORTEX_TERMINAL_SESSION_NAME: sessionName,
+  }, resolvedEnvironment);
+  return terminalHost.spawn({ ...launch, name: 'xterm-256color', cols, rows, cwd });
 }
 
 function trimScrollback(att: TerminalAttachment) {
@@ -2465,13 +2455,17 @@ const REALTIME_LOG_LIMIT = Math.max(
   4,
   Number.parseInt(process.env.O8_REALTIME_LOG_LIMIT ?? '400', 10) || 400,
 );
+const REALTIME_LOG_BYTE_LIMIT = Math.max(
+  1,
+  Number.parseInt(process.env.O8_REALTIME_LOG_BYTE_LIMIT ?? '', 10) || 2 * 1024 * 1024,
+);
 const BROWSER_DISCOVERY_INTERVAL_MS = 15_000;
 const ATTACHED_BROWSER_REFRESH_MS = 2_000;
 const WS_SERVER_VERSION = resolveAppVersion();
 const REALTIME_EPOCH = randomUUID();
 
 let realtimeSeq = 0;
-const realtimeLog: RealtimeEventEnvelope[] = [];
+const realtimeLog = new RealtimeReplayLog(REALTIME_LOG_LIMIT, REALTIME_LOG_BYTE_LIMIT);
 let runtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let runtimeRefreshFreshRequested = false;
 let mobileRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2615,11 +2609,6 @@ function mutationToLaneLifecyclePayload(
   };
 }
 
-function clampRealtimeLog() {
-  if (realtimeLog.length <= REALTIME_LOG_LIMIT) return;
-  realtimeLog.splice(0, realtimeLog.length - REALTIME_LOG_LIMIT);
-}
-
 function normalizeRealtimeStreamKey(raw: string | undefined, sessionKey?: string | null): RealtimeStreamKey | null {
   if (!raw) return null;
   if (raw === 'global') return 'global';
@@ -2745,7 +2734,7 @@ function negotiateRealtimeProtocol(client: ClientState, msg: Record<string, unkn
 }
 
 function eventMatchesRealtimeSubscription(
-  envelope: RealtimeEventEnvelope,
+  envelope: Pick<RealtimeEventEnvelope, 'stream' | 'audience'>,
   subscription: RealtimeSubscription,
   client: ClientState,
 ) {
@@ -2813,8 +2802,7 @@ function buildRealtimeEnvelope(
   };
 
   if (options.delivery !== 'bootstrap') {
-    realtimeLog.push(envelope);
-    clampRealtimeLog();
+    realtimeLog.record(envelope);
   }
 
   return envelope;
@@ -2846,12 +2834,8 @@ function broadcastRealtimeEvents(events: RealtimeEventEnvelope[]) {
   }
 }
 
-function retainedEventsForStream(stream: RealtimeStreamKey) {
-  return realtimeLog.filter((event) => event.stream === stream);
-}
-
 function earliestRetainedSeq(stream: RealtimeStreamKey) {
-  return retainedEventsForStream(stream)[0]?.seq;
+  return realtimeLog.earliestSeq(stream);
 }
 
 function replayRealtimeSubscriptions(client: ClientState, subscriptions: RealtimeSubscription[]) {
@@ -2880,8 +2864,8 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
       });
       continue;
     }
-    const replay = realtimeLog.filter((event) => (
-      event.seq > since && eventMatchesRealtimeSubscription(event, subscription, client)
+    const replay = realtimeLog.since(since, (event) => (
+      eventMatchesRealtimeSubscription(event, subscription, client)
     ));
     if (replay.length > 0) {
       sendRealtimeBatch(client, stream, 'replay', replay);
@@ -5524,6 +5508,7 @@ async function handleOrchestratorSendMsgOnce(
       return;
     }
     if (taskArtifactStamp) {
+      const { markThreadActionDelivered } = await import('@/lib/task-artifacts/service');
       const marked = markThreadActionDelivered(taskArtifactStamp, { repoPath, threadId });
       if (!marked.ok) {
         const error = `Task artifact action refused: ${marked.reason}.`;
@@ -7760,7 +7745,7 @@ const httpServer = createServer(async (req, res) => {
       }
 
       try {
-        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env);
+        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env, payload?.resolvedEnvironment === true);
         const now = Date.now();
         const attachment: TerminalAttachment = {
           id: randomUUID(),

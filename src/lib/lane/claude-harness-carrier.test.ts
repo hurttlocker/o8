@@ -1,3 +1,4 @@
+import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const profileState = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ const { resolveClaudeHarnessCarrier } = await import('./claude-harness-carrier')
 
 describe('Claude Code orchestrator carrier', () => {
   beforeEach(() => {
+    saveRuntimeBillingMode('claude-code', 'api');
     profileState.source = 'native';
     profileState.model = null;
     profileState.codexModel = null;

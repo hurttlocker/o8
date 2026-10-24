@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile } from '@/lib/providers/child-process';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -119,7 +120,7 @@ async function queryConfiguredModels(): Promise<string[]> {
     timeout: 10_000,
     maxBuffer: 512 * 1024,
     windowsHide: true,
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: childEnvironment({ runtimeId: '3code', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
   });
   const knownGood = new Set(parseThreecodeGoodOutput(result.stdout));
   return [...new Set(parseThreecodeConfiguredProviders(config)

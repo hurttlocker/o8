@@ -142,3 +142,20 @@ it omits string contents and does not claim dominator-retained sizes.
 Review the JSON's failures, sample counts, calibration, and workload limitations
 before comparing medians or worst cases. `complete` requires three full soaks;
 it does not assert that every original #2887 acceptance criterion is complete.
+
+## WS replay memory
+
+With Node 22, `node scripts/speed/ws-replay-memory.mjs --check` builds the
+standalone WS entry point and drives its internal realtime publisher with 3,600
+large synthetic events. It owns disposable data, repository, profile and API
+fixtures. The default accelerates one hour of event timestamps; the receipt
+records actual elapsed time. Use `--interval-ms=1000` for a wall-clock hour.
+`--output=work/ws-replay-memory` selects the private evidence directory.
+
+Collect RSS and heap evidence in separate runs. `--snapshots --settle-ms=2000`
+adds idle/loaded heap snapshots and sanitized retaining paths; those RSS values
+are marked incomparable because snapshot allocation changes residency. Ordinary
+runs settle for 45 seconds before each measurement and record memory both before
+and after explicit collection. The 150 MB check uses settled idle RSS before collection and loaded RSS after
+collection; the receipt also retains the raw loaded RSS. `--entry=<bundle>` can measure an already-built baseline artifact.
+Keep the raw snapshots private, as with the other speed probes above.

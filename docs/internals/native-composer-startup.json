@@ -520,5 +520,7 @@
     "first_paint_under_1000_ms": false,
     "interactive_under_3000_ms": false,
     "note": "Both targets remain unmet in the measured CPU-limited conditions; unthrottled reference-host acceptance remains open."
-  }
+  },
+  "measurement_source_head": "7c99f420b9a8370bc98d1a861f45f8ae05d7ac6c",
+  "branch_refresh_main_commit": "1834e625c150de6fd3cef3396dbbec1412bc8fcc"
 }

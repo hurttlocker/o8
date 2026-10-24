@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * spec-image-captions — caption markdown images during spec ingest so the
  * Engineering Brain has searchable text for visual references (#1131).
@@ -169,9 +170,7 @@ async function captionViaGemini(absPath: string, apiKey: string): Promise<string
  * Always returns the (possibly unchanged) markdown — never throws.
  */
 export async function captionImagesInSpec(specFilePath: string, content: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY
-    ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    ?? process.env.GOOGLE_AI_API_KEY;
+  const apiKey = resolveProviderKey('GEMINI_API_KEY');
 
   // Collect matches up-front so we don't replace + re-scan in one pass.
   const matches = Array.from(content.matchAll(MARKDOWN_IMAGE_REGEX));

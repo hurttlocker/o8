@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * tmux helper — server-side utility for managing tmux sessions.
  *
@@ -7,7 +8,7 @@
  * - Interactive terminal input (users can type into agent's terminal)
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -94,7 +95,7 @@ export async function createTmuxSession(
       windowsHide: true,
       cwd,
       timeout: 10_000,
-      env: { ...process.env },
+      env: childEnvironment(),
     });
 
     // Set remain-on-exit so output persists after the process finishes

@@ -50,8 +50,8 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
-    // Load routes on request. Eagerly importing every API and page competes
-    // with native boot's identity probe and first dashboard render (#4436).
+    // Next otherwise requires every route at boot, retaining unused feature
+    // chunks and their module-level state for the entire sidecar lifetime.
     preloadEntriesOnStart: false,
     // Runtime response caches must not mutate the signed standalone app.
     // Compiled responses remain readable and the in-memory cache stays enabled.
