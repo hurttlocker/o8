@@ -42,8 +42,9 @@ async function main() {
       };
       if (words.includes('Start streaming') && !released) {
         yield append('Worker streaming');
-        const deadline = Date.now() + 60_000;
-        for (let tick = 1; !released && Date.now() < deadline; tick++) {
+        // The owner releases this turn explicitly. A wall-clock completion
+        // changes queue semantics on loaded hosts; abort and host cleanup bound it.
+        for (let tick = 1; !released; tick++) {
           await delay(50, undefined, { signal });
           yield append(` ${tick}`);
         }
