@@ -46,6 +46,7 @@ export interface WorkspacePreservationPayload {
   capturePolicy: {
     rebuildablePaths: string[];
     copiedEnvironment: Record<string, string | null>;
+    environmentReferences?: Record<string, string>;
     discardSource: boolean;
   };
   handoff: {
@@ -209,7 +210,13 @@ async function preserveWorkspaceArtifactsNative(
   const managed = await readManagedWorkspaceMaterialization(repo.localPath, snapshot.originalPath);
   const lane = snapshot.laneId ? getLane(snapshot.laneId) : null;
   try {
-    const bindings = await repoSetupCopyBindingRequirements(repo);
+    const environmentReferences = managed.metadata.environmentReferences ?? {};
+    // References carry no copied bytes and may outlive or rotate their source.
+    const bindings = await repoSetupCopyBindingRequirements({
+      ...repo, setup: { ...repo.setup, envFiles: repo.setup.envFiles.filter((file) => (
+        !Object.prototype.hasOwnProperty.call(environmentReferences, file.trim().replaceAll('\\', '/').replace(/^\.\//, ''))
+      )) },
+    });
     const capturePolicy = {
       rebuildablePaths: [
         'node_modules', '.o8-install-runtime', '.next/cache', '.turbo',
@@ -218,6 +225,7 @@ async function preserveWorkspaceArtifactsNative(
       copiedEnvironment: Object.fromEntries(
         Object.entries(bindings).map(([relativePath, binding]) => [relativePath, binding.sourceContentFingerprint]),
       ),
+      environmentReferences,
       discardSource: options.discardSource === true,
     };
     const capture = await captureIgnoredArtifacts({

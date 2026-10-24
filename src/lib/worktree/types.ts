@@ -163,6 +163,8 @@ export interface WorktreeMetaStore {
 }
 
 export interface WorktreeMetaEntry {
+  /** Exact link targets provisioned by the manager, never environment contents. */
+  environmentReferences?: Record<string, string>;
   /** Creation-time association for bounded terminal discovery, including collision slots. */
   packetId?: string;
   laneId?: string;

@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -64,15 +64,24 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetId: string, revision: string) {
+async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetId: string, revision: string, provisionEnvironment = false) {
   const worktreeId = 'packet-' + packetId;
   const branch = 'codex/' + packetId;
   const workspacePath = path.join(resolveWorktreeRootLayout(repo.localPath).primaryBase, worktreeId);
-  mkdirSync(path.dirname(workspacePath), { recursive: true });
-  git(repo.localPath, 'clone', '--quiet', '--no-hardlinks', '--no-checkout', repo.localPath, workspacePath);
+  if (provisionEnvironment) {
+    await new WorktreeManager(repo.localPath).create({
+      agentType: 'codex', taskName: packetId, packetId, branchName: branch,
+      baseBranch: revision, managed: true, skipSetup: true, envMode: 'copy',
+      isolationPreference: 'git-worktree',
+      envFiles: packetId.endsWith('leading-dot') ? ['./.env', './.env.local'] : undefined,
+    });
+  } else {
+    mkdirSync(path.dirname(workspacePath), { recursive: true });
+    git(repo.localPath, 'clone', '--quiet', '--no-hardlinks', '--no-checkout', repo.localPath, workspacePath);
+    git(workspacePath, 'checkout', '-qb', branch, revision);
+  }
   git(workspacePath, 'config', 'user.name', 'o8 regression');
   git(workspacePath, 'config', 'user.email', 'o8@example.test');
-  git(workspacePath, 'checkout', '-qb', branch, revision);
   const identity = await captureWorktreeMaterializationIdentity(workspacePath);
   const parentIdentity = await captureWorktreeMaterializationIdentity(path.dirname(workspacePath));
   const surfaceId = 'codex-owned:codex-owned-' + packetId;
@@ -94,9 +103,10 @@ async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetI
   writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify(session), { mode: 0o600 });
   const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
   resetOwnedSessionIndex();
-  await withWorktreeMetaTransaction(repo.localPath, (transaction) => transaction.save(worktreeId, {
+  await withWorktreeMetaTransaction(repo.localPath, async (transaction) => transaction.save(worktreeId, {
+    ...(await transaction.readAll())[worktreeId],
     id: worktreeId, agentType: 'codex', sessionKey: surfaceId, baseBranch: 'main', createdAt: Date.now(),
-    claudeManaged: false, taskName: packetId, branchName: branch, status: 'ready', isolationKind: 'apfs-cow-clone',
+    claudeManaged: false, taskName: packetId, branchName: branch, status: 'ready', isolationKind: provisionEnvironment ? 'git-worktree' : 'apfs-cow-clone',
     materializationIdentity: identity, materializationParentIdentity: parentIdentity,
   }));
   const lane = createLane({
@@ -131,7 +141,7 @@ beforeAll(async () => {
   git(repoPath, 'init', '-q', '-b', 'main');
   git(repoPath, 'config', 'user.name', 'o8 regression');
   git(repoPath, 'config', 'user.email', 'o8@example.test');
-  writeFileSync(path.join(repoPath, '.gitignore'), '.o8/\nnode_modules/\n');
+  writeFileSync(path.join(repoPath, '.gitignore'), '.o8/\nnode_modules/\n.env*\n');
   writeFileSync(path.join(repoPath, 'tracked.txt'), 'base source\n');
   mkdirSync(path.join(repoPath, 'checked', 'nested'), { recursive: true });
   writeFileSync(path.join(repoPath, 'checked', 'nested', 'evidence.txt'), 'outside bytes must survive\n');
@@ -175,9 +185,9 @@ afterAll(async () => {
 
 
 async function finishedPacket(packetId: string, status: 'archived' | 'completed' | 'failed' | 'reviewing' | 'paused' = 'archived',
-  retainedSession?: 'ordinary' | 'read-only') {
+  retainedSession?: 'ordinary' | 'read-only', provisionEnvironment = false) {
   const repo = await addRepo(repoPath);
-  const source = await ownedWorkspace(repo, packetId, 'main');
+  const source = await ownedWorkspace(repo, packetId, 'main', provisionEnvironment);
   if (retainedSession !== 'read-only') {
     writeFileSync(path.join(source.workspacePath, 'tracked.txt'), 'completed source\n');
     git(source.workspacePath, 'commit', '-qam', 'completed source');
@@ -234,6 +244,95 @@ async function archive(laneId: string) {
 }
 
 describe('finished packet checkout retirement', () => {
+  it.each(['skip', 'symlink'] as const)('keeps %s bootstrap explicit and never blesses an existing destination', async (envMode) => {
+    const manager = new WorktreeManager(repoPath);
+    const created = await manager.create({
+      agentType: 'codex', taskName: 'existing-env-' + envMode, packetId: 'existing-env-' + envMode,
+      baseBranch: 'main', managed: true, skipSetup: true, envMode, envFiles: ['tracked.txt'],
+      isolationPreference: 'git-worktree',
+    });
+    expect(lstatSync(path.join(created.path, 'tracked.txt')).isSymbolicLink()).toBe(false);
+    const metadata = await withWorktreeMetaTransaction(repoPath, async (transaction) => (await transaction.readAll())[created.id]);
+    expect(metadata?.environmentReferences).toBeUndefined();
+    expect(readFileSync(path.join(created.path, 'tracked.txt'), 'utf8')).toBe('base source\n');
+    expect(await manager.cleanup(created.id, { force: true, deleteBranch: true })).toBe(true);
+  }, 120_000);
+
+  it('retires an explicit standalone environment reference without touching its source', async () => {
+    const name = '.env.standalone';
+    const source = path.join(repoPath, name);
+    writeFileSync(source, 'O8_ENV_FIXTURE=standalone\n');
+    const sourceStat = lstatSync(source);
+    try {
+      const manager = new WorktreeManager(repoPath);
+      const created = await manager.create({
+        agentType: 'codex', taskName: 'standalone-env-reference', baseBranch: 'main',
+        managed: true, skipSetup: true, envMode: 'symlink', envFiles: [name],
+        isolationPreference: 'git-worktree',
+      });
+      expect(lstatSync(path.join(created.path, name)).isSymbolicLink()).toBe(true);
+      expect(await manager.cleanup(created.id, { force: true, deleteBranch: true })).toBe(true);
+      expect(existsSync(created.path)).toBe(false);
+      expect(lstatSync(source).ino).toBe(sourceStat.ino);
+      expect(readFileSync(source, 'utf8')).toBe('O8_ENV_FIXTURE=standalone\n');
+    } finally { rmSync(source, { force: true }); }
+  }, 120_000);
+
+  it.each(['original', 'leading-dot', 'source-removed', 'source-rotated', 'file-replacement', 'link-replacement'] as const)(
+    'provisions packet environment references and safely handles %s on close', async (change) => {
+      const values = { '.env': 'O8_ENV_FIXTURE=base\n', '.env.local': 'O8_ENV_FIXTURE=local\n' };
+      for (const [name, value] of Object.entries(values)) writeFileSync(path.join(repoPath, name), value);
+      const sourceStats = Object.fromEntries(Object.keys(values).map((name) => [name, lstatSync(path.join(repoPath, name))]));
+      try {
+        const packetId = 'finished-env-reference-' + change;
+        const { repo, source } = await finishedPacket(packetId, 'completed', undefined, true);
+        for (const name of Object.keys(values)) {
+          expect(lstatSync(path.join(source.workspacePath, name)).isSymbolicLink()).toBe(true);
+        }
+        // A development task resolves the configuration at its ordinary checkout path.
+        expect(execFileSync(process.execPath, ['--env-file=.env.local', '-e',
+          'process.stdout.write(process.env.O8_ENV_FIXTURE)'], {
+          cwd: source.workspacePath, encoding: 'utf8',
+        })).toBe('local');
+        if (change === 'source-removed') rmSync(path.join(repoPath, '.env.local'));
+        if (change === 'source-rotated') {
+          writeFileSync(path.join(repoPath, '.env.rotated'), values['.env.local']);
+          rmSync(path.join(repoPath, '.env.local'));
+          symlinkSync('.env.rotated', path.join(repoPath, '.env.local'));
+          sourceStats['.env.local'] = lstatSync(path.join(repoPath, '.env.local'));
+        }
+        if (change.endsWith('replacement')) {
+          rmSync(path.join(source.workspacePath, '.env.local'));
+          if (change === 'file-replacement') writeFileSync(path.join(source.workspacePath, '.env.local'), values['.env.local']);
+          else symlinkSync(path.join(repoPath, '.env'), path.join(source.workspacePath, '.env.local'));
+        }
+        const closed = await cli(['packet', 'close', packetId, '--reason', 'superseded']);
+        if (!change.endsWith('replacement')) {
+          expect(closed.exitCode, closed.stderr + closed.stdout).toBe(0);
+          expect(existsSync(source.workspacePath)).toBe(false);
+          const snapshot = getWorkspaceSnapshot(repo.id, packetId);
+          expect(snapshot?.state).toBe('retired');
+          const { preservationIdForSnapshot, readWorkspacePreservation } = await import('@/lib/workspace/preservation-store');
+          const { payload } = await readWorkspacePreservation(preservationIdForSnapshot(snapshot!)!);
+          expect(payload.capture.entries.some((entry) => entry.path.startsWith('.env'))).toBe(false);
+          expect(JSON.stringify(payload)).not.toContain('O8_ENV_FIXTURE');
+        } else {
+          expect(closed.exitCode).not.toBe(0);
+          expect(closed.stderr + closed.stdout).toContain('close_failed');
+          expect(existsSync(source.workspacePath)).toBe(true);
+          expect(getWorkspaceSnapshot(repo.id, packetId)?.state).not.toBe('retired');
+        }
+        for (const [name, value] of Object.entries(values)) {
+          if (change === 'source-removed' && name === '.env.local') continue;
+          expect(readFileSync(path.join(repoPath, name), 'utf8')).toBe(value);
+          expect(lstatSync(path.join(repoPath, name)).ino).toBe(sourceStats[name]!.ino);
+        }
+      } finally {
+        for (const name of [...Object.keys(values), '.env.rotated']) rmSync(path.join(repoPath, name), { force: true });
+      }
+    }, 120_000,
+  );
+
   it.each(['file-open', 'final-stat'] as const)('archive refuses an intermediate symlink swap at the native %s seam without changing outside bytes', async (swapAt) => {
     const packetId = 'finished-component-race-' + swapAt;
     const { repo, source } = await finishedPacket(packetId, 'completed');

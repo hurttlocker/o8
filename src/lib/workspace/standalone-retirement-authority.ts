@@ -35,11 +35,12 @@ async function assertStandaloneOwner(repositoryPath: string, worktreeId: string,
   }
 }
 
-async function verifyCleanContents(candidatePath: string, identity: WorktreeMaterializationIdentity, headCommit: string, treeSha: string, generatedSettingsSha256: string): Promise<void> {
+async function verifyCleanContents(candidatePath: string, identity: WorktreeMaterializationIdentity, headCommit: string, treeSha: string, generatedSettingsSha256: string, environmentReferences: Record<string, string>): Promise<void> {
   const capture = await captureIgnoredArtifacts({
     workspacePath: candidatePath, identity: { ...identity, canonicalPath: candidatePath },
     headCommit, treeSha, rebuildablePaths: [...REBUILDABLE_PATHS, ...await rebuildableCargoTargetPaths(candidatePath, { ...identity, canonicalPath: candidatePath })],
     copiedEnvironment: { [MANAGED_WORKSPACE_SAFETY_SETTINGS]: generatedSettingsSha256 },
+    environmentReferences,
   });
   if (capture.entries.some((entry) => entry.kind === 'file')) throw new Error('Standalone workspace has unique ignored content and must remain retained.');
 }
@@ -56,14 +57,15 @@ export async function admitStandaloneRetirement(input: {
   const generatedSettingsSha256 = createHash('sha256').update(managedWorkspaceSafetyHooksContent(
     await resolveManagedWorkspaceSafetyHookRuntime(),
   )).digest('hex');
-  await verifyCleanContents(input.directoryPath, input.identity, headCommit, treeSha, generatedSettingsSha256);
+  const environmentReferences = (await readWorktreeMetaSnapshot(input.repositoryPath))[input.worktreeId]?.environmentReferences ?? {};
+  await verifyCleanContents(input.directoryPath, input.identity, headCommit, treeSha, generatedSettingsSha256, environmentReferences);
   const repositoryPath = canonicalRepoRoot(input.repositoryPath);
   const objects = await git(repositoryPath, ['rev-list', '--objects', '--missing=print', headCommit]);
   if (objects.split('\n').some((line) => line.startsWith('?'))) throw new Error('Standalone source recovery objects are incomplete.');
   const key = createHash('sha256').update(JSON.stringify({ repositoryPath, worktreeId: input.worktreeId, identity: input.identity, headCommit })).digest('hex');
   const recoveryRef = 'refs/o8/recovery/standalone/' + key;
   await git(repositoryPath, ['update-ref', recoveryRef, headCommit]);
-  return { retirementReason: 'standalone-clean', repositoryPath, worktreeId: input.worktreeId, headCommit, treeSha, recoveryRef, generatedSettingsSha256 };
+  return { retirementReason: 'standalone-clean', repositoryPath, worktreeId: input.worktreeId, headCommit, treeSha, recoveryRef, generatedSettingsSha256, environmentReferences };
 }
 
 export async function verifyStandaloneRetirement(input: {
@@ -85,5 +87,11 @@ export async function verifyStandaloneRetirement(input: {
   }
   if ((await git(repositoryPath, ['rev-list', '--objects', '--missing=print', headCommit]))
     .split('\n').some((line) => line.startsWith('?'))) throw new Error('Standalone recovery objects became incomplete.');
-  if (input.verifyContents) await verifyCleanContents(input.candidatePath, input.identity, headCommit, treeSha, generatedSettingsSha256);
+  if (input.verifyContents) {
+    const environmentReferences = (await readWorktreeMetaSnapshot(repositoryPath))[worktreeId]?.environmentReferences ?? {};
+    if (JSON.stringify(environmentReferences) !== JSON.stringify(input.authority.environmentReferences ?? {})) {
+      throw new Error('Standalone environment reference authority changed.');
+    }
+    await verifyCleanContents(input.candidatePath, input.identity, headCommit, treeSha, generatedSettingsSha256, environmentReferences);
+  }
 }
