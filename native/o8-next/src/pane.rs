@@ -1,4 +1,5 @@
 //! Transcript pane uses the production native stream merger and retained rows.
+use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     model::History,
@@ -6,9 +7,7 @@ use crate::{
     stream::Transcript,
     transport::{self, Incoming, Subscription},
 };
-use gpui::{
-    AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px, rgb,
-};
+use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -211,7 +210,7 @@ impl Pane {
                             .h(px(18.))
                             .px(px(8.))
                             .text_size(px(9.5))
-                            .text_color(rgb(0x8a93a0))
+                            .text_color(theme().text_muted)
                             .child(notice),
                     )
                     .child(

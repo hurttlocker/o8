@@ -1,5 +1,6 @@
 //! Opt-in workspace grid. Independent of the single-session Surface so transcript
 //! and terminal work can extend their own modules without a second app fork.
+use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     grid_sessions,
@@ -8,7 +9,7 @@ use crate::{
 };
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Render, Window, WindowBounds,
-    WindowOptions, div, point, prelude::*, px, rgb, size,
+    WindowOptions, div, point, prelude::*, px, size,
 };
 use std::{collections::HashSet, time::Duration};
 
@@ -242,11 +243,11 @@ impl Grid {
             .min_h_0()
             .overflow_hidden()
             .border_1()
-            .border_color(rgb(if index == self.layout.focus {
-                0x8cb4e8
+            .border_color(if index == self.layout.focus {
+                theme().accent
             } else {
-                0x343b45
-            }))
+                theme().border
+            })
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |this, _, window, cx| this.focus(index, window, cx)),
@@ -270,7 +271,7 @@ impl Grid {
                     .child(
                         div()
                             .text_size(px(9.5))
-                            .text_color(rgb(0x8a93a0))
+                            .text_color(theme().text_muted)
                             .child(pane.state.clone()),
                     )
                     .child(
@@ -305,9 +306,9 @@ impl Render for Grid {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1e24))
-            .text_color(rgb(0xe8ecf2))
-            .font_family(".AppleSystemUIFont")
+            .bg(theme().background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
             .text_size(px(13.))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key))
@@ -326,11 +327,11 @@ impl Render for Grid {
                             .px(px(8.))
                             .py(px(4.))
                             .cursor_pointer()
-                            .bg(rgb(if count == self.layout.size {
-                                0x303744
+                            .bg(if count == self.layout.size {
+                                theme().selection
                             } else {
-                                0x282e38
-                            }))
+                                theme().surface_raised
+                            })
                             .child(format!("{count}"))
                             .on_click(cx.listener(move |this, _, _, cx| this.resize(count, cx)))
                     }))

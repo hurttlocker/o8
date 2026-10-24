@@ -1,8 +1,9 @@
 //! Opt-in native terminal pane. Original GPUI rendering over the published
 //! Apache-2.0 Alacritty grid; no Zed application crates or WebView changes.
+use crate::theme::current as theme;
 use crate::{
     client::Client,
-    terminal_grid::{BACKGROUND, FOREGROUND, Grid, Size},
+    terminal_grid::{Grid, Size},
     terminal_transport::{self, Event, Link},
 };
 use alacritty_terminal::{
@@ -254,8 +255,9 @@ impl Render for Pane {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(BACKGROUND))
-            .text_color(rgb(FOREGROUND))
+            .bg(theme().code_background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
@@ -308,7 +310,7 @@ impl Render for Pane {
                                     px(cell.x as f32 * CELL_WIDTH),
                                     px(cell.y as f32 * CELL_HEIGHT),
                                 );
-                            if cell.background != BACKGROUND {
+                            if cell.background != u32::from(theme().code_background) >> 8 {
                                 window.paint_quad(fill(
                                     Bounds::new(
                                         origin,
@@ -320,11 +322,7 @@ impl Render for Pane {
                             if cell.text == " " {
                                 continue;
                             }
-                            let mut face = font(if cfg!(target_os = "macos") {
-                                "Menlo"
-                            } else {
-                                "monospace"
-                            });
+                            let mut face = font(theme().font_mono);
                             if cell.flags.contains(Flags::BOLD) {
                                 face.weight = gpui::FontWeight::BOLD;
                             }
@@ -382,7 +380,7 @@ impl Render for Pane {
                             };
                             window.paint_quad(fill(
                                 Bounds::new(origin + offset, dimensions),
-                                gpui::rgba(0x8cb4e880),
+                                theme().terminal_cursor,
                             ));
                         }
                         painted_cells.set(cells.len());
