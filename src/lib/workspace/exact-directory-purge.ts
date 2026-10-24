@@ -1,6 +1,6 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
-import { spawn } from '@/lib/providers/child-process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -238,6 +238,7 @@ async function manifestAt() {
   const entries = [];
   const byPath = new Map([[ '.', directories[0].entry ]]);
   const pending = ['.'];
+  process.stdout.write('O8_PURGE_PROGRESS 0\n');
   while (pending.length > 0) {
     const relative = pending.pop();
     const stat = await inDirectory(path.dirname(relative), byPath, () => fsp.lstat(path.basename(relative)));
@@ -259,6 +260,9 @@ async function manifestAt() {
       const names = (await inDirectory(relative, byPath, () => fsp.readdir('.'))).sort().reverse();
       for (const name of names) pending.push(path.join(relative, name));
     }
+    // Only completed metadata work renews the parent's idle budget. A timer
+    // heartbeat would conceal a stuck syscall and is not capture progress.
+    process.stdout.write('O8_PURGE_PROGRESS ' + entries.length + '\n');
   }
   return entries;
 }
@@ -439,6 +443,65 @@ void main().catch((error) => {
 });
 `;
 
+/** Bound a stalled metadata operation, rather than the total size of its tree. */
+async function waitForPurgeCapture(
+  child: ChildProcessWithoutNullStreams,
+  closed: Promise<number | null>,
+  stdout: () => string,
+  stderr: () => string,
+): Promise<void> {
+  const startedAt = performance.now();
+  let progressAt = startedAt;
+  let entries = -1;
+  let consumed = 0;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  let inspect: () => void = () => {};
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const renew = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => reject(new Error(
+          `Exact purge manifest capture stalled after ${Math.round(performance.now() - startedAt)}ms `
+          + `(${Math.max(0, entries)} entries; no progress for ${Math.round(performance.now() - progressAt)}ms).`,
+        )), 60_000);
+      };
+      inspect = () => {
+        if (settled) return;
+        const output = stdout();
+        let end: number;
+        while ((end = output.indexOf('\n', consumed)) !== -1) {
+          const line = output.slice(consumed, end);
+          consumed = end + 1;
+          if (/^O8_PURGE_CAPTURED [0-9a-f]{64}$/.test(line)) {
+            resolve();
+            return;
+          }
+          const progress = /^O8_PURGE_PROGRESS (\d+)$/.exec(line);
+          const count = progress ? Number(progress[1]) : -1;
+          if (Number.isSafeInteger(count) && count > entries) {
+            entries = count;
+            progressAt = performance.now();
+            renew();
+          }
+        }
+      };
+      renew();
+      child.stdout.on('data', inspect);
+      inspect();
+      void closed.then(() => {
+        if (settled) return;
+        inspect();
+        reject(new Error(stderr().trim() || 'Exact purge manifest capture failed.'));
+      });
+    });
+  } finally {
+    settled = true;
+    clearTimeout(timeout);
+    child.stdout.off('data', inspect);
+  }
+}
+
 async function runCapturedPurge(
   candidatePath: string,
   identity: { device: number; inode: number },
@@ -468,22 +531,7 @@ async function runCapturedPurge(
   child.stdin.on('error', () => { /* Native close outcome remains authoritative. */ });
   child.stdin.write(`${JSON.stringify({ entries: expectedManifest ?? [] })}\n`);
   try {
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Exact purge capture timed out.')), 60_000);
-      const inspect = () => {
-        if (/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
-          clearTimeout(timeout);
-          resolve();
-        }
-      };
-      child.stdout.on('data', inspect);
-      void closed.then(() => {
-        if (!/O8_PURGE_CAPTURED [0-9a-f]{64}\n/.test(stdout)) {
-          clearTimeout(timeout);
-          reject(new Error(stderr.trim() || 'Exact purge capture failed.'));
-        }
-      });
-    });
+    await waitForPurgeCapture(child, closed, () => stdout, () => stderr);
     await assertPurgeNamespace(namespace, identity);
     const stat = await lstat(namespace.canonicalPath);
     const probe = child.pid ? await probeMetadataLockProcessIdentity(child.pid) : null;
@@ -498,9 +546,10 @@ async function runCapturedPurge(
     await afterTreeCapture?.(candidatePath, witness);
     await assertPurgeNamespace(namespace, identity);
   } catch (error) {
-    // EOF refuses release. Settle the captured child before reporting refusal,
-    // so the caller cannot race an authorized writer after seeing an error.
+    // No continuation has been sent, so this helper has no release authority.
+    // Kill and settle it even if the metadata syscall has stopped responding.
     child.stdin.end();
+    child.kill('SIGKILL');
     await closed;
     throw error;
   }
@@ -530,10 +579,19 @@ export async function captureExactDirectoryManifest(
   });
   let stdout = '';
   let stderr = '';
+  const closed = new Promise<number | null>((resolve) => child.once('close', resolve));
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  child.stdin.on('error', () => { /* Native close outcome remains authoritative. */ });
   child.stdin.end('{"entries":[]}\n');
-  const code = await new Promise<number | null>((resolve) => child.once('close', resolve));
+  try {
+    await waitForPurgeCapture(child, closed, () => stdout, () => stderr);
+  } catch (error) {
+    child.kill('SIGKILL');
+    await closed;
+    throw error;
+  }
+  const code = await closed;
   const match = /O8_PURGE_CAPTURED ([0-9a-f]{64})\n/.exec(stdout);
   const manifestMatch = /O8_PURGE_MANIFEST ([A-Za-z0-9_-]+)\n/.exec(stdout);
   if (code !== 0 || !match?.[1] || !manifestMatch?.[1]) {

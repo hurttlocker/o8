@@ -65,6 +65,13 @@ it('journals postship disposal and reuses the verified artifact across later pre
     if (process.env.O8_FIXTURE_BUILD_FAILURE) process.exit(42);
     fs.mkdirSync('.next/cache', { recursive: true });
     fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
+    for (let index = 0; index < 2048; index += 1) {
+      const directory = '.next/cache/chunks/' + (index % 32);
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(directory + '/' + index, 'generated chunk');
+    }
+    fs.writeFileSync('.next/cache/large.bin', '');
+    fs.truncateSync('.next/cache/large.bin', 6 * 1024 ** 3);
     fs.writeFileSync('.next/BUILD_ID', 'native fixture');
     fs.mkdirSync('.next/standalone/.next/server', { recursive: true });
     for (const name of ['.env', '.env.production']) fs.copyFileSync(name, '.next/standalone/' + name);
@@ -123,6 +130,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
     { O8_DATA_DIR: profile, CORTEX_IDE_DATA_DIR: profile, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: publicClientKey });
   }
   const outputPath = path.join(repo, '.next');
+  expect(readFileSync(path.join(outputPath, 'cache/chunks/0/0'), 'utf8')).toBe('generated chunk');
   const outputSaved = path.join(repo, '.fixture/original-next');
   const manifestPath = path.join(repo, 'out/.o8-release-artifact-manifest.json');
   const originalManifest = readFileSync(manifestPath, 'utf8');
@@ -218,6 +226,11 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const retired = resources()[0];
   expect(retired).toMatchObject({ resourceId: original.resourceId, state: 'retired',
     attempt: original.attempt, disposal: { kind: 'postship' } });
+  const purgedEntries = retired.disposal.claim.authority.purgeManifest.entries;
+  expect(purgedEntries.filter((entry: { kind: string; relative: string }) => entry.kind === 'file'
+    && entry.relative.startsWith(path.join('cache', 'chunks') + path.sep))).toHaveLength(2048);
+  expect(purgedEntries.find((entry: { relative: string }) => entry.relative === path.join('cache', 'large.bin')))
+    .toMatchObject({ kind: 'file', size: 6 * 1024 ** 3 });
   expect(resources()).toHaveLength(1);
   const replay = run(postship);
   expect(replay.status, replay.stderr + replay.stdout).toBe(0);
