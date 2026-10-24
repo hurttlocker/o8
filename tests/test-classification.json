@@ -2307,6 +2307,12 @@
       ]
     },
     {
+      "path": "tests/compact-chat-overlay-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/compaction-scorer-real-path.test.ts",
       "reasons": [
         "executable-fixture",
