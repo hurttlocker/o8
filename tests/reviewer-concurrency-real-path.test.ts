@@ -13,12 +13,11 @@ import os from 'node:os';
 import { join } from 'node:path';
 
 import { NextRequest } from 'next/server';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const REVIEW_LATENCY_MS = 50;
-const FIRST_WAVE_BARRIER_TIMEOUT_MS = 10_000;
 const PACKET_COUNT = 6;
 const REVIEW_CONCURRENCY_LIMIT = 3;
+// 15 s covers two three-slot waves of real Git checks and durable verdict writes.
 const REVIEW_TAIL_BUDGET_MS_PER_PACKET = 2_500;
 
 const reviewer = vi.hoisted(() => ({
@@ -71,34 +70,25 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', async (importOriginal) => {
       reviewer.sessionNames.push(sessionName);
       reviewer.activeTurns += 1;
       reviewer.peakActiveTurns = Math.max(reviewer.peakActiveTurns, reviewer.activeTurns);
-      reviewer.startedAt.push(Date.now());
+      // Monotonic, sub-millisecond stamps keep the strict overlap oracle without a sleep.
+      reviewer.startedAt.push(performance.now());
       try {
         if (reviewer.sessionNames.length <= REVIEW_CONCURRENCY_LIMIT) {
           await new Promise<void>((resolve) => {
-            let settled = false;
-            const release = () => {
-              if (settled) return;
-              settled = true;
-              resolve();
-            };
-            const timeout = setTimeout(release, FIRST_WAVE_BARRIER_TIMEOUT_MS);
-            reviewer.firstWaveWaiters.push(() => {
-              clearTimeout(timeout);
-              release();
-            });
+            reviewer.firstWaveWaiters.push(resolve);
             if (reviewer.firstWaveWaiters.length === REVIEW_CONCURRENCY_LIMIT) {
+              setFixtureStage('review queue drain');
               const waiters = reviewer.firstWaveWaiters.splice(0);
               for (const waiter of waiters) waiter();
             }
           });
         }
-        await new Promise((resolve) => setTimeout(resolve, REVIEW_LATENCY_MS));
         onEvent({
           type: 'text',
           text: 'CODEX_AUTO_REVIEW: {"approved":true,"findings":[]}',
         });
       } finally {
-        reviewer.finishedAt.push(Date.now());
+        reviewer.finishedAt.push(performance.now());
         reviewer.activeTurns -= 1;
         reviewer.activeSessions.delete(sessionName);
       }
@@ -143,6 +133,16 @@ vi.mock('@/lib/orchestrator/context-relay', () => ({
   readPacketCompletionContext: vi.fn(async () => null),
 }));
 
+let fixtureStage = 'module imports';
+let stageStartedAt = performance.now();
+const stageTimings: string[] = [];
+
+function setFixtureStage(stage: string): void {
+  stageTimings.push(`${fixtureStage}: ${(performance.now() - stageStartedAt).toFixed(1)}ms`);
+  fixtureStage = stage;
+  stageStartedAt = performance.now();
+}
+
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-reviewer-concurrency-data-'));
 const repoDir = mkdtempSync(join(os.tmpdir(), 'o8-reviewer-concurrency-repo-'));
 process.env.O8_DATA_DIR = dataDir;
@@ -162,6 +162,7 @@ function git(cwd: string, args: string[]): string {
 function createPacket(index: number) {
   const branch = `fix/reviewer-concurrency-${index}`;
   const worktreePath = join(repoDir, `.packet-${index}`);
+  setFixtureStage(`packet ${index + 1}/${PACKET_COUNT} worktree and commit`);
   git(repoDir, ['worktree', 'add', '-q', '-b', branch, worktreePath, 'main']);
   const relativePath = `packet-${index}.txt`;
   writeFileSync(join(worktreePath, relativePath), `packet ${index}\n`, 'utf8');
@@ -192,36 +193,54 @@ async function enqueueThroughRealRoute(laneId: string): Promise<void> {
   expect(await response.json()).toEqual({ ok: true });
 }
 
-git(repoDir, ['init', '-q', '-b', 'main']);
-git(repoDir, ['config', 'user.email', 'test@example.com']);
-git(repoDir, ['config', 'user.name', 'Test User']);
-mkdirSync(join(repoDir, 'src'), { recursive: true });
-writeFileSync(join(repoDir, 'README.md'), 'base\n', 'utf8');
-git(repoDir, ['add', '--', 'README.md']);
-git(repoDir, ['commit', '-q', '-m', 'base']);
+let packets: ReturnType<typeof createPacket>[];
+
+beforeAll(() => {
+  setFixtureStage('repository setup');
+  git(repoDir, ['init', '-q', '-b', 'main']);
+  git(repoDir, ['config', 'user.email', 'test@example.com']);
+  git(repoDir, ['config', 'user.name', 'Test User']);
+  mkdirSync(join(repoDir, 'src'), { recursive: true });
+  writeFileSync(join(repoDir, 'README.md'), 'base\n', 'utf8');
+  git(repoDir, ['add', '--', 'README.md']);
+  git(repoDir, ['commit', '-q', '-m', 'base']);
+  // Git construction has its own default 30 s hook bound; the case times the review burst.
+  packets = Array.from({ length: PACKET_COUNT }, (_, index) => createPacket(index));
+  setFixtureStage('packet transitions');
+});
 
 afterAll(() => {
+  console.info(`[reviewer-concurrency] last stage: ${fixtureStage}; `
+    + `${(performance.now() - stageStartedAt).toFixed(1)}ms; `
+    + `started=${reviewer.startedAt.length}/${PACKET_COUNT}, `
+    + `finished=${reviewer.finishedAt.length}/${PACKET_COUNT}, active=${reviewer.activeTurns}`);
+  setFixtureStage('teardown');
   closeDb();
   rmSync(repoDir, { recursive: true, force: true });
   rmSync(dataDir, { recursive: true, force: true });
+  setFixtureStage('finished');
+  console.info(`[reviewer-concurrency] ${stageTimings.join('; ')}`);
 });
 
 describe('bounded concurrent auto-review queue (#2294)', () => {
   it('reviews a simultaneous packet burst without busy deferrals and exposes queued state', async () => {
-    const packets = Array.from({ length: PACKET_COUNT }, (_, index) => createPacket(index));
     for (const { lane, packetId } of packets) {
       const completed = transitionPostCompletionLaneToReviewing(lane.id, packetId);
       expect(completed.lane?.status).toBe('reviewing');
     }
 
+    setFixtureStage('real-route enqueue');
     await Promise.all(packets.map(({ lane }) => enqueueThroughRealRoute(lane.id)));
-    const workerCompletionAt = Date.now();
+    const workerCompletionAt = performance.now();
+    // Admission, never elapsed time, releases the first wave; Vitest bounds a stuck drain.
+    setFixtureStage('first-wave admission');
     await Promise.all([
       drainReviewQueue(),
       drainReviewQueue(),
       drainReviewQueue(),
     ]);
 
+    setFixtureStage('outcome assertions');
     const queueRows = getSqlite().prepare(
       'SELECT id, lane_id, status FROM review_queue ORDER BY created_at ASC',
     ).all() as Array<{ id: string; lane_id: string; status: string }>;
@@ -261,5 +280,6 @@ describe('bounded concurrent auto-review queue (#2294)', () => {
     expect(lastVerdictAt - workerCompletionAt).toBeLessThan(
       PACKET_COUNT * REVIEW_TAIL_BUDGET_MS_PER_PACKET,
     );
+    setFixtureStage('assertions complete');
   });
 });
