@@ -1498,6 +1498,13 @@
       ]
     },
     {
+      "path": "tests/agent-rule-coverage-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agent-setup-real-path.test.ts",
       "reasons": [
         "child-process",
