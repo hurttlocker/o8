@@ -28,7 +28,9 @@ afterAll(async () => {
 });
 
 describe.sequential('workspace manifest HTTP health cancellation real path', () => {
-  it.each(['healthy', 'failed', 'cancelled'] as const)('persists %s health through manifest apply', async (mode) => {
+  it.each(['healthy', 'failed', 'cancelled', 'healthy-stream', 'failed-stream'] as const)('persists %s health through manifest apply', async (mode) => {
+    const healthy = mode.startsWith('healthy');
+    const streaming = mode.endsWith('-stream');
     let requestArrived = false;
     let responseClosed = false;
     let pendingResponse: ServerResponse | undefined;
@@ -36,7 +38,12 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
       requestArrived = true;
       response.once('close', () => { responseClosed = true; });
       if (mode === 'cancelled') { pendingResponse = response; return; }
-      response.writeHead(mode === 'healthy' ? 200 : 503);
+      response.writeHead(healthy ? 200 : 503);
+      if (streaming) {
+        pendingResponse = response;
+        response.write('fixture streaming health');
+        return;
+      }
       response.end('fixture health');
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -70,11 +77,14 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
         await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 2_000 });
       }
       const result = await application;
+      if (streaming) {
+        await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 2_000 });
+      }
       const receipt = await readWorkspaceManifestReceipt(repoPath);
       const events = getLaneEvents(lane.id, 100);
       expect(receipt).toMatchObject({ packetId, laneId: lane.id,
-        state: mode === 'healthy' ? 'completed' : mode, finishedAt: expect.any(String) });
-      if (mode === 'healthy') {
+        state: healthy ? 'completed' : mode === 'cancelled' ? 'cancelled' : 'failed', finishedAt: expect.any(String) });
+      if (healthy) {
         expect(result?.preview).toBe(url);
         expect(receipt?.services[0].health).toMatchObject({ kind: 'http', ok: true });
         expect(events.filter(event => event.verb === 'workspace_manifest_failed')).toEqual([]);
@@ -82,9 +92,9 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
         expect(result).toBeNull();
         expect(events.filter(event => event.verb === 'workspace_manifest_applied')).toEqual([]);
         expect(events.filter(event => event.verb === 'workspace_manifest_failed')).toEqual([
-          expect.objectContaining({ payload: expect.objectContaining({ state: mode, step: 'services' }) }),
+          expect.objectContaining({ payload: expect.objectContaining({ state: mode === 'cancelled' ? 'cancelled' : 'failed', step: 'services' }) }),
         ]);
-        if (mode === 'failed') expect(receipt?.services[0].health).toMatchObject({ ok: false, error: 'HTTP health probe returned 503.' });
+        if (mode.startsWith('failed')) expect(receipt?.services[0].health).toMatchObject({ ok: false, error: 'HTTP health probe returned 503.' });
         else {
           expect(receipt?.services).toEqual([]);
           expect(Object.values(await readWorkspacePortLeases()).some(lease => lease.laneId === lane.id)).toBe(false);

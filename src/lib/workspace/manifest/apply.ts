@@ -176,6 +176,8 @@ async function httpHealth(
       redirect: 'manual',
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
+    // Health is status-based; release unused bodies without overriding that status.
+    await response.body?.cancel().catch(() => undefined);
     return response.ok
       ? { ok: true }
       : { ok: false, error: `HTTP health probe returned ${response.status}.` };
