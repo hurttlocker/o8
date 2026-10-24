@@ -113,7 +113,7 @@ describe('ClaudeCodeHarnessSection', () => {
 
     const options = Array.from(document.body.querySelectorAll('[role="option"]'))
       .map((option) => option.textContent);
-    expect(options).toContain('Existing Claude connectionUse the existing Claude Code login or inherited gateway.');
+    expect(options).toContain('Existing Claude connectionUse the existing Claude Code login. API keys require My API key billing.');
     expect(options).toContain('Codex subscription (experimental)Unofficial local compatibility connection; uses Codex subscription quota.');
     expect(options.some((option) => option?.includes('OpenRouter'))).toBe(false);
   });

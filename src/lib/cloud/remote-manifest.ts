@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { parseWorkspaceManifest } from '@/lib/workspace/manifest/schema';

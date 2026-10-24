@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, realpathSync } from 'node:fs';
 
 import { isSafeGitRef } from '@/lib/git/refs';

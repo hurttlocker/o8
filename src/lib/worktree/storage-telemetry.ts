@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import { readdir, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
@@ -125,7 +126,7 @@ async function runDuBytes(targetPath: string, apparent: boolean): Promise<number
       ? ['-sk', targetPath]
       : ['-s', '--block-size=1', targetPath];
   const { stdout } = await execFileAsync('du', args, {
-    env: { ...process.env, LC_ALL: 'C' },
+    env: childEnvironment({ env: { LC_ALL: 'C' } }),
     windowsHide: true,
     timeout: DU_TIMEOUT_MS,
   });
@@ -353,7 +354,7 @@ function opaqueVolumeId(prefix: string, value: string): string {
 /** The device node macOS mounts a path from, as `df` reports it. */
 async function darwinMountDevice(targetPath: string): Promise<string | null> {
   const { stdout } = await execFileAsync('/bin/df', ['-P', targetPath], {
-    env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+    env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
     windowsHide: true,
     timeout: VOLUME_ID_TIMEOUT_MS,
   });
@@ -367,7 +368,7 @@ async function platformVolumeId(targetPath: string, mountDevice: string | null):
     // Network mount sources have no diskutil UUID; retain their device identity.
     if (!device.startsWith('/dev/')) return null;
     const { stdout } = await execFileAsync('/usr/sbin/diskutil', ['info', '-plist', device], {
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
       windowsHide: true,
       timeout: VOLUME_ID_TIMEOUT_MS,
       maxBuffer: 256 * 1024,
@@ -377,13 +378,13 @@ async function platformVolumeId(targetPath: string, mountDevice: string | null):
   }
   if (process.platform === 'linux') {
     const uuid = await execFileAsync('findmnt', ['-T', targetPath, '-n', '-o', 'UUID'], {
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
       windowsHide: true,
       timeout: VOLUME_ID_TIMEOUT_MS,
     }).then(({ stdout }) => stdout.trim()).catch(() => '');
     if (uuid && uuid !== '-') return `volume-uuid:${uuid.toLowerCase()}`;
     const mount = await execFileAsync('findmnt', ['-T', targetPath, '-n', '-o', 'SOURCE,FSTYPE,TARGET'], {
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
       windowsHide: true,
       timeout: VOLUME_ID_TIMEOUT_MS,
     }).then(({ stdout }) => stdout.trim()).catch(() => '');

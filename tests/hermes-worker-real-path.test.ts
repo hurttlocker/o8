@@ -3,7 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
+  readFileSync, realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -123,7 +123,7 @@ describe('Hermes worker production runtime seam', () => {
       hermesHome: string;
       argv: string[];
     };
-    expect(firstLaunch.cwd).toBe(workspace);
+    expect(realpathSync(firstLaunch.cwd)).toBe(realpathSync(workspace));
     expect(firstLaunch.argv).toEqual(['acp', '--accept-hooks']);
     expect(firstLaunch.home).toBe(userHome);
     expect(firstLaunch.hermesHome.startsWith(sessionsRoot)).toBe(true);

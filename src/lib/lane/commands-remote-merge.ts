@@ -42,7 +42,7 @@ export async function performRemoteCustomerMerge(
     return { ok: false, laneId: command.laneId, note: fetched.note };
   }
 
-  const { execFile } = await import('node:child_process');
+  const { execFile } = await import('@/lib/providers/child-process');
   const { promisify } = await import('node:util');
   const execFileAsync = promisify(execFile);
 

@@ -1,6 +1,10 @@
+import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -51,6 +55,7 @@ type InteractiveTurn = {
 };
 
 interface InternalClaudeCodeInteractiveSession extends ClaudeCodeInteractiveSession {
+  credentialPolicy: string;
   idleTimer: ReturnType<typeof setTimeout> | null;
   stdoutLineBuffer: string;
   stderrBuffer: string;
@@ -374,18 +379,16 @@ function spawnSession(
     claudeCodeBin(),
     buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId),
   );
+  const credentialPolicy = credentialPolicyFingerprint('claude-code');
   const proc = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd,
-    env: {
-      ...process.env,
-      FORCE_COLOR: '0',
-      O8_MANAGED_SESSION: '1',
-    },
+    env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
   const session: InternalClaudeCodeInteractiveSession = {
+    credentialPolicy,
     tabId,
     cwd,
     model,
@@ -433,6 +436,7 @@ export function ensureSession(
   if (
     existing
     && existing.status !== 'dead'
+    && existing.credentialPolicy === credentialPolicyFingerprint('claude-code')
     && existing.cwd === normalizedCwd
     && existing.model === normalizedModel
     && existing.permissionMode === normalizedPermissionMode
@@ -466,6 +470,10 @@ export async function sendMessage(
   options: SendClaudeCodeInteractiveMessageOptions = {},
 ): Promise<void> {
   const internal = session as InternalClaudeCodeInteractiveSession;
+  if (internal.credentialPolicy !== credentialPolicyFingerprint('claude-code')) {
+    killClaudeCodeInteractiveSession(internal.tabId);
+    throw new Error('Credentials or billing changed. Retry the launch.');
+  }
   if (!text.trim()) {
     throw new Error('Message is required');
   }
@@ -520,12 +528,15 @@ export async function sendMessage(
     const payload = buildClaudeStreamJsonUserPayload(text);
 
     try {
-      internal.proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
-        if (error) {
-          internal.stdinWritable = false;
-          internal.status = 'dead';
-          settleTurn(internal, error);
-        }
+      withProviderStoreLock(() => {
+        if (internal.credentialPolicy !== credentialPolicyFingerprint('claude-code')) throw new Error('Credentials or billing changed. Retry the launch.');
+        internal.proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
+          if (error) {
+            internal.stdinWritable = false;
+            internal.status = 'dead';
+            settleTurn(internal, error);
+          }
+        });
       });
     } catch (error) {
       internal.stdinWritable = false;

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { basename } from 'node:path';
 import { getHarnessCapabilities } from './capabilities';
 import { groundTask } from './ground';

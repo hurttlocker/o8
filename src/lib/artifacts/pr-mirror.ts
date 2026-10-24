@@ -9,7 +9,7 @@
  * there's no automatic "packet got a PR" moment to hook. Best-effort: never
  * throws; the in-app proof strips remain the source of truth.
  */
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';

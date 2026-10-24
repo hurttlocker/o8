@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { getGitHubBrokerStatus } from '@/lib/github-broker/status';
 import { listRepos } from '@/lib/repos/registry';
@@ -47,7 +48,7 @@ async function readLocalGhStatus() {
     const { stdout, stderr } = await exec('gh', ['auth', 'status', '--hostname', 'github.com'], {
       windowsHide: true,
       timeout: 10_000,
-      env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' },
+      env: childEnvironment({ env: { GH_NO_UPDATE_NOTIFIER: '1' } }),
     });
     return parseGhStatusOutput(`${stdout}\n${stderr}`.trim());
   } catch (error) {

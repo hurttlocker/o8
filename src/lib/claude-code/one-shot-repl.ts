@@ -1,3 +1,5 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * One-shot `claude --input-format stream-json` REPL helper (#1124).
  *
@@ -27,7 +29,7 @@
 import 'server-only';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import os from 'node:os';
 
 import {
@@ -87,7 +89,7 @@ export async function askClaudeOneShot(
 ): Promise<string> {
   const cwd = opts.cwd ?? os.tmpdir();
   const timeoutMs = opts.timeoutMs ?? 300_000;
-  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' };
+  const env = providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' });
 
   return new Promise<string>((resolve, reject) => {
     const args = buildOneShotArgs(opts.model, opts.effort);
@@ -96,7 +98,7 @@ export async function askClaudeOneShot(
     const child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd,
-      env,
+      env: providerSpawnEnvironment(env, { runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

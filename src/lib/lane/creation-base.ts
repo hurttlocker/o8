@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { and, asc, eq } from 'drizzle-orm';
 
 import { getDb, laneEvents } from '@/lib/db';

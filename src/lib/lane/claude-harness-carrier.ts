@@ -1,3 +1,5 @@
+import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
@@ -37,7 +39,7 @@ function carrierFingerprint(
   credential: string | null,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ source, model, baseUrl, credential }))
+    .update(JSON.stringify({ source, model, baseUrl, credential, policy: credentialPolicyFingerprint('claude-code') }))
     .digest('hex');
 }
 
@@ -50,6 +52,7 @@ export async function resolveClaudeHarnessCarrier(input: {
 
   const model = selectedClaudeCodeWorkerModelSync() ?? input.requestedModel;
   if (profile.source === 'openrouter') {
+    if (runtimeBillingMode('claude-code') !== 'api') throw new Error('Set Claude Code billing to My API key in Settings before using OpenRouter.');
     const credential = await resolveClaudeCodeWorkerGatewayKey();
     if (!credential) {
       throw new Error('The Claude Code harness is set to OpenRouter, but no API key is configured in Settings > Models > API keys.');

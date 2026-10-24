@@ -8,7 +8,7 @@
  * - search_code: Search through codebase with grep
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, execSync } from '@/lib/providers/child-process';
 import { statSync } from 'node:fs';
 import { lstat, unlink } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';

@@ -1,3 +1,4 @@
+import { internalBrokerEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Parent-side terminal-host: the seam ws-server spawns PTYs through.
  *
@@ -12,7 +13,7 @@
  */
 
 import { reserveWorkLaunch, WorkAdmissionExpiredError, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
-import { fork, type ChildProcess } from 'node:child_process';
+import { fork, withChildEnvironment, type ChildProcess } from '@/lib/providers/child-process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type {
@@ -44,13 +45,13 @@ export function createInlineTerminalHost(ptyModule: InlinePtyModule): TerminalHo
       let p: ChildPty | undefined;
       try {
         lease.started(process.pid);
-        p = ptyModule.spawn(spec.file, spec.args, {
+        p = withChildEnvironment(spec.env, spec.args, env => ptyModule.spawn(spec.file, spec.args, {
           name: spec.name ?? 'xterm-256color',
           cols: spec.cols,
           rows: spec.rows,
           cwd: spec.cwd,
-          env: spec.env,
-        });
+          env,
+        }), false, spec.cwd);
         try { lease.started(p.pid); } catch (error) {
           if (error instanceof WorkAdmissionExpiredError) {
             p.kill('SIGKILL');
@@ -143,6 +144,7 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
   const log = options.log ?? (() => {});
 
   const child = fork(forkEntry, [], {
+    env: internalBrokerEnvironment(),
     execArgv,
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });

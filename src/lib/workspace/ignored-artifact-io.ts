@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ARTIFACT_PROTOCOL_SCRIPT } from '@/lib/workspace/ignored-artifact-protocol';
@@ -63,7 +63,7 @@ function git(args) {
   verifyRoot();
   const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
-  return execFileSync(process.argv[3], args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+  return withO8ChildPolicy(freshEnv => execFileSync(process.argv[3], args, { encoding: 'utf8', env: freshEnv, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }), { env });
 }
 function readRevision() {
   try {

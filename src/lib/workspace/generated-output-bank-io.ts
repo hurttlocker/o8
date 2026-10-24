@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity, type MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';

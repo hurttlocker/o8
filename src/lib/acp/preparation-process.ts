@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
 

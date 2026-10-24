@@ -16,7 +16,7 @@
  * is incomplete. Only metrics actually computed from `ps` are ever reported.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import os from 'node:os';
 import { promisify } from 'node:util';
 import { listActiveOrchestratorTurns } from '@/lib/lane/orchestrator-crash-survival';

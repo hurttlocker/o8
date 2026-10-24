@@ -1,5 +1,5 @@
 import { reserveWorkLaunch, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
 import { DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId } from '@/lib/terminal/dash-session-owner';

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 

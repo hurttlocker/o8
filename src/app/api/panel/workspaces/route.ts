@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync, execFileSync } from 'child_process';
+import { execSync, execFileSync } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
 import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';

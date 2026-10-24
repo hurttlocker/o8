@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import path from 'node:path';

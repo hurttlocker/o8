@@ -39,7 +39,7 @@
 import { createCompletionTurnGuard } from './completion-turn';
 import { completionHandoffTurnCheck } from '@/lib/orchestrator/completion-handoff';
 import { acceptSilentExitCompletion } from './silent-exit-completion';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import {

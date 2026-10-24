@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { NextRequest, NextResponse } from 'next/server';
 import { githubInstallationFetch } from '@/lib/github-broker/auth';
 import { normalizeRepoSlug } from '@/lib/github-broker/repo';

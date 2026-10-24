@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
@@ -249,7 +250,7 @@ async function applyLoadedManifest(input: {
   });
   await updateWorkspaceManifestRun(input.lifecycle, (receipt) => ({ ...receipt, ports }));
   const allocatedEnvironment = portEnvironment(input.manifest, ports);
-  const setupEnvironment = { ...process.env, ...allocatedEnvironment };
+  const setupEnvironment = childEnvironment({ env: { ...allocatedEnvironment } });
   const setupReceipts: WorkspaceManifestSetupReceipt[] = [];
   for (const [index, setupCommand] of (input.manifest.setup ?? []).entries()) {
     const step = `setup:${index + 1}` as const;

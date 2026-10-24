@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { getBranchSnapshot, getCachedBranchSnapshot, refreshBranchSnapshot } from '@/lib/panel/branch-snapshot';
 import { findLaneByRepoAndBranch } from '@/lib/lane/registry';

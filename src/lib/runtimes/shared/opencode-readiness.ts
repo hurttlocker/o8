@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import "server-only";
 
-import { execFile } from "node:child_process";
+import { execFile } from '@/lib/providers/child-process';
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -450,7 +451,7 @@ async function runOpencodeProbe(binaryPath: string, args: string[]): Promise<str
   const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
     windowsHide: true,
     timeout: SERVICE_PROBE_TIMEOUT_MS,
-    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    env: childEnvironment({ env: { FORCE_COLOR: "0", NO_COLOR: "1" } }),
     maxBuffer: 64 * 1024,
   });
   return `${stdout}\n${stderr}`.trim();
@@ -531,7 +532,7 @@ async function runOpencodeCliProbe(binaryPath: string, args: string[]): Promise<
   const { stdout } = await execFileAsync(invocation.command, invocation.args, {
     windowsHide: true,
     timeout: SERVICE_PROBE_TIMEOUT_MS,
-    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    env: childEnvironment({ env: { FORCE_COLOR: "0", NO_COLOR: "1" } }),
     maxBuffer: 256 * 1024,
   });
   return stdout;

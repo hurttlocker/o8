@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
@@ -130,7 +131,7 @@ async function isRetirableReadOnlyCheckout(record: OwnedSessionRecord, lane: Lan
     if (!policy || digest(policy) !== digest(record.executionPolicy)) return false;
     const git = promisify(execFile);
     const options = { encoding: 'utf8' as const, timeout: 5_000,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } };
+      env: childEnvironment({ env: { GIT_OPTIONAL_LOCKS: '0' } }) };
     let head: string;
     const admitted = orphanCloseOwner(lane.id);
     const pending = admitted ? orphanCloseRetirement(lane) : null;

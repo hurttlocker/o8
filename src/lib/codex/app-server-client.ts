@@ -1,6 +1,8 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
@@ -64,12 +66,7 @@ export class CodexAppServerClient {
     const launch = cliInvocation(options.binaryPath, ['app-server', '--stdio']);
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
-      env: {
-        ...process.env,
-        CODEX_HOME: options.codexHome,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-      },
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: options.codexHome, FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'codex' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child.stdout.setEncoding('utf-8');

@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Inference route resolver (monetization Step 2).
  *
@@ -118,9 +119,7 @@ export function freeAllowanceToken(): string | null {
 
 function resolveGeminiKey(): string | undefined {
   return (
-    process.env.GOOGLE_AI_API_KEY ??
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-    process.env.GEMINI_API_KEY
+    resolveProviderKey('GEMINI_API_KEY') ?? undefined
   );
 }
 

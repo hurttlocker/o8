@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -26,7 +27,7 @@ export function createWorkspaceGitHubReader(cwd: string, run: Runner) {
   let access: Promise<{ scope: string; env: NodeJS.ProcessEnv }> | undefined;
   return async (args: string[]): Promise<Result> => {
     access ??= (async () => {
-      const env = { ...process.env };
+      const env = childEnvironment();
       const host = env.GH_HOST || 'github.com';
       // This CLI command reads environment/config/keychain only; it makes no API request.
       const token = (await run(['auth', 'token', '--hostname', host], env)).trim();

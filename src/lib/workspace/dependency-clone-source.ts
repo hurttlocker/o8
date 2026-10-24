@@ -1,18 +1,19 @@
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { guardedWorkspaceReadScriptInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import type { DependencyInstallRecipe } from './dependency-install';
 import { RECIPE_CONFIG_NAMES } from './dependency-manager-config';
 
-const CHECK_SOURCE_RECIPE = String.raw`
+const CHECK_SOURCE_RECIPE = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
 const {recipe, configNames, sourceTree, requireSameTree} = JSON.parse(process.argv[1]);
-const git = (...args) => cp.execFileSync('git', args, {encoding:'utf8'}).trim();
+const git = (...args) => withO8ChildPolicy(env => cp.execFileSync('git', args, {env, encoding:'utf8'})).trim();
 const tree = git('rev-parse', 'HEAD^{tree}');
 let matches = (!sourceTree || tree === sourceTree) && (!requireSameTree || tree === recipe.gitTreeSha);
-const tracked = cp.execFileSync('git', ['ls-files', '-z'], {encoding:'utf8'}).split('\0').filter(Boolean);
+const tracked = withO8ChildPolicy(env => cp.execFileSync('git', ['ls-files', '-z'], {env, encoding:'utf8'})).split('\0').filter(Boolean);
 const inputs = tracked.filter(file => path.posix.basename(file) === 'package.json'
   || configNames.includes(file) || file.startsWith('patches/') || file.startsWith('.yarn/patches/')
   || file.startsWith('.yarn/plugins/') || file.startsWith('.yarn/releases/') || file.endsWith('.patch')

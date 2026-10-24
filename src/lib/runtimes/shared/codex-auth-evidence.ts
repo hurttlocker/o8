@@ -1,5 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import 'server-only';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,14 +17,14 @@ export async function codexAuthEvidence(binaryPath: string) {
     const value: unknown = JSON.parse(await readFile(path.join(os.homedir(), '.codex', 'auth.json'), 'utf-8'));
     if (value && typeof value === 'object' && !Array.isArray(value)) authJson = value as Record<string, unknown>;
   } catch { /* No readable credential evidence. */ }
-  const envCredential = Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_ACCESS_TOKEN);
+  const envCredential = Boolean(resolveProviderKey('OPENAI_API_KEY') || process.env.CODEX_ACCESS_TOKEN);
   const fileCredential = Boolean(authJson?.tokens && typeof authJson.tokens === 'object');
   let login: 'present' | 'absent' | 'unknown' = 'unknown';
   try {
     const probe = cliInvocation(binaryPath, ['login', 'status']);
     const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true, timeout: 1500, maxBuffer: 64 * 1024,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
     const output = `${stdout}\n${stderr}`.toLowerCase();
     if (output.includes('not logged in') || output.includes('logged out')) login = 'absent';

@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execSync } from '@/lib/providers/child-process';
 import os from 'node:os';
 import { listRepos } from '@/lib/repos/registry';
 import {
@@ -43,7 +44,7 @@ function execQuiet(cmd: string, opts?: { timeout?: number; maxBuffer?: number })
       encoding: 'utf-8',
       timeout: opts?.timeout ?? 8000,
       maxBuffer: opts?.maxBuffer ?? 2 * 1024 * 1024,
-      env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
+      env: childEnvironment({ env: { PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } }),
     }).trim();
   } catch {
     return '';

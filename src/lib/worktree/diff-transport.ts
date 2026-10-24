@@ -1,6 +1,7 @@
 import { resolveGitBinary } from '@/lib/git/binary';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { createHash } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '@/lib/providers/child-process';
 import { createReadStream, lstatSync, readlinkSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -68,7 +69,7 @@ async function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Pr
     cwd,
     timeout,
     maxBuffer: METADATA_MAX_BUFFER,
-    env: { ...process.env, LC_ALL: 'C' },
+    env: childEnvironment({ env: { LC_ALL: 'C' } }),
   });
   return stdout;
 }
@@ -371,7 +372,7 @@ async function appendGitDiff(
     const child = spawn(resolveGitBinary(), args, {
       windowsHide: true,
       cwd,
-      env: { ...process.env, LC_ALL: 'C' },
+      env: childEnvironment({ env: { LC_ALL: 'C' } }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stderr = '';

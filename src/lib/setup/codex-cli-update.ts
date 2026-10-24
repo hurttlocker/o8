@@ -2,7 +2,7 @@ import { withCliInstallerReservation, releaseOwnedCliUpdateLock, type CliInstall
 import 'server-only';
 import type { CliUpdateReporter } from './cli-update-progress';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { constants } from 'node:fs';
 import { access, realpath, readFile, stat, open, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';

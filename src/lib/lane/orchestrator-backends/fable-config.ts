@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Fable orchestrator config resolution (mirrors `collide-config.ts`).
  *
@@ -36,7 +37,7 @@ export interface FableConfig {
 export function resolveFableConfig(): FableConfig {
   const model = process.env.O8_FABLE_MODEL?.trim() || DEFAULT_FABLE_MODEL;
   const rawKey = process.env[FABLE_API_KEY_ENV]?.trim();
-  return { model, apiKey: rawKey || null };
+  return { model, apiKey: rawKey ? resolveProviderKey('ANTHROPIC_API_KEY', { ANTHROPIC_API_KEY: rawKey }) : null };
 }
 
 /** BYO key alone — used by the spawn-side env injection. */

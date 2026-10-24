@@ -9,6 +9,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
+import { RuntimeBillingRow } from './RuntimeBillingRow';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { useModelSettings } from './useModelSettings';
 import {
@@ -103,6 +104,7 @@ export function ModelDefaultsContent({ settings, onNavigateTab }: { settings: Re
       ) : null}
 
       <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} />
+      {values.orchestratorBackend === 'openclaw' ? <SettingsGroup header="OpenClaw runtime"><RuntimeBillingRow runtimeId="openclaw" /></SettingsGroup> : null}
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup

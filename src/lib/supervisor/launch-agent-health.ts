@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   LAUNCH_AGENT_HEALTHY_UPTIME_MS,

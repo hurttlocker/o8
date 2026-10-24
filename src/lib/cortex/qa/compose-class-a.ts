@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import 'server-only';
 import { composeConnectedBrain } from './compose-connected';
 
@@ -428,9 +429,7 @@ async function tryComposeOpenRouter(prompt: string, model?: string, managedOnly 
 /** Tier 3: Flash. Returns answer text or null on any failure. */
 async function tryComposeFlash(prompt: string): Promise<string | null> {
   const apiKey =
-    process.env.GOOGLE_AI_API_KEY ??
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-    process.env.GEMINI_API_KEY;
+    resolveProviderKey('GEMINI_API_KEY');
   if (!apiKey) return null;
 
   try {

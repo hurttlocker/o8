@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -29,6 +29,8 @@ describe('PATCH /api/runtime/claude-code-profile', () => {
     dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-claude-profile-route-'));
     process.env.O8_DATA_DIR = dataDir;
     process.env.CORTEX_IDE_DATA_DIR = dataDir;
+    mkdirSync(path.join(dataDir, 'runtime-billing'), { recursive: true });
+    writeFileSync(path.join(dataDir, 'runtime-billing', 'claude-code.json'), JSON.stringify({ version: 1, mode: 'api' }));
     requirePanelAuthMock.mockReset().mockReturnValue(null);
     vi.resetModules();
   });

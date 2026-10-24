@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { selectOrphanDashSessions, type DashGcOptions, type DashSessionInfo } from '@/lib/terminal/dash-gc';
 import { collectPersistedTmuxSessions } from '@/lib/terminal/state-store';

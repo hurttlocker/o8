@@ -94,7 +94,7 @@ describe('AcpClient', () => {
         }
       });
     `;
-    const client = new AcpClient({ command: process.execPath, args: ['-e', peer], cwd });
+    const client = new AcpClient({ runtimeId: 'acp', command: process.execPath, args: ['-e', peer], cwd });
     children.push(client);
 
     await client.initialize();
@@ -145,7 +145,7 @@ describe('AcpClient', () => {
         }
       });
     `;
-    const client = new AcpClient({
+    const client = new AcpClient({ runtimeId: 'acp',
       command: process.execPath,
       args: ['-e', peer],
       onNotification: (notification) => notifications.push(notification),
@@ -195,7 +195,7 @@ describe('AcpClient', () => {
         }
       });
     `;
-    const client = new AcpClient({ command: process.execPath, args: ['-e', peer] });
+    const client = new AcpClient({ runtimeId: 'acp', command: process.execPath, args: ['-e', peer] });
     children.push(client);
 
     await client.initialize();
@@ -217,7 +217,7 @@ describe('AcpClient', () => {
     const peer = String.raw`
       process.stdin.resume();
     `;
-    const client = new AcpClient({
+    const client = new AcpClient({ runtimeId: 'acp',
       command: process.execPath,
       args: ['-e', peer],
       requestTimeoutMs: 25,
@@ -247,7 +247,7 @@ describe('AcpClient', () => {
         }
       });
     `;
-    const client = new AcpClient({
+    const client = new AcpClient({ runtimeId: 'acp',
       command: process.execPath,
       args: ['-e', peer],
       onRequest: (request) => {

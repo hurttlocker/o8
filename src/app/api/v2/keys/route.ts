@@ -20,31 +20,12 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { MasterKeyUnavailableError } from '@/lib/db/master-key';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { encryptValue, decryptValue } from '@/lib/db/master-key';
-import { resolveOpenRouterKey, updateManagedOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
-import {
-  checkOpenRouterKey,
-  clearOpenRouterCheck,
-  openRouterConnectionView,
-  readOpenRouterConnection,
-  recordOpenRouterCheck,
-  setOpenRouterEnabled,
-} from '@/lib/providers/openrouter-connection';
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { assertProviderStoreAvailable, mutateProviderKey, storedProviderKey, resolveProviderKey, providerKeyEnabled } from '@/lib/providers/key-store';
+import { checkOpenRouterKey, clearOpenRouterCheck, openRouterConnectionView, readOpenRouterConnection, recordOpenRouterCheck, setOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 import { invalidateRuntimeAuthCache } from '@/lib/runtimes/shared/auth-detect';
-import { getDataDir } from '@/lib/data-dir-migration';
-
-// Prefix that distinguishes an encrypted value from legacy plaintext.
-const ENC_PREFIX = 'enc:' as const;
-
-// Config lives in ~/.o8/ so it survives app updates
-const CONFIG_DIR = getDataDir();
-const ENV_FILE = join(CONFIG_DIR, '.env.local');
-
-// Also check project-local .env.local as fallback (dev mode)
-const LOCAL_ENV = join(process.cwd(), '.env.local');
 
 interface ProviderKeyConfig {
   id: string;
@@ -57,7 +38,7 @@ interface ProviderKeyConfig {
 
 // BYOK (#960): OpenRouter + Anthropic are the two user-managed keys for beta.
 // CLI runtimes (codex, claude-code, gemini, opencode) handle their own auth.
-// Kill these before official release in favour of the hosted subscription tier.
+// CLI credential stores remain owned by their respective runtimes.
 const PROVIDERS: ProviderKeyConfig[] = [
   {
     id: 'openrouter',
@@ -95,131 +76,6 @@ const PROVIDERS: ProviderKeyConfig[] = [
     validateUrl: 'https://api.openai.com/v1/models',
   },
 ];
-
-/**
- * Parse raw env lines from a file. Returns a map of key → raw stored value
- * (which may be an `enc:…` blob or legacy plaintext).
- */
-function parseRawEnvFromPath(filePath: string): Map<string, string> {
-  const vars = new Map<string, string>();
-  if (!existsSync(filePath)) return vars;
-  const content = readFileSync(filePath, 'utf-8');
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const k = trimmed.slice(0, eqIdx).trim();
-    let v = trimmed.slice(eqIdx + 1).trim();
-    // Strip surrounding quotes from legacy plaintext values only.
-    if (!v.startsWith(ENC_PREFIX)) {
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-        v = v.slice(1, -1);
-      }
-    }
-    vars.set(k, v);
-  }
-  return vars;
-}
-
-/**
- * Decode a stored value: decrypt `enc:iv:ct` blobs, pass plaintext through as-is.
- * Returns null if decryption fails (corrupt / wrong key).
- */
-async function decodeStoredValue(stored: string): Promise<string | null> {
-  if (!stored.startsWith(ENC_PREFIX)) {
-    // Legacy plaintext — return unchanged.
-    return stored;
-  }
-  // Format: enc:<hex-iv>:<hex-ciphertext+authtag>
-  const rest = stored.slice(ENC_PREFIX.length);
-  const colonIdx = rest.indexOf(':');
-  if (colonIdx === -1) return null;
-  const iv = rest.slice(0, colonIdx);
-  const ct = rest.slice(colonIdx + 1);
-  return decryptValue(ct, iv);
-}
-
-/**
- * Encode a plaintext value to the `enc:iv:ct` storage format.
- */
-async function encodeStoredValue(plaintext: string): Promise<string> {
-  const { ciphertext, iv } = await encryptValue(plaintext);
-  return `${ENC_PREFIX}${iv}:${ciphertext}`;
-}
-
-/**
- * Read all provider env vars from the config files, decrypting enc: blobs.
- * Returns a map of envVar → plaintext value (or empty string if missing).
- */
-async function parseEnvFile(): Promise<Map<string, string>> {
-  const rawLocal = parseRawEnvFromPath(LOCAL_ENV);
-  const rawGlobal = parseRawEnvFromPath(ENV_FILE);
-  const merged = new Map([...rawLocal, ...rawGlobal]);
-
-  const decoded = new Map<string, string>();
-  for (const [k, v] of merged) {
-    const plain = await decodeStoredValue(v);
-    if (plain !== null) {
-      decoded.set(k, plain);
-    } else {
-      // decodeStoredValue only returns null for enc: blobs that failed GCM
-      // auth — wrong master key or corrupt blob. Dropping silently makes
-      // stored keys "vanish" with zero diagnostics.
-      console.warn(`[keys] failed to decrypt ${k} — wrong master key or corrupt blob; skipping`);
-    }
-  }
-  return decoded;
-}
-
-/**
- * Write provider env vars to ~/.o8/.env.local, encrypting each value.
- * Non-provider lines (comments, unrecognised keys) are preserved verbatim.
- */
-async function writeEnvFile(vars: Map<string, string>, removed = new Set<string>()): Promise<void> {
-  mkdirSync(CONFIG_DIR, { recursive: true });
-
-  let lines: string[] = [];
-  if (existsSync(ENV_FILE)) {
-    lines = readFileSync(ENV_FILE, 'utf-8').split('\n');
-  }
-
-  const written = new Set<string>();
-
-  // Build updated line list. For keys we're writing, replace with encrypted form.
-  const updated: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      updated.push(line);
-      continue;
-    }
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) {
-      updated.push(line);
-      continue;
-    }
-    const k = trimmed.slice(0, eqIdx).trim();
-    if (removed.has(k)) continue;
-    if (vars.has(k)) {
-      written.add(k);
-      const encoded = await encodeStoredValue(vars.get(k)!);
-      updated.push(`${k}=${encoded}`);
-    } else {
-      updated.push(line);
-    }
-  }
-
-  // Append any new keys not already in the file.
-  for (const [k, v] of vars) {
-    if (!written.has(k)) {
-      const encoded = await encodeStoredValue(v);
-      updated.push(`${k}=${encoded}`);
-    }
-  }
-
-  writeFileSync(ENV_FILE, updated.join('\n'), { mode: 0o600 });
-}
 
 async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ valid: boolean; error?: string }> {
   if (!config.validateUrl) return { valid: true };
@@ -278,15 +134,15 @@ function maskKey(key: string): string {
 }
 
 // GET — list providers with masked keys
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  const envVars = await parseEnvFile();
+  assertProviderStoreAvailable();
   const connection = readOpenRouterConnection();
   // Also check process.env (may be set outside .env.local)
   const providers = PROVIDERS.map((p) => {
-    const envValue = envVars.get(p.envVar) || process.env[p.envVar] || '';
+    const envValue = storedProviderKey(p.envVar) || resolveProviderKey(p.envVar) || '';
     return {
       id: p.id,
       label: p.label,
@@ -294,6 +150,7 @@ export async function GET(request: NextRequest) {
       placeholder: p.placeholder,
       docsUrl: p.docsUrl,
       configured: !!envValue,
+      enabled: providerKeyEnabled(p.envVar),
       maskedKey: envValue ? maskKey(envValue) : null,
       ...(p.id === 'openrouter' ? { connection: openRouterConnectionView(envValue || null, connection) } : {}),
     };
@@ -303,7 +160,7 @@ export async function GET(request: NextRequest) {
 }
 
 // POST — set/update a key
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
@@ -332,28 +189,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: openRouterCheck?.error || validation.error || 'Invalid API key' }, { status: 400 });
   }
 
-  // Read existing plaintext map (decrypted), update, then re-encrypt all entries.
-  const envVars = await parseEnvFile();
-  envVars.set(config.envVar, key);
-  await writeEnvFile(envVars);
+  // Replace only this credential; retain unrelated ciphertext verbatim.
+  assertProviderStoreAvailable();
+  if (config.id === 'openrouter') readOpenRouterConnection();
+  mutateProviderKey(config.envVar, { key });
+  // payer policy part b: preserve the base save-to-ambient behavior for deferred MCP consumers.
+  // Every ordinary child crosses its own persisted billing boundary.
+  process.env[config.envVar] = key;
 
-  // Also set in process.env so it takes effect immediately (no restart needed)
-  if (config.id === 'openrouter') updateManagedOpenRouterKey(key);
-  else process.env[config.envVar] = key;
-  const connection = openRouterCheck ? openRouterConnectionView(key, recordOpenRouterCheck(key, openRouterCheck)) : undefined;
+  let warning = validation.error;
+  let connection;
+  if (openRouterCheck) {
+    try { connection = openRouterConnectionView(key, recordOpenRouterCheck(key, openRouterCheck)); }
+    catch { warning = 'Key saved. Provider check status could not be persisted.'; }
+  }
   invalidateRuntimeAuthCache();
 
   return NextResponse.json({
     success: true,
     provider: config.id,
     maskedKey: maskKey(key),
-    warning: validation.error || undefined,
+    warning: warning || undefined,
     ...(connection ? { connection } : {}),
   });
 }
 
 // DELETE — remove a key
-export async function DELETE(request: NextRequest) {
+async function handleDELETE(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
@@ -367,38 +229,50 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: `Unknown provider: ${body.provider}` }, { status: 400 });
   }
 
-  // Remove from .env.local (delete key, re-encrypt remaining entries).
-  const envVars = await parseEnvFile();
-  envVars.delete(config.envVar);
-  await writeEnvFile(envVars, new Set([config.envVar]));
+  // A durable removal marker prevents old native entries from returning.
+  assertProviderStoreAvailable();
+  if (config.id === 'openrouter') readOpenRouterConnection();
+  mutateProviderKey(config.envVar, { key: null });
+  delete process.env[config.envVar];
 
-  // Clear from process.env
+  let warning = 'External environment and project-local keys are managed separately.';
   if (config.id === 'openrouter') {
-    updateManagedOpenRouterKey(null);
-    clearOpenRouterCheck();
-  } else delete process.env[config.envVar];
+    try { clearOpenRouterCheck(); } catch { warning = 'Key removed. Provider check status cleanup is pending.'; }
+  }
   invalidateRuntimeAuthCache();
 
-  return NextResponse.json({ success: true, provider: config.id, warning: 'External environment and project-local keys are managed separately.' });
+  return NextResponse.json({ success: true, provider: config.id, warning });
 }
 
 // PATCH — OpenRouter connection controls (#3583). Turning it off keeps the key
 // but stops every o8 OpenRouter call; Check re-reads the key's status.
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
   const body = await request.json().catch(() => null);
-  if (body?.provider !== 'openrouter') {
-    return NextResponse.json({ error: 'Only the OpenRouter connection supports this action' }, { status: 400 });
-  }
+  const config = PROVIDERS.find((provider) => provider.id === body?.provider);
+  if (!config) return NextResponse.json({ error: 'Unknown provider' }, { status: 400 });
   const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
-  if (enabled === undefined && body.check !== true) {
+  if (enabled === undefined && (config.id !== 'openrouter' || body.check !== true)) {
     return NextResponse.json({ error: 'enabled (boolean) or check (true) is required' }, { status: 400 });
   }
 
+  if (enabled !== undefined && body.check === true) return NextResponse.json({ error: 'Check and enabled must be separate actions' }, { status: 400 });
+  assertProviderStoreAvailable();
+  if (config.id !== 'openrouter') {
+    if (enabled !== undefined) {
+      mutateProviderKey(config.envVar, { enabled });
+      resolveProviderKey(config.envVar);
+      invalidateRuntimeAuthCache();
+    }
+    return NextResponse.json({ success: true, provider: config.id, enabled: providerKeyEnabled(config.envVar) });
+  }
   if (enabled !== undefined) {
     setOpenRouterEnabled(enabled);
+    const stored = storedProviderKey('OPENROUTER_API_KEY');
+    if (enabled && stored) process.env.OPENROUTER_API_KEY = stored;
+    else if (!enabled && stored && process.env.OPENROUTER_API_KEY === stored) delete process.env.OPENROUTER_API_KEY;
     // Resolving applies the new state to this process's environment.
     await resolveOpenRouterKey();
     invalidateRuntimeAuthCache();
@@ -415,3 +289,17 @@ export async function PATCH(request: NextRequest) {
 
   return NextResponse.json({ success: true, provider: 'openrouter', connection: openRouterConnectionView(key) });
 }
+
+function storageGuard(handler: (request: NextRequest) => Promise<NextResponse>) {
+  return async (request: NextRequest) => {
+    try { return await handler(request); }
+    catch (error) {
+      if (error instanceof MasterKeyUnavailableError) return NextResponse.json({ error: error.message, code: error.code }, { status: 503 });
+      return NextResponse.json({ error: 'Credential store unavailable. Previous keys were preserved.', code: 'key_store_unavailable' }, { status: 503 });
+    }
+  };
+}
+export const GET = storageGuard(handleGET);
+export const POST = storageGuard(handlePOST);
+export const DELETE = storageGuard(handleDELETE);
+export const PATCH = storageGuard(handlePATCH);

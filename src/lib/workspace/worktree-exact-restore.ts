@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -40,17 +41,17 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const RESTORE_TARGET_POPULATOR = String.raw`
+const RESTORE_TARGET_POPULATOR = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const { spawnSync } = require('node:child_process');
 const commands = JSON.parse(process.argv[1]);
 for (const [command, args] of commands) {
-  const result = spawnSync(command, args, {
+  const result = withO8ChildPolicy(env => spawnSync(command, args, {
     cwd: '.',
-    env: process.env,
+    env,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 16 * 1024 * 1024,
-  });
+  }));
   if (result.error) throw result.error;
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || 'Restore target population failed.\n');

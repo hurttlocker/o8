@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import * as childProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -205,7 +206,7 @@ describe('remaining lane Git real entry points', () => {
     // Keep real Git execution and lane config; substitute only the read-only
     // global-config enumeration so this test never edits operator credentials.
     const spy = vi.spyOn(childProcess, 'execFileSync').mockImplementation(((...args: Parameters<typeof original>) => {
-      if (args[0] === 'git' && Array.isArray(args[1]) && args[1].includes('--global')) {
+      if (args[0] === resolveGitBinary() && Array.isArray(args[1]) && args[1].includes('--global')) {
         return 'credential.helper\n\0credential.helper\n' + trusted + '\0';
       }
       return original(...args);

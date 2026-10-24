@@ -1,3 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertRuntimeProfilesAvailable } from '@/lib/providers/legacy-runtime-config';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Governed Hermes profile — the #1075 orchestrator≠worker lockout for Hermes.
  *
@@ -11,13 +15,12 @@
  * worker through o8) — a STRUCTURAL lockout, not prompt-framing.
  *
  * Isolation is via HOME (Hermes reads $HOME/.hermes). The operator's own config
- * + credentials are COPIED in (mirrors openclaw's credential copy) so the
- * governed profile authenticates with whatever provider THEY configured — o8
- * never creates or stores provider keys itself.
+ * + account credentials seed new files with provider API keys omitted. Existing
+ * profile files are left unchanged; file-based API billing belongs to #4340.
  */
 
-import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { execFileSync } from '@/lib/providers/child-process';
+import { existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -47,17 +50,20 @@ export function governedHermesHome(): string {
  */
 export function governHermesProfile(hermesBin: string): { home: string } | null {
   const userDir = userHermesDir();
-  if (!existsSync(join(userDir, 'config.yaml'))) return null; // hermes not set up
-
   const home = governedHermesHome();
   const governedHermes = join(home, '.hermes');
+  // Governance changes tool state. Never run its mutating CLI through a link
+  // into an operator profile, even when that profile is otherwise launchable.
+  if ([home, governedHermes].some(dir => existsSync(dir) && !lstatSync(dir).isDirectory())) return null;
+  assertRuntimeProfilesAvailable([governedHermes]);
+  if (!existsSync(join(governedHermes, 'config.yaml')) && !existsSync(join(userDir, 'config.yaml'))) return null;
   mkdirSync(governedHermes, { recursive: true });
 
-  // Carry the operator's own config + credentials (their provider, not ours).
-  for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) {
-    const src = join(userDir, file);
-    if (existsSync(src)) {
-      try { cpSync(src, join(governedHermes, file)); } catch { /* best-effort */ }
+  // Seed once; provider API credentials never enter the new files.
+  if (!existsSync(join(governedHermes, 'config.yaml'))) {
+    for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) {
+      const src = join(userDir, file);
+      if (existsSync(src)) copyRuntimeConfigFile(src, join(governedHermes, file), 'hermes');
     }
   }
 
@@ -67,7 +73,7 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   try {
     execFileSync(hermesBin, ['tools', 'disable', ...HERMES_DENIED_TOOLSETS], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'hermes', env: { HOME: home, HERMES_HOME: governedHermes } }), { runtimeId: 'hermes' }),
       stdio: 'ignore',
       timeout: 20000,
     });
@@ -91,7 +97,7 @@ export function isHermesProfileGoverned(home: string, hermesBin: string): boolea
   try {
     const out = execFileSync(hermesBin, ['tools', 'list'], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'hermes', env: { HOME: home, HERMES_HOME: join(home, '.hermes') } }), { runtimeId: 'hermes' }),
       encoding: 'utf8',
       timeout: 20000,
     });

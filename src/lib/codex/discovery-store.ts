@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { access, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

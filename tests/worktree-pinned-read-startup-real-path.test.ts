@@ -174,3 +174,39 @@ it('uses a fresh runner for background reads inherited after the session closes'
   release();
   expect(await background).toBe('after');
 });
+
+
+it('filters saved credentials from the batched reader while preserving unrelated service keys', async () => {
+  const { mutateProviderKey } = await import('@/lib/providers/key-store');
+  const names = ['NODE_OPTIONS', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'O8_MASTER_KEY', 'BRAVE_API_KEY'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  const workspace = path.join(root, 'session-credentials');
+  const receipt = path.join(root, 'reader-credentials.json');
+  const preload = path.join(root, 'reader-credentials.cjs');
+  mkdirSync(workspace);
+  writeFileSync(path.join(workspace, 'file'), 'pinned contents');
+  writeFileSync(preload, `
+if (process.argv.includes('pinned-read-session')) require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({
+  managed: Boolean(process.env.OPENAI_API_KEY), alias: Boolean(process.env.CODEX_API_KEY),
+  master: Boolean(process.env.O8_MASTER_KEY), unrelated: process.env.BRAVE_API_KEY === 'reader-service-fixture'
+}));
+`);
+  try {
+    process.env.O8_MASTER_KEY = Buffer.alloc(32, 63).toString('base64url');
+    process.env.OPENAI_API_KEY = process.env.CODEX_API_KEY = 'reader-provider-fixture';
+    process.env.BRAVE_API_KEY = 'reader-service-fixture';
+    mutateProviderKey('OPENAI_API_KEY', { key: process.env.OPENAI_API_KEY, enabled: true });
+    process.env.NODE_OPTIONS = `${previousNodeOptions ?? ''} --require=${preload}`.trim();
+    const identity = await captureWorktreeMaterializationIdentity(workspace);
+    await withPinnedWorkspaceReadSession(async () => {
+      expect(await readPinnedWorkspaceFile(workspace, identity, 'file')).toBe('pinned contents');
+    });
+    expect(JSON.parse(readFileSync(receipt, 'utf8'))).toEqual({ managed: false, alias: false, master: false, unrelated: true });
+  } finally {
+    mutateProviderKey('OPENAI_API_KEY', { key: null });
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});

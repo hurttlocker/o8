@@ -1,3 +1,5 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Codex CLI adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.7 v2).
  *
@@ -24,7 +26,7 @@
 
 import 'server-only';
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '@/lib/providers/child-process';
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -80,7 +82,7 @@ async function resolveCodexBin(): Promise<string | null> {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v codex'], {
         windowsHide: true,
         timeout: 10_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'codex' }),
       });
       const found = stdout.trim();
       if (found) {
@@ -227,7 +229,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
       const child = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd,
-        env,
+        env: providerSpawnEnvironment(env, { runtimeId: 'codex' }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
