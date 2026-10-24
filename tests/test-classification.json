@@ -1504,6 +1504,12 @@
       ]
     },
     {
+      "path": "tests/agent-peer-transcript-identity-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agent-rule-coverage-real-path.test.ts",
       "reasons": [
         "child-process",

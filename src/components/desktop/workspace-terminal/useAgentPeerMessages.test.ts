@@ -30,6 +30,35 @@ describe('agent peer message selection', () => {
     ], self).map((entry) => entry.id)).toEqual(['received', 'sent']);
   });
 
+  it('rejects recorded participant identities from another session or runtime', () => {
+    const bound = (id: string, from: string, to: string, runtime: string, sessionKey: string) => ({
+      ...message(id, from, to), refs: { laneId: null, packetId: null, identities: {
+        from: from === 'Nova' ? { runtime, sessionKey } : null,
+        to: to === 'Nova' ? { runtime, sessionKey } : null,
+      } },
+    });
+    expect(selectPeerMessages([
+      bound('right-in', 'Sage', 'Nova', self.runtime, self.sessionKey!),
+      bound('right-out', 'Nova', 'Sage', self.runtime, self.sessionKey!),
+      bound('old-in', 'Sage', 'Nova', self.runtime, 'codex:old'),
+      bound('old-out', 'Nova', 'Sage', self.runtime, 'codex:old'),
+      bound('wrong-runtime', 'Sage', 'Nova', 'claude-code', self.sessionKey!),
+    ], self).map(entry => entry.id)).toEqual(['right-in', 'right-out']);
+  });
+
+  it('distinguishes absent legacy identity records from explicit unknown identities', () => {
+    const unknown = { ...message('unknown', 'Sage', 'Nova'), refs: { laneId: null, packetId: null, identities: { from: null, to: null } } };
+    expect(selectPeerMessages([message('legacy', 'Sage', 'Nova'), unknown], self).map(entry => entry.id)).toEqual(['legacy']);
+  });
+
+  it('uses a session-derived agent id only when presence has no session key', () => {
+    const entry = { ...message('bound', 'Sage', 'Nova'), refs: { laneId: null, packetId: null, identities: {
+      from: null, to: { runtime: self.runtime, sessionKey: self.sessionKey },
+    } } };
+    expect(selectPeerMessages([entry], { ...self, sessionKey: null })).toEqual([entry]);
+    expect(selectPeerMessages([entry], { ...self, sessionKey: 'codex:replacement' })).toEqual([]);
+  });
+
   it('keeps hidden split panes idle and loads stored identities when visible', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.useFakeTimers();
