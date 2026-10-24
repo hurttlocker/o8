@@ -1,0 +1,15 @@
+system event 1: height=230px lines=["system", "source-model → destination-model", "Cold handoff", "narrative: summary", "intent: full", "workspace: full", "governance: full", "provenance: omitted", "Workspace: fixture/transcript · uncommitted changes present", "Governance: 1 packets · 0 approvals", "Compacted by summary-model"]
+
+thread 'ui::transcript_tests::system_events_are_compact_and_expand_on_click' (12519) panicked at src/transcript_tests.rs:69:9:
+assertion `left == right` failed: default event must be one summary row without raw fields
+  left: 11
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ui::transcript_tests::system_events_are_compact_and_expand_on_click ... FAILED
+
+failures:
+
+failures:
+    ui::transcript_tests::system_events_are_compact_and_expand_on_click
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 4.58s
