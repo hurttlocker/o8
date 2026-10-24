@@ -1,7 +1,26 @@
 #!/usr/bin/env tsx
 import process from 'node:process';
+import { execFile } from 'node:child_process';
+import { devNull } from 'node:os';
+import { promisify } from 'node:util';
 
-import { buildRuleCheckFailureMessage, runRuleCheck } from '../src/lib/supervisor/rule-check';
+import { buildRuleCheckFailureMessage, runRuleCheck, type RuleCheckGitReader } from '../src/lib/supervisor/rule-check';
+
+const execFileAsync = promisify(execFile);
+
+// Static analysis never opens the application credential store. Git needs only
+// executable lookup and OS temporary-directory settings, with no inherited keys.
+const staticGitReader: RuleCheckGitReader = (cwd, args) => {
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'production', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: devNull };
+  for (const name of ['PATH', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TMPDIR', 'TMP', 'TEMP']) {
+    if (process.env[name]) env[name] = process.env[name];
+  }
+  const readArgs = args[0] === 'diff'
+    ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)] : args;
+  return execFileAsync('git', ['--no-pager', '-c', 'core.fsmonitor=false', ...readArgs], {
+    cwd, env, windowsHide: true, maxBuffer: 10 * 1024 * 1024,
+  });
+};
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -35,7 +54,7 @@ async function main(): Promise<void> {
     console.warn(`[rule-check] Ignoring unrecognized args: ${passthrough.join(' ')}`);
   }
 
-  const result = await runRuleCheck(process.cwd(), baseRef);
+  const result = await runRuleCheck(process.cwd(), baseRef, staticGitReader);
   if (result.ok) {
     console.log(`[rule-check] OK — scanned ${result.scannedFiles} file(s), zero violations vs ${baseRef}`);
     return;

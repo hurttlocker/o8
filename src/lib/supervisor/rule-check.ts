@@ -1,10 +1,8 @@
-import { execFile } from '../providers/child-process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { scanSpawnEnvironment } from './spawn-environment-rule';
 
-const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const FILE_CEILING = 800;
 const MAX_VIOLATIONS_REPORTED = 60;
@@ -33,6 +31,16 @@ export interface RuleCheckResult {
   violations: RuleViolation[];
   scannedFiles: number;
 }
+
+/** Standalone checks can supply a Git reader without loading application secrets. */
+export type RuleCheckGitReader = (cwd: string, args: string[]) => Promise<{ stdout: string }>;
+
+const applicationGitReader: RuleCheckGitReader = async (cwd, args) => {
+  const { execFile } = await import('../providers/child-process');
+  return promisify(execFile)('git', args, {
+    windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER,
+  });
+};
 
 // Layout orchestrators, multiplexers, and verb dispatchers that are explicitly
 // waived from the 800-line ceiling (mirrors CLAUDE.md "ALWAYS respect the
@@ -67,17 +75,16 @@ function shouldCheckFile(relPath: string): boolean {
   return relPath.endsWith('.tsx') || relPath.endsWith('.ts');
 }
 
-async function listTouchedFiles(cwd: string, baseRef: string): Promise<string[] | null> {
+async function listTouchedFiles(cwd: string, baseRef: string, git: RuleCheckGitReader): Promise<string[] | null> {
   // Agents commonly leave files uncommitted at completion — the supervisor
   // auto-commits after verification passes. So we need both committed diffs
   // against the base ref AND untracked files in the working tree to get a
   // complete picture of what the agent touched.
   const collected = new Set<string>();
   try {
-    const { stdout } = await execFileAsync(
-      'git',
+    const { stdout } = await git(
+      cwd,
       ['diff', '--name-only', '--diff-filter=ACMR', baseRef],
-      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     for (const entry of stdout.split('\n')) {
       const trimmed = entry.trim();
@@ -88,10 +95,9 @@ async function listTouchedFiles(cwd: string, baseRef: string): Promise<string[] 
   }
 
   try {
-    const { stdout } = await execFileAsync(
-      'git',
+    const { stdout } = await git(
+      cwd,
       ['ls-files', '--others', '--exclude-standard'],
-      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     for (const entry of stdout.split('\n')) {
       const trimmed = entry.trim();
@@ -116,15 +122,15 @@ async function getChangedLinesPerFile(
   cwd: string,
   baseRef: string,
   paths: string[],
+  git: RuleCheckGitReader,
 ): Promise<Map<string, Set<number>>> {
   const result = new Map<string, Set<number>>();
   if (paths.length === 0) return result;
 
   try {
-    const { stdout } = await execFileAsync(
-      'git',
+    const { stdout } = await git(
+      cwd,
       ['diff', '-U0', '--no-color', baseRef, '--', ...paths],
-      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
 
     let currentFile: string | null = null;
@@ -164,12 +170,12 @@ async function getOldLineCount(
   cwd: string,
   baseRef: string,
   relPath: string,
+  git: RuleCheckGitReader,
 ): Promise<number | null> {
   try {
-    const { stdout } = await execFileAsync(
-      'git',
+    const { stdout } = await git(
+      cwd,
       ['show', `${baseRef}:${relPath}`],
-      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     const newlines = (stdout.match(/\n/g) ?? []).length;
     return newlines + (stdout.length > 0 && !stdout.endsWith('\n') ? 1 : 0);
@@ -178,8 +184,8 @@ async function getOldLineCount(
   }
 }
 
-export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleCheckResult> {
-  const touched = await listTouchedFiles(cwd, baseRef);
+export async function runRuleCheck(cwd: string, baseRef = 'main', git: RuleCheckGitReader = applicationGitReader): Promise<RuleCheckResult> {
+  const touched = await listTouchedFiles(cwd, baseRef, git);
   if (!touched) {
     // Fail-open: if git can't resolve the base branch, skip the check cleanly
     // rather than blocking every dispatch. The typecheck gate is still in
@@ -192,7 +198,7 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
     return { ok: true, violations: [], scannedFiles: 0 };
   }
 
-  const changedLinesByFile = await getChangedLinesPerFile(cwd, baseRef, filtered);
+  const changedLinesByFile = await getChangedLinesPerFile(cwd, baseRef, filtered, git);
 
   const violations: RuleViolation[] = [];
   let scanned = 0;
@@ -212,7 +218,7 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
     // everything. Otherwise scope inline rules to changed lines only so
     // pre-existing debt on untouched lines doesn't block new work.
     const changedLines = changedLinesByFile.get(relPath) ?? null;
-    const oldLineCount = await getOldLineCount(cwd, baseRef, relPath);
+    const oldLineCount = await getOldLineCount(cwd, baseRef, relPath, git);
 
     violations.push(...scanSpawnEnvironment(relPath, content).slice(0, MAX_VIOLATIONS_REPORTED - violations.length));
     scanFileContent(relPath, content, violations, { changedLines, oldLineCount });
