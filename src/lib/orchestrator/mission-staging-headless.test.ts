@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-mission-staging-'));
 process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
@@ -80,6 +80,11 @@ function stubMissionApiFetch() {
   }));
 }
 
+beforeAll(async () => {
+  // Load the real route during fixture setup, outside the interaction deadline.
+  await import('@/app/api/orchestrator/create-mission/route');
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -138,13 +143,18 @@ describe('staged mission creation', () => {
       repoPath, runtime: 'codex', comparisonModels: ['gpt-5.6-sol', 'gpt-5.6-sol'], dispatch: false,
     }));
     const { fanOutComparisonPackets } = await import('@/lib/orchestrator/comparison-fanout');
-    const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const cached = fanOutComparisonPackets(readOrchestratorControlPlaneState());
+    const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    const { state: cached } = await withMissionRegistryState(staged.missionId, (state) => ({
+      state: fanOutComparisonPackets(state), result: undefined,
+    }));
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     writeOrchestratorControlPlaneState(cached);
     const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
     expect(cached.packets).toHaveLength(2);
     const firstId = cached.packets[0]!.id;
     const heldId = cached.packets[1]!.id;
+    expect(readMissionRegistryEntry(staged.missionId)?.mission.packets.map((packet) => packet.id))
+      .toEqual([firstId, heldId]);
     const { NextRequest } = await import('next/server');
     const stateRoute = await import('@/app/api/orchestrator/state/route');
     const packetRequest = (packetId: string, queueState: 'held' | 'queued') => new NextRequest('http://localhost/api/orchestrator/state', {
