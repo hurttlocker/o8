@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-github-scope-data-'));
@@ -47,6 +47,13 @@ afterAll(() => {
 beforeEach(() => {
   launchPacket.mockReset();
 });
+
+// Cold transformation of this service graph can exhaust a test's 30-second
+// budget under concurrent validation. Prepare it after data-dir isolation and
+// cleanup registration, before timing the real create/dispatch/readback flow.
+const serviceSetupStarted = performance.now();
+const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+console.info(`[packet-scope-fixture] mission service setup completed in ${Math.round(performance.now() - serviceSetupStarted)}ms`);
 
 describe('GitHub issue packet scope real path', () => {
   it('keeps only repo paths when an issue body also contains a Git range and event field', async () => {
@@ -152,7 +159,17 @@ describe('GitHub issue packet scope real path', () => {
   });
 
   it('never launches a packet whose only predicted file is forbidden by its task brief', async () => {
+    let stage = 'repository creation';
+    const started = performance.now();
+    const enterStage = (next: string) => {
+      console.info(`[packet-scope-fixture] ${stage} finished after ${Math.round(performance.now() - started)}ms`);
+      stage = next;
+    };
+    onTestFailed(() => {
+      console.error(`[packet-scope-fixture] incomplete stage: ${stage}`);
+    });
     const repoPath = createRepo();
+    enterStage('skeleton scan');
     const { scanRepo } = await import('@/lib/skeleton');
     await scanRepo({ repoPath, chunks: false });
 
@@ -179,7 +196,7 @@ describe('GitHub issue packet scope real path', () => {
       };
     });
 
-    const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+    enterStage('mission creation');
     const created = await createMission({
       issues: [{
         number: 18_360,
@@ -197,23 +214,19 @@ describe('GitHub issue packet scope real path', () => {
     expect(createdPacket.predictedFiles).toEqual(['o8.md']);
     expect(createdPacket.allowedFiles).toEqual(['**/*']);
 
+    enterStage('mission dispatch');
     await dispatchMission({ missionId: created.missionId });
+    enterStage('persisted scope readback');
 
     const { getPacketScope } = await import('@/lib/lanes/scope');
     const state = readOrchestratorControlPlaneState();
     const packet = state.packets.find((candidate) => candidate.id === packetId)!;
     const scope = await getPacketScope({ packetId });
-    const launchedUnsatisfiableScope = launchPacket.mock.calls.length > 0
-      && scope?.allowedPaths.length === 1
-      && scope.allowedPaths[0] === 'o8.md';
-
+    expect(launchPacket).toHaveBeenCalledTimes(1);
     expect(packet.predictedFiles).toEqual(['o8.md']);
-    expect(launchedUnsatisfiableScope).toBe(false);
-    if (launchPacket.mock.calls.length === 0) {
-      expect(packet.blockedReason).toMatch(/unsatisfiable packet scope/i);
-    } else {
-      expect(scope?.allowedPaths).not.toEqual(['o8.md']);
-    }
+    expect(packet.allowedFiles).toEqual(['**/*']);
+    expect(scope?.allowedPaths).toEqual(['**/*']);
+    enterStage('complete');
   });
 
   it('records a bounded worker scope expansion reason on the packet lane', async () => {
