@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 
 import type { RequestPrincipalContext } from '@/lib/auth/principal';
 import { codename } from '@/lib/agents/codename';
+import { isAgentInboxWakePending } from '@/lib/agents/inbox-wake';
 import { getSqlite } from '@/lib/db';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -270,6 +271,7 @@ export async function postAgentMessage(
       claimAgentInboxWake({ agent: wakeTarget, throughSequence }, sqlite)
     ),
     releaseCodexInboxWake: (wakeTarget, reservationId) => releaseAgentInboxWake(wakeTarget, reservationId, sqlite),
+    isCodexInboxWakePending: (wakeTarget, reservationId) => isAgentInboxWakePending(wakeTarget, reservationId, sqlite),
   };
   try {
     const result = await deliverAgentMessage(message, target, seams, wakeSeams);

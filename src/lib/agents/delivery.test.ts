@@ -3,12 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildClaudeTerminalUserTurn,
   codexAgentInboxWakeText,
+  defaultAgentMessageDeliverySeams,
   deliverAgentMessage,
   submitClaudeTerminalUserTurn,
   submitCodexQueuedUserTurn,
 } from './delivery';
 import { AGENT_NATIVE_WAKE_TTL_MS } from './store';
 import type { AgentMessage, AgentPresence } from './types';
+
+const ownedResume = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+vi.mock('@/lib/runtimes', () => ({ getRuntime: () => ({ resume: ownedResume }) }));
 
 describe('buildClaudeTerminalUserTurn', () => {
   it('builds an idempotent Codex wake without embedding stale peer content', () => {
@@ -156,5 +160,18 @@ describe('buildClaudeTerminalUserTurn', () => {
     now += AGENT_NATIVE_WAKE_TTL_MS;
     await deliverAgentMessage(message(4), target, deliverySeams, wakeSeams);
     expect(sendCodex).toHaveBeenCalledTimes(3);
+  });
+
+  it('checks freshness before handing an owned wake to the runtime', async () => {
+    ownedResume.mockClear();
+    const target: AgentPresence = {
+      agentId: 'owned-session', name: 'Owned', repo: '/workspace/o8', worktreePath: '/workspace/o8',
+      runtime: 'codex', sessionKey: 'codex-owned:thread', laneId: null, packetId: null,
+      lastSeen: new Date().toISOString(),
+    };
+    await expect(defaultAgentMessageDeliverySeams.sendCodex(target, 'Wake', () => false)).resolves.toBe(false);
+    expect(ownedResume).not.toHaveBeenCalled();
+    await expect(defaultAgentMessageDeliverySeams.sendCodex(target, 'Wake', () => true)).resolves.toBe(true);
+    expect(ownedResume).toHaveBeenCalledExactlyOnceWith(target.sessionKey, 'Wake');
   });
 });
