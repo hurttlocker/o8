@@ -24,7 +24,7 @@ function wsLagFixtureBlock() {
 const originalInterval = global.setInterval;
 global.setInterval = (callback, delay, ...args) => originalInterval(() => {
   const trigger = path.join(root, 'block-once');
-  if (delay === 1000 && fs.existsSync(trigger)) {
+  if (delay === 1000 && String(callback).includes('this.tick(') && fs.existsSync(trigger)) {
     fs.unlinkSync(trigger);
     wsLagFixtureBlock();
   }

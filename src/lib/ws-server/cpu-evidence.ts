@@ -14,7 +14,7 @@ export interface WsCpuEvidence {
   frames: WsCpuFrame[];
 }
 
-/** Only repository code locations leave the profiler. Never retain raw profiles,
+/** Only repository module basenames leave the profiler. Never retain raw profiles,
  * absolute paths, URLs, arguments or inspector errors in the health payload.
  * Samples identify overlapping CPU work, not a proven production root cause.
  */
@@ -36,8 +36,11 @@ export function summarizeWsCpuProfile(profile: Profiler.Profile, root: string, w
     const allowed = bundled || !isAbsolute(file) && !file.split('/').includes('..')
       && /^(?:src|scripts|tests|dist|lib)\/[A-Za-z0-9_./-]+\.(?:[cm]?[jt]sx?)$/.test(file)
       && !file.split('/').includes('node_modules');
-    frames.set(node.id, allowed ? {
-      file, line: node.callFrame.lineNumber + 1,
+    // Shared process/Git adapters hide the operation that requested the work.
+    // Charge their native samples to the next repository caller instead.
+    const adapter = ['src/lib/providers/child-process.ts', 'src/lib/providers/store-lock.ts', 'src/lib/lane/lane-git.ts'].includes(file);
+    frames.set(node.id, allowed && !adapter ? {
+      file: basename(file).slice(0, 96), line: node.callFrame.lineNumber + 1,
       functionName: /^[A-Za-z_$][A-Za-z0-9_$]{0,79}$/.test(node.callFrame.functionName) ? node.callFrame.functionName : '(anonymous)',
       sampledMicros: 0,
     } : null);

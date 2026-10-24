@@ -217,6 +217,23 @@ timestamp, not a kernel spawn timestamp.
 node scripts/speed/dispatch-fixture.mjs --output=work/worker-launch
 ```
 
+For the Linux ws-event-loop regression, run:
+
+```sh
+node scripts/speed/dispatch-fixture.mjs --soak --output=work/ws-work-soak
+```
+
+This repeats the real delegate-route fixture three times. Each repetition launches
+three owned fixture workers, reviews and merges their commits into a local Git
+origin, and runs the worktree reaper alongside the merges. A symbol-rich skeleton
+cache uses the scanner's 2,000-file ceiling. No accounts or network are needed.
+The receipt includes max delay, p99 delay, wedge count and bounded CPU summaries.
+At 10ms sampling resolution, each measured phase must stay below 250ms max and
+50ms p99 with zero wedges. The summary reports the worst phase p99, so a quieter
+phase cannot hide a slow merge. Run this timing fixture separately from expensive
+checks. The ordinary fixture mode above continues to measure scheduler launch.
+
+
 To include a private copy of this checkout's installed dependency payload in
 each measured dispatch, add `--payload=node_modules`. The fixture copies those
 files without preserving external hardlinks and audits the resulting tree.

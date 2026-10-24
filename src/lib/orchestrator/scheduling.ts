@@ -1,6 +1,6 @@
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
-
+import { observeWsHealthHandler } from '@/lib/ws-server/handler-activity';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
@@ -412,7 +412,7 @@ export function mergeDispatchTickOutcome(
   fresh.updatedAt = afterDispatch.updatedAt ?? fresh.updatedAt;
 }
 
-export async function runDispatchTick(
+export const runDispatchTick = observeWsHealthHandler('dispatch', async function runDispatchTick(
   state: OrchestratorMissionState,
   options: {
     launchBudget?: DispatchLaunchBudget;
@@ -817,4 +817,4 @@ export async function runDispatchTick(
   }
 
   return nextState;
-}
+});

@@ -35,7 +35,7 @@ it('bounds output and charges native work once to its nearest repository caller'
   const evidence = summarizeWsCpuProfile(profile(), root, 100, 200);
   expect(evidence).toMatchObject({ status: 'sampled', windowStartedAt: 100, capturedAt: 200 });
   expect(evidence.frames).toHaveLength(8);
-  expect(evidence.frames[0]).toEqual({ file: 'src/handler.ts', functionName: 'handleWork', line: 2, sampledMicros: 500000 });
+  expect(evidence.frames[0]).toEqual({ file: 'handler.ts', functionName: 'handleWork', line: 2, sampledMicros: 500000 });
   expect(evidence.frames.reduce((total, frame) => total + frame.sampledMicros, 0)).toBe(500007);
   expect(JSON.stringify(evidence)).not.toMatch(/outside|private|token|https|file:|node:|\/Users\//);
 });
@@ -89,7 +89,7 @@ it.each([true, false])('includes a periodically rotated window only while it ove
   await vi.advanceTimersByTimeAsync(15000);
   if (!overlapping) await vi.advanceTimersByTimeAsync(3000);
   const evidence = await sampler.capture(Date.now() - 1000);
-  if (overlapping) expect(evidence.frames[0]).toMatchObject({ file: 'src/handler.ts', sampledMicros: 500000 });
+  if (overlapping) expect(evidence.frames[0]).toMatchObject({ file: 'handler.ts', sampledMicros: 500000 });
   else expect(evidence.frames).toEqual([]);
   await sampler.stop();
 });
@@ -106,4 +106,33 @@ it('keeps wedge and recovery detection working when CPU capture rejects', async 
   watchdog.tick();
   expect(watchdog.getStats()).toMatchObject({ wedged: false, wedgeCount: 1 });
   watchdog.stop();
+});
+it('rate-limits watchdog CPU captures across repeated high-lag samples', async () => {
+  let clock = 0;
+  const capture = vi.fn(async () => ({ status: 'sampled' as const, frames: [] }));
+  const watchdog = new WsWatchdog({ intervalMs: 10, sustainedSamples: 1,
+    nowMs: () => clock, wallClock: () => clock, scheduler: () => ({}), cancelScheduler: () => {}, log: () => {},
+    cpuSampler: { start: () => {}, stop: async () => {}, capture, getEvidence: () => ({ status: 'sampling', frames: [] }) },
+  });
+  watchdog.start();
+  for (let index = 0; index < 5; index += 1) {
+    clock += 600;
+    watchdog.tick();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  expect(capture).toHaveBeenCalledOnce();
+  clock += 30_000;
+  watchdog.tick();
+  expect(capture).toHaveBeenCalledTimes(2);
+  watchdog.stop();
+});
+
+it('attributes native process adapter samples to the requesting repository call site', () => {
+  const evidence = summarizeWsCpuProfile({ nodes: [
+    node(1, pathToFileURL(join(root, 'src/lib/workspace/git-bundle-preservation.ts')).href, 'preservationGitValueNative', [2]),
+    node(2, pathToFileURL(join(root, 'src/lib/lane/lane-git.ts')).href, 'runGitPlanSync', [3]),
+    node(3, pathToFileURL(join(root, 'src/lib/providers/child-process.ts')).href, 'invoke', [4]),
+    node(4, 'node:process', 'nativeWait'),
+  ], samples: [4], timeDeltas: [500000], startTime: 0, endTime: 500000 }, root, 1, 2);
+  expect(evidence.frames).toEqual([{ file: 'git-bundle-preservation.ts', functionName: 'preservationGitValueNative', line: 2, sampledMicros: 500000 }]);
 });

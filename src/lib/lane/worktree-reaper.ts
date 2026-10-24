@@ -1,3 +1,4 @@
+import { withWsHealthHandler } from '@/lib/ws-server/handler-activity';
 import { resolveGitBinary } from '@/lib/git/binary';
 /**
  * Stale-worktree reaper.
@@ -438,7 +439,7 @@ export async function runWorktreeReaperTick(): Promise<void> {
 
 /** Startup, completion and interval callers share one bounded, durable scheduler. */
 export async function runWorktreeMaintenanceTick(primaryRepoPath = process.cwd()): Promise<void> {
-  const result = await runBoundedWorktreeMaintenance(reconcileWorktreeLane, { primaryRepoPath });
+  const result = await withWsHealthHandler('worktree-reaper', () => runBoundedWorktreeMaintenance(reconcileWorktreeLane, { primaryRepoPath }));
   if (result.removed > 0 || result.held > 0 || result.registryHold) {
     console.log(
       `[worktree-reaper] candidates=${result.candidates} removed=${result.removed} held=${result.held} `

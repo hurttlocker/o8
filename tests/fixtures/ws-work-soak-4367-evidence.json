@@ -1,0 +1,54 @@
+{
+  "issue": 4367,
+  "platform": "linux",
+  "nodeMajor": 22,
+  "resolutionMs": 10,
+  "fixture": {
+    "cacheFiles": 2000,
+    "symbolsPerFile": 200,
+    "dispatchesPerRepetition": 3,
+    "reviewedMergesPerRepetition": 3,
+    "reaper": "concurrent with each merge"
+  },
+  "measurement": "max histogram delay and worst phase p99, including 10ms sampling resolution; wedge threshold 250ms with one high sample",
+  "before": {
+    "maxLag": 567.279615,
+    "p99Lag": 54.296575,
+    "wedges": 3
+  },
+  "after": [
+    {
+      "sample": 1,
+      "maxLag": 108.199935,
+      "p99Lag": 35.717119,
+      "wedges": 0
+    },
+    {
+      "sample": 2,
+      "maxLag": 69.009407,
+      "p99Lag": 35.258367,
+      "wedges": 0
+    },
+    {
+      "sample": 3,
+      "maxLag": 116.195327,
+      "p99Lag": 39.550975,
+      "wedges": 0
+    }
+  ],
+  "identifiedCallSites": [
+    "checkDiffBudgets -> getAllCached: all symbol JSON decoded for scalar line budgets",
+    "merge gate and preview -> laneGitSync: synchronous Git validation and command waits",
+    "preservationGitValueNative and capturePreservationGitBundleNative -> laneGitInvocation: synchronous validation in bundle preservation"
+  ],
+  "redTail": [
+    "AssertionError: expected 567.279615 to be less than 250",
+    "AssertionError: expected 54.296575 to be less than 50",
+    "AssertionError: expected 3 to be +0 // Object.is equality",
+    "Test Files  1 failed (1)",
+    "Tests  1 failed (1)"
+  ],
+  "greenTail": [
+    "dispatch-fixture --soak: 3 successful repetitions, 9 dispatches, 9 reviewed merges, zero failures"
+  ]
+}

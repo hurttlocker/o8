@@ -1,3 +1,4 @@
+import { observeWsHealthHandler } from '@/lib/ws-server/handler-activity';
 import type { MergePreviewResult } from '@/lib/lane/preview-merge';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
@@ -621,7 +622,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   return dispatchPacketMerge(packet, input, mergeActor);
 }
 
-export async function approveAndMergePacket(input: ApproveAndMergeInput) {
+export const approveAndMergePacket = observeWsHealthHandler('merge', async function approveAndMergePacket(input: ApproveAndMergeInput) {
   const { currentMissionState } = await loadShared();
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -687,8 +688,7 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
       ? `Merged ${mergedPrerequisites.join(', ')} before ${packet.referenceLabel} based on recommended same-wave merge order. ${requestedResult.note}`
       : requestedResult.note,
   };
-}
-
+});
 export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
   const [
     { currentMissionState },

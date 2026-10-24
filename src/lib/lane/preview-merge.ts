@@ -12,7 +12,7 @@
  * "gate could not run".
  */
 
-import { laneGitSync } from '@/lib/lane/lane-git';
+import { laneGit } from '@/lib/lane/lane-git';
 
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -188,15 +188,11 @@ function hasApprovedOrchestratorReview(packetId: string): boolean {
   return mission.packets.find((packet) => packet.id === packetId)?.review?.approved === true;
 }
 
-function readDirtyWorktreeDetail(cwd: string, repoPath: string): string | null {
+async function readDirtyWorktreeDetail(cwd: string, repoPath: string): Promise<string | null> {
   try {
-    const output = laneGitSync(cwd, repoPath, ['status', '--porcelain'], {
-      windowsHide: true,
-      cwd,
-      timeout: 5000,
-      encoding: 'utf-8',
-      maxBuffer: 1024 * 1024,
-    }).trim();
+    const output = (await laneGit(cwd, repoPath, ['status', '--porcelain'], {
+      timeout: 5000, maxBuffer: 1024 * 1024,
+    })).stdout.trim();
     if (!output) return null;
     const lines = output.split('\n').slice(0, 5);
     const suffix = output.split('\n').length > lines.length ? '\n...' : '';
@@ -293,7 +289,7 @@ export async function buildPreviewForLane(
       blockers.push('contract-review');
     }
   }
-  const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd, lane.repoPath);
+  const dirtyDetail = await readDirtyWorktreeDetail(reviewSource.cwd, lane.repoPath);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
     if (cleanCheck) {

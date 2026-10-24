@@ -103,10 +103,13 @@ it('retains sampled blocking call sites through the real server health endpoint'
   await waitFor(async () => (await health()).eventLoop.cpuEvidence?.status === 'sampled', 'lag CPU evidence');
   const stats = (await health()).eventLoop;
   expect(stats.maxLagMs).toBeGreaterThan(250);
+  expect(stats.inFlightHandlers).toEqual([]);
+  expect(stats.lastLagHandlers).toEqual([]);
   expect(stats.cpuEvidence.frames).toContainEqual(expect.objectContaining({
-    file: 'tests/helpers/ws-lag-preload.cjs', functionName: 'wsLagFixtureBlock',
+    file: 'ws-lag-preload.cjs', functionName: 'wsLagFixtureBlock',
   }));
   expect(stats.cpuEvidence.frames.length).toBeLessThanOrEqual(8);
+  for (const frame of stats.cpuEvidence.frames) expect(frame.file).not.toMatch(/[\\/]/);
   expect(stats.cpuEvidence.sampleCount).toBeGreaterThan(0);
   expect(JSON.stringify(stats.cpuEvidence)).not.toContain(process.cwd());
   await waitFor(async () => (await health()).eventLoop.lastSampleLagMs < 250, 'loop recovery');
