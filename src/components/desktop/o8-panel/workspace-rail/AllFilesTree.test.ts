@@ -35,7 +35,10 @@ async function render(repoPath = workspace, selectedFile: string | null = null) 
   await settled(() => Boolean(treeRoot()) && !treeText().includes('Loading files...'));
 }
 function treeRoot() { return host.querySelector('file-tree-container')?.shadowRoot; }
-function treeText() { return `${host.textContent ?? ''}${[...treeRoot()?.querySelectorAll('[role=treeitem]') ?? []].map(node => node.getAttribute('aria-label')).join(' ')}`; }
+function treeText() {
+  const active = host.querySelector('[data-workspace-file-index-active="true"]') ?? host;
+  return `${active.textContent ?? ''}${[...treeRoot()?.querySelectorAll('[role=treeitem]') ?? []].map(node => node.getAttribute('aria-label')).join(' ')}`;
+}
 function item(path: string) { return [...treeRoot()?.querySelectorAll<HTMLButtonElement>('[role=treeitem]') ?? []].find(node => node.dataset.itemPath?.replace(/^f::/, '').replace(/\/$/, '') === path); }
 async function settled(check: () => boolean) {
   for (let i = 0; i < 100 && !check(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
