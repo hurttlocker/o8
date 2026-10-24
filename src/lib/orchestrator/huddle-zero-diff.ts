@@ -2,6 +2,9 @@ import { getLane, getLaneEvents, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
+import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export const HUDDLE_READY_EVENT_LABEL = 'huddle_ready';
 
@@ -47,10 +50,58 @@ export async function parkHuddleReadyZeroDiffLane(
   const packetId = lane.packetId?.trim();
   if (!packetId) return { parked: false };
 
-  const state = readOrchestratorControlPlaneState();
-  const packet = state.packets.find((candidate) => candidate.id === packetId);
-  if (!packet) return { parked: false };
+  const snapshot = await withMissionHandoffBarrier(async () =>
+    readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId)
+      ?? findMissionRegistryEntryByPacketId(packetId)?.mission.packets.find((packet) => packet.id === packetId)
+  );
+  if (!snapshot) return { parked: false };
+  // Transcript evidence is optional observability. Never hold mutation locks
+  // across this read: a steer must be able to supersede the completing turn.
+  const huddleReady = !resolvePacketAlignment(snapshot).armed
+    || hasPersistedHuddleReport(lane.id) || await transcriptEndsWithPlan(lane);
+  assertCurrent();
 
+  // Classification must follow the durable owner when another mission becomes
+  // selected. Serialize routing with that handoff and mutate only that owner.
+  return withMissionHandoffBarrier(async () => {
+    const { result } = await withLockedState(async (state) => {
+      assertCurrent();
+      const packet = state.packets.find((candidate) => candidate.id === packetId);
+      return packet ? parkPacket(lane, packet, huddleReady, assertCurrent) : null;
+    });
+    if (result) return result;
+    const entry = findMissionRegistryEntryByPacketId(packetId);
+    if (!entry) return { parked: false };
+    return (await withMissionRegistryState(entry.id, async (state) => {
+      assertCurrent();
+      const packet = state.packets.find((candidate) => candidate.id === packetId);
+      return { state, result: packet ? parkPacket(lane, packet, huddleReady, assertCurrent) : { parked: false } };
+    })).result;
+  });
+}
+
+function markPacketBlocked(packet: OrchestratorPacket, lane: Lane, label: string, at: string): void {
+  packet.status = 'blocked';
+  packet.blockedReason = label;
+  packet.lastEventAt = at;
+  packet.lastEventLabel = label;
+  if (packet.lane) {
+    packet.lane = {
+      ...packet.lane,
+      laneId: lane.id,
+      sessionKey: lane.sessionKey ?? packet.lane.sessionKey ?? null,
+      lastEventAt: at,
+      lastEventLabel: label,
+    };
+  }
+}
+
+function parkPacket(
+  lane: Lane,
+  packet: OrchestratorPacket,
+  huddleReady: boolean,
+  assertCurrent: () => void,
+): HuddleZeroDiffResult {
   // A worker can intentionally end an implementation turn with a typed
   // blocker after restoring a clean tree. That operator-facing reason is more
   // specific than generic zero-diff classification and must survive process
@@ -66,24 +117,8 @@ export async function parkHuddleReadyZeroDiffLane(
     && currentLabel !== HUDDLE_READY_EVENT_LABEL
   ) {
     const blockedAt = currentLane.lastEventAt ?? new Date().toISOString();
-    await withLockedState((current) => {
-      assertCurrent();
-      const currentPacket = current.packets.find((candidate) => candidate.id === packetId);
-      if (!currentPacket) return;
-      currentPacket.status = 'blocked';
-      currentPacket.blockedReason = currentLabel;
-      currentPacket.lastEventAt = blockedAt;
-      currentPacket.lastEventLabel = currentLabel;
-      if (currentPacket.lane) {
-        currentPacket.lane = {
-          ...currentPacket.lane,
-          laneId: currentLane.id,
-          sessionKey: currentLane.sessionKey ?? lane.sessionKey ?? null,
-          lastEventAt: blockedAt,
-          lastEventLabel: currentLabel,
-        };
-      }
-    });
+    assertCurrent();
+    markPacketBlocked(packet, currentLane, currentLabel, blockedAt);
     return { parked: false, operatorBlocked: true, lane: currentLane };
   }
 
@@ -103,33 +138,15 @@ export async function parkHuddleReadyZeroDiffLane(
   const alignmentArmed = resolvePacketAlignment(packet).armed;
   if (!alignmentArmed) return { parked: false };
 
-  const huddleReady = hasPersistedHuddleReport(lane.id) || await transcriptEndsWithPlan(lane);
   assertCurrent();
   if (!huddleReady) {
-    console.log(`[lane-lifecycle] Alignment-armed packet ${packetId} exited zero-diff without an explicit plan signal; parking for orchestrator anyway (#1496).`);
+    console.log(`[lane-lifecycle] Alignment-armed packet ${packet.id} exited zero-diff without an explicit plan signal; parking for orchestrator anyway (#1496).`);
   }
 
   const now = new Date().toISOString();
   const parkedLane = setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', HUDDLE_READY_EVENT_LABEL) ?? lane;
 
-  await withLockedState((current) => {
-    assertCurrent();
-    const currentPacket = current.packets.find((candidate) => candidate.id === packetId);
-    if (!currentPacket) return;
-    currentPacket.status = 'blocked';
-    currentPacket.blockedReason = HUDDLE_READY_EVENT_LABEL;
-    currentPacket.lastEventAt = now;
-    currentPacket.lastEventLabel = HUDDLE_READY_EVENT_LABEL;
-    if (currentPacket.lane) {
-      currentPacket.lane = {
-        ...currentPacket.lane,
-        laneId: parkedLane.id,
-        sessionKey: parkedLane.sessionKey ?? lane.sessionKey ?? null,
-        lastEventAt: now,
-        lastEventLabel: HUDDLE_READY_EVENT_LABEL,
-      };
-    }
-  });
+  markPacketBlocked(packet, parkedLane, HUDDLE_READY_EVENT_LABEL, now);
 
   return { parked: true, lane: parkedLane };
 }
