@@ -11,7 +11,7 @@ import {
 } from '@/lib/worktree/materialization-identity';
 import {
   ensurePinnedWorkspaceDirectory,
-  ensurePinnedWorkspaceFile,
+  createPinnedInstallRuntime,
 } from '@/lib/worktree/materialization-leaf-io';
 import { purgeExactDirectory } from './exact-directory-purge';
 import {
@@ -519,18 +519,8 @@ async function createInstallRuntime(
   workspacePath: string,
   workspaceIdentity: WorktreeMaterializationIdentity,
 ): Promise<InstallRuntimePaths> {
-  const runtimeParentRelative = '.o8-install-runtime';
-  await ensurePinnedWorkspaceDirectory(
-    workspacePath,
-    workspaceIdentity,
-    runtimeParentRelative,
-  );
-  const rootRelative = `${runtimeParentRelative}/${randomUUID()}`;
-  const rootIdentity = await ensurePinnedWorkspaceDirectory(
-    workspacePath,
-    workspaceIdentity,
-    rootRelative,
-  );
+  const rootRelative = `.o8-install-runtime/${randomUUID()}`;
+  const rootIdentity = await createPinnedInstallRuntime(workspacePath, workspaceIdentity, rootRelative);
   const root = path.join(workspacePath, rootRelative);
   const paths: InstallRuntimePaths = {
     root,
@@ -544,25 +534,6 @@ async function createInstallRuntime(
     device: rootIdentity.device,
     inode: rootIdentity.inode,
   };
-  for (const relative of ['home', 'config', 'xdg-cache', 'tmp', 'corepack']) {
-    await ensurePinnedWorkspaceDirectory(
-      workspacePath,
-      workspaceIdentity,
-      `${rootRelative}/${relative}`,
-    );
-  }
-  await ensurePinnedWorkspaceFile(
-    workspacePath,
-    workspaceIdentity,
-    `${rootRelative}/config/user.rc`,
-    '',
-  );
-  await ensurePinnedWorkspaceFile(
-    workspacePath,
-    workspaceIdentity,
-    `${rootRelative}/config/global.rc`,
-    '',
-  );
   return paths;
 }
 
@@ -657,32 +628,37 @@ interface InstalledHardlinkAudit {
 async function auditInstalledEntry(
   workspacePath: string,
   absolutePath: string,
-  hardlinks: Map<string, InstalledHardlinkAudit>,
-): Promise<void> {
+  hardlinks: Map<string, InstalledHardlinkAudit | number>,
+): Promise<string[]> {
   const entry = await lstat(absolutePath);
   if (entry.isSymbolicLink()) {
     const target = await realpath(absolutePath);
     if (!pathInside(target, await realpath(workspacePath))) {
       throw new Error(`Installed dependency link escapes its private workspace: ${path.relative(workspacePath, absolutePath)}`);
     }
-    return;
+    return [];
   }
   if (entry.isFile()) {
     const key = `${entry.dev}:${entry.ino}`;
     const audited = hardlinks.get(key);
-    if (audited) {
+    // Retain EVERY inode and its count. A number encodes internal count with
+    // observed nlink <= 1; promote it if any later observation has more links.
+    // This keeps the same accounting without retaining private file paths.
+    if (typeof audited === 'number') {
+      hardlinks.set(key, entry.nlink > 1
+        ? { path: absolutePath, nlink: entry.nlink, internal: audited + 1 }
+        : audited + 1);
+    } else if (audited) {
       audited.internal += 1;
       audited.nlink = Math.max(audited.nlink, entry.nlink);
     } else {
-      hardlinks.set(key, { path: absolutePath, nlink: entry.nlink, internal: 1 });
+      hardlinks.set(key, entry.nlink > 1 ? { path: absolutePath, nlink: entry.nlink, internal: 1 } : 1);
     }
-    return;
+    return [];
   }
-  if (!entry.isDirectory()) return;
+  if (!entry.isDirectory()) return [];
   const children = await readdir(absolutePath);
-  for (const child of children) {
-    await auditInstalledEntry(workspacePath, path.join(absolutePath, child), hardlinks);
-  }
+  return children.map((child) => path.join(absolutePath, child));
 }
 
 export async function auditPrivateDependencyView(workspacePath: string): Promise<void> {
@@ -699,10 +675,34 @@ export async function auditPrivateDependencyView(workspacePath: string): Promise
   if (!root.isDirectory() || root.isSymbolicLink() || (root.mode & 0o200) === 0) {
     throw new Error('Installed dependency view is not a private writable directory.');
   }
-  const hardlinks = new Map<string, InstalledHardlinkAudit>();
-  await auditInstalledEntry(workspacePath, nodeModules, hardlinks);
+  const hardlinks = new Map<string, InstalledHardlinkAudit | number>();
+  const pending = [nodeModules];
+  const waiting: Array<() => void> = [];
+  let active = 0;
+  let failed = false;
+  let failure: unknown;
+  // Fixed workers avoid batch barriers without unbounded filesystem pressure.
+  const worker = async () => {
+    while (!failed) {
+      const entry = pending.pop();
+      if (!entry) {
+        if (!active) return;
+        await new Promise<void>((resolve) => { waiting.push(resolve); });
+        continue;
+      }
+      active += 1;
+      try {
+        for (const child of await auditInstalledEntry(workspacePath, entry, hardlinks)) pending.push(child);
+      }
+      catch (error) { failed = true; failure = error; }
+      finally { active -= 1; for (const resume of waiting.splice(0)) resume(); }
+    }
+  };
+  // Every in-flight read settles before failure can retire the private runtime.
+  await Promise.all(Array.from({ length: 32 }, worker));
+  if (failed) throw failure;
   for (const audited of hardlinks.values()) {
-    if (audited.nlink > 1 && audited.internal < audited.nlink) {
+    if (typeof audited !== 'number' && audited.nlink > 1 && audited.internal < audited.nlink) {
       throw new Error(
         `Installed dependency uses a shared hardlink: ${path.relative(workspacePath, audited.path)} (nlink=${audited.nlink}, internal=${audited.internal})`,
       );

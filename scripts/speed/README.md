@@ -201,3 +201,28 @@ resolver; DevTools frame injection added renderer work to the earlier probe.
 The composer probe acknowledges the first frame after its changed value was
 painted, without an additional wait frame. Compare revisions using the same
 probe version, and retain the original probe results separately.
+
+## Account-free worker dispatch
+
+Run the existing scheduler launch-budget fixture three times with its real owned
+runtime, persisted lane events and stdout observation. The fixture installer and
+runtime executables never contact a provider. The same `persistedWorkerStages`
+observer used by `worker-run.mjs` records admission, workspace preparation,
+dependency preparation and the persisted run-start boundary. Fixture stdout is
+verified before recording the result; the fixture's adjacent timestamp is an
+upper bound on its first output. `spawnToOutputMs` uses the persisted run-start
+timestamp, not a kernel spawn timestamp.
+
+```sh
+node scripts/speed/dispatch-fixture.mjs --output=work/worker-launch
+```
+
+To include a private copy of this checkout's installed dependency payload in
+each measured dispatch, add `--payload=node_modules`. The fixture copies those
+files without preserving external hardlinks and audits the resulting tree.
+These runs cover the Linux native-install fallback, with fixture package-manager
+execution; they do not establish physical block sharing, reference macOS timing,
+real package-manager installation time or provider first-token latency. Private
+logs and numeric receipts stay in the selected evidence directory. Any failed
+regression or incomplete sample makes the harness exit nonzero. Compare the same
+payload and run the before and after arms without competing builds or tests.

@@ -267,6 +267,54 @@ async function main() {
     }
     return;
   }
+  if (operation === 'create-install-runtime') {
+    // prepareParent captured every ancestor. The UUID leaf must be new; never
+    // adopt an existing directory or populate through an unchecked namespace.
+    const expectedPath = path.join(fs.realpathSync('.'), prepared.target);
+    fs.mkdirSync(prepared.target, { mode: 0o700 });
+    const before = fs.lstatSync(prepared.target);
+    await waitForStep('install-runtime-created');
+    process.chdir(prepared.target);
+    const captured = fs.lstatSync('.');
+    const canonicalPath = fs.realpathSync('.');
+    if (!captured.isDirectory() || captured.isSymbolicLink()
+      || captured.dev !== before.dev || captured.ino !== before.ino
+      || canonicalPath !== expectedPath) {
+      throw new Error('Pinned install runtime changed during capture.');
+    }
+    // The captured cwd keeps all child creation in this private inode even if
+    // the workspace namespace is renamed while the operation is in flight.
+    for (const name of ['home', 'config', 'xdg-cache', 'tmp', 'corepack']) {
+      fs.mkdirSync(name, { mode: 0o700 });
+    }
+    const config = fs.lstatSync('config');
+    if (!config.isDirectory() || config.isSymbolicLink()) throw new Error('Pinned install config is unsafe.');
+    await waitForStep('install-runtime-config');
+    process.chdir('config');
+    const configCwd = fs.lstatSync('.');
+    if (configCwd.dev !== config.dev || configCwd.ino !== config.ino
+      || fs.realpathSync('.') !== path.join(canonicalPath, 'config')) {
+      throw new Error('Pinned install config changed during capture.');
+    }
+    for (const name of ['user.rc', 'global.rc']) {
+      const fd = fs.openSync(name, fs.constants.O_WRONLY | fs.constants.O_CREAT
+        | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+      try {
+        const opened = fs.fstatSync(fd);
+        await waitForStep('install-runtime-file-opened');
+        fs.fsyncSync(fd);
+        const after = fs.fstatSync(fd);
+        const named = fs.lstatSync(name);
+        if (!opened.isFile() || opened.nlink !== 1 || after.nlink !== 1 || after.size !== 0
+          || !named.isFile() || named.isSymbolicLink() || named.nlink !== 1
+          || named.dev !== opened.dev || named.ino !== opened.ino) {
+          throw new Error('Pinned install config file changed during creation.');
+        }
+      } finally { fs.closeSync(fd); }
+    }
+    process.stdout.write(JSON.stringify({ canonicalPath, device: captured.dev, inode: captured.ino }));
+    return;
+  }
   if (operation === 'ensure-directory') {
     let before;
     try {
@@ -420,7 +468,7 @@ function safeRelativePath(value: string): string {
 async function runPinnedLeaf(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
-  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree' | 'ensure-directory' | 'ensure-file',
+  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree' | 'ensure-directory' | 'ensure-file' | 'create-install-runtime',
   relativePath: string,
   sourceOrTarget?: string,
   content?: string,
@@ -643,14 +691,15 @@ export async function createPinnedWorkspaceBinding(
   return receipt.code === 46 ? 'unsupported' : receipt.code === 45 ? 'exists' : 'created';
 }
 
-export async function ensurePinnedWorkspaceDirectory(
+async function pinnedDirectoryOperation(
+  operation: 'ensure-directory' | 'create-install-runtime',
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
   afterPinnedStep?: (segment: string) => Promise<void>,
 ): Promise<WorktreeMaterializationIdentity> {
   const receipt = await runPinnedLeaf(
-    workspacePath, identity, 'ensure-directory', relativePath, undefined, undefined, afterPinnedStep,
+    workspacePath, identity, operation, relativePath, undefined, undefined, afterPinnedStep,
   );
   const parsed = JSON.parse(receipt.stdout) as Partial<WorktreeMaterializationIdentity>;
   if (!Number.isSafeInteger(parsed.device)
@@ -661,6 +710,25 @@ export async function ensurePinnedWorkspaceDirectory(
   }
   const result = parsed as WorktreeMaterializationIdentity;
   return { ...result, volumeId: await resolveStorageVolumeId(result.canonicalPath) };
+}
+
+export function ensurePinnedWorkspaceDirectory(
+  workspacePath: string,
+  identity: WorktreeMaterializationIdentity,
+  relativePath: string,
+  afterPinnedStep?: (segment: string) => Promise<void>,
+): Promise<WorktreeMaterializationIdentity> {
+  return pinnedDirectoryOperation('ensure-directory', workspacePath, identity, relativePath, afterPinnedStep);
+}
+
+/** Create the fixed private installer scaffold in one captured-cwd child. */
+export function createPinnedInstallRuntime(
+  workspacePath: string,
+  identity: WorktreeMaterializationIdentity,
+  relativePath: string,
+  afterPinnedStep?: (segment: string) => Promise<void>,
+): Promise<WorktreeMaterializationIdentity> {
+  return pinnedDirectoryOperation('create-install-runtime', workspacePath, identity, relativePath, afterPinnedStep);
 }
 
 /** The native publication receipt is the only authority for discarding a clone. */

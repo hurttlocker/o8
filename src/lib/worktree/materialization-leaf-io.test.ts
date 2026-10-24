@@ -2,6 +2,9 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  lstatSync,
+  linkSync,
+  rmSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -16,6 +19,7 @@ import { expect, it } from 'vitest';
 import { captureWorktreeMaterializationIdentity } from './materialization-identity';
 import {
   createPinnedWorkspaceBinding,
+  createPinnedInstallRuntime,
   ensurePinnedWorkspaceDirectory,
   ensurePinnedWorkspaceFile,
   inspectPinnedWorkspaceEntry,
@@ -229,4 +233,74 @@ it('never mutates a replaced preexisting Git exclude receipt', async () => {
 
   expect(readFileSync(exclude, 'utf8')).toBe('external-sentinel\n');
   expect(readFileSync(admitted, 'utf8')).toBe('.claude/\n');
+});
+
+it('refuses a swapped installer config ancestor before creating its files', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-outside-'));
+  try {
+    const identity = await captureWorktreeMaterializationIdentity(workspace);
+    await expect(createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt', async (step) => {
+      if (step !== 'install-runtime-config') return;
+      const config = path.join(workspace, '.o8-install-runtime/attempt/config');
+      renameSync(config, `${config}-captured`);
+      symlinkSync(outside, config, 'dir');
+    })).rejects.toThrow(/changed|unsafe/);
+    expect(readdirSync(outside)).toEqual([]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+it('creates the private installer scaffold once and refuses an occupied root', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-scaffold-'));
+  try {
+    const identity = await captureWorktreeMaterializationIdentity(workspace);
+    const created = await createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt');
+    const runtime = path.join(workspace, '.o8-install-runtime/attempt');
+    expect(created.inode).toBe(lstatSync(runtime).ino);
+    for (const name of ['', 'home', 'config', 'xdg-cache', 'tmp', 'corepack']) {
+      expect(lstatSync(path.join(runtime, name)).mode & 0o777).toBe(0o700);
+    }
+    for (const name of ['config/user.rc', 'config/global.rc']) {
+      expect(readFileSync(path.join(runtime, name), 'utf8')).toBe('');
+      expect(lstatSync(path.join(runtime, name)).nlink).toBe(1);
+      expect(lstatSync(path.join(runtime, name)).mode & 0o777).toBe(0o600);
+    }
+    await expect(createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt')).rejects.toThrow(/EEXIST/);
+    expect(lstatSync(runtime).ino).toBe(created.inode);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
+
+it('refuses a replaced installer root before populating any child', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-root-'));
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-root-outside-'));
+  try {
+    const identity = await captureWorktreeMaterializationIdentity(workspace);
+    await expect(createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt', async (step) => {
+      if (step !== 'install-runtime-created') return;
+      const runtime = path.join(workspace, '.o8-install-runtime/attempt');
+      renameSync(runtime, `${runtime}-captured`);
+      symlinkSync(outside, runtime, 'dir');
+    })).rejects.toThrow(/changed/);
+    expect(readdirSync(outside)).toEqual([]);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+it('refuses an installer config file that gains an external hardlink', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-runtime-file-'));
+  try {
+    const identity = await captureWorktreeMaterializationIdentity(workspace);
+    let linked = false;
+    await expect(createPinnedInstallRuntime(workspace, identity, '.o8-install-runtime/attempt', async (step) => {
+      if (step !== 'install-runtime-file-opened' || linked) return;
+      linked = true;
+      linkSync(path.join(workspace, '.o8-install-runtime/attempt/config/user.rc'), path.join(workspace, 'outside.rc'));
+    })).rejects.toThrow(/changed/);
+    expect(readFileSync(path.join(workspace, 'outside.rc'), 'utf8')).toBe('');
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
 });
