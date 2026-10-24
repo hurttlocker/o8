@@ -52,6 +52,28 @@ describe('failed-check batch evidence from the rendered PR checks section', () =
       .find((button) => button.textContent?.trim() === label);
   }
 
+  it.each([
+    ['SUCCESS', 'COMPLETED', 'passed', '\u2713'],
+    ['', 'in_progress', 'pending', '\u25CB'],
+    ['', 'queued', 'pending', '\u25CB'],
+    ['FAILURE', 'COMPLETED', 'failed', '\u2717'],
+    ['timed_out', 'completed', 'failed', '\u2717'],
+    ['ACTION_REQUIRED', 'COMPLETED', 'failed', '\u2717'],
+    ['startup_failure', 'completed', 'failed', '\u2717'],
+    ['NEUTRAL', 'COMPLETED', 'neutral', '\u2014'],
+    ['neutral', 'completed', 'neutral', '\u2014'],
+    ['SKIPPED', 'COMPLETED', 'skipped', '\u2014'],
+    ['cancelled', 'completed', 'skipped', '\u2014'],
+    ['STALE', 'COMPLETED', 'neutral', '\u2014'],
+  ])('shows %s/%s as %s rather than inventing a failure', async (conclusion, status, outcome, glyph) => {
+    await render([{ name: 'Fixture status', status, conclusion }]);
+    expect(container.querySelector('[data-pr-section="checks"]')?.firstElementChild?.textContent).toBe(glyph);
+    const indicator = container.querySelector(`[role="img"][aria-label="Check ${outcome}"]`);
+    expect(indicator).not.toBeNull();
+    expect(indicator?.textContent).toBe(glyph);
+    if (outcome !== 'failed') expect(container.textContent).not.toContain('\u2717');
+  });
+
   it.each(['NEUTRAL', 'neutral', 'SKIPPED', 'CANCELLED', 'SUCCESS', '', 'STALE'])(
     'does not offer failed-check batch evidence for a non-failure (%s)', async (conclusion) => {
       await render([{ name: 'Non-failing check', status: conclusion ? 'COMPLETED' : 'IN_PROGRESS', conclusion }]);

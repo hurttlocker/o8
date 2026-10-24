@@ -77,8 +77,11 @@ function PRChecksSectionBase({
         ) : null}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {ciChecks.map((check, i) => {
-            const passed = check.conclusion === 'SUCCESS' || check.conclusion === 'success';
-            const pending = check.status === 'IN_PROGRESS' || check.status === 'QUEUED' || check.status === 'PENDING';
+            const bucket = checkBucket(check);
+            const passed = bucket === 'passed';
+            const pending = bucket === 'running';
+            const failed = bucket === 'failing';
+            const statusLabel = passed ? 'passed' : pending ? 'pending' : failed ? 'failed' : bucket;
             const rowBackground = activeItemIndex === i ? 'rgba(37,99,235,0.08)' : 'transparent';
             let duration = '';
             if (check.startedAt && check.completedAt) {
@@ -109,18 +112,18 @@ function PRChecksSectionBase({
               }}
               >
                 {/* Status icon */}
-                <span style={{
+                <span role="img" aria-label={`Check ${statusLabel}`} style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   width: 20, height: 20,
                   borderRadius: '50%',
-                  background: passed ? 'rgba(34,197,94,0.08)' : pending ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)',
-                  color: passed ? '#22c55e' : pending ? '#f59e0b' : '#ef4444',
+                  background: passed ? 'rgba(34,197,94,0.08)' : pending ? 'rgba(245,158,11,0.08)' : failed ? 'rgba(239,68,68,0.08)' : 'var(--t-hover)',
+                  color: passed ? '#22c55e' : pending ? '#f59e0b' : failed ? '#ef4444' : 'var(--t-text-muted)',
                   fontSize: 12, fontWeight: 700,
                   flexShrink: 0,
                   }}>
-                    {passed ? '\u2713' : pending ? '\u25CB' : '\u2717'}
+                    {passed ? '\u2713' : pending ? '\u25CB' : failed ? '\u2717' : '\u2014'}
                   </span>
                 {/* Check name */}
                 <span style={{
