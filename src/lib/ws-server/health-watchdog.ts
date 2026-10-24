@@ -10,8 +10,9 @@
  * `[ws-health]` and keeps rolling counters queryable in-process (exposed on the
  * existing `/health` HTTP endpoint).
  *
- * Local CPU sampling rotates every 15 seconds; only bounded repository call-site
- * summaries are retained when lag is observed. Raw profiles are discarded.
+ * Opt-in CPU sampling (O8_WS_CPU_EVIDENCE=1) rotates every 15 seconds; only
+ * bounded repository call-site summaries are retained when lag is observed.
+ * Raw profiles are discarded. Lag and wedge detection always remain active.
  */
 
 import { performance } from 'node:perf_hooks';
@@ -60,7 +61,7 @@ export interface WsWatchdogOptions {
   cancelScheduler?: (handle: unknown) => void;
   /** Log sink. Default console.log. */
   log?: (msg: string) => void;
-  /** Disable sampling for deterministic clock drivers; production samples locally. */
+  /** Override the sampler; otherwise profiling requires O8_WS_CPU_EVIDENCE=1. */
   cpuSampler?: Pick<WsCpuSampler, 'start' | 'stop' | 'capture' | 'getEvidence'> | false;
 }
 
@@ -90,7 +91,7 @@ export class WsWatchdog {
     this.scheduler = opts.scheduler ?? ((cb, ms) => setInterval(cb, ms));
     this.cancelScheduler = opts.cancelScheduler ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
     this.log = opts.log ?? ((m) => console.log(m));
-    this.cpuSampler = opts.cpuSampler ?? new WsCpuSampler();
+    this.cpuSampler = opts.cpuSampler ?? (process.env.O8_WS_CPU_EVIDENCE === '1' ? new WsCpuSampler() : false);
 
     this.stats = {
       startedAt: this.wallClock(),

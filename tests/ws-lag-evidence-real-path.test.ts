@@ -22,19 +22,36 @@ async function port() {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return value;
 }
-async function health() {
-  const response = await fetch(`http://127.0.0.1:${wsPort}/health`, { signal: AbortSignal.timeout(3000) });
+async function health(serverPort = wsPort) {
+  const response = await fetch(`http://127.0.0.1:${serverPort}/health`, { signal: AbortSignal.timeout(3000) });
   expect(response.status).toBe(200);
   return await response.json();
 }
-async function waitFor(check: () => Promise<boolean>, label: string) {
+async function waitFor(check: () => Promise<boolean>, label: string, serverChild = child) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     try { if (await check()) return; } catch { /* Listener may still be starting. */ }
-    if (child?.exitCode !== null && child?.exitCode !== undefined) throw new Error(`Fixture exited before ${label}`);
+    if (serverChild?.exitCode !== null && serverChild?.exitCode !== undefined) throw new Error(`Fixture exited before ${label}`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Timed out waiting for ${label}`);
+}
+async function stopServer(serverChild: ChildProcess) {
+  if (serverChild.exitCode !== null || serverChild.signalCode !== null) return;
+  const exited = once(serverChild, 'exit');
+  serverChild.kill('SIGTERM');
+  const stopped = await Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 5000))]);
+  if (!stopped) { serverChild.kill('SIGKILL'); await exited; }
+}
+function startServer(serverPort: number, apiPort: number, serverData: string, cpuEvidence?: string) {
+  return execFile(process.execPath, ['--require=./tests/helpers/ws-lag-preload.cjs',
+    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts'], {
+    cwd: process.cwd(), env: { PATH: process.env.PATH, NODE_ENV: 'test', HOME: serverData, USERPROFILE: serverData,
+      O8_DATA_DIR: serverData, CORTEX_IDE_DATA_DIR: serverData, CORTEX_IDE_DB_PATH: join(serverData, 'db.sqlite'),
+      CORTEX_IDE_REVIEW_REPO_ROOT: root, O8_API_PORT: String(apiPort), O8_WS_PORT: String(serverPort),
+      NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`, O8_LAG_FIXTURE_DIR: serverData,
+      O8_WS_CPU_EVIDENCE: cpuEvidence, O8_SILENT_EXIT_DETECTOR_ENABLED: '0' },
+  });
 }
 beforeAll(async () => {
   mkdirSync(data);
@@ -46,12 +63,7 @@ beforeAll(async () => {
   });
   api.listen(apiPort, '127.0.0.1');
   await once(api, 'listening');
-  child = execFile(process.execPath, ['--require=./tests/helpers/ws-lag-preload.cjs',
-    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts'], {
-    cwd: process.cwd(), env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
-      CORTEX_IDE_REVIEW_REPO_ROOT: root, O8_API_PORT: String(apiPort), O8_WS_PORT: String(wsPort),
-      NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`, O8_LAG_FIXTURE_DIR: root },
-  });
+  child = startServer(wsPort, apiPort, data, '1');
   child.stdout?.on('data', (chunk) => { output = (output + String(chunk)).slice(-16000); });
   child.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-16000); });
   await waitFor(async () => Boolean((await health()).eventLoop), 'server health');
@@ -78,12 +90,7 @@ it('captures call sites from the executing implementation bundle outside its wor
   expect(stdout).not.toContain(root);
 });
 afterAll(async () => {
-  if (child && child.exitCode === null && child.signalCode === null) {
-    const exited = once(child, 'exit');
-    child.kill('SIGTERM');
-    const stopped = await Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 5000))]);
-    if (!stopped) { child.kill('SIGKILL'); await exited; }
-  }
+  if (child) await stopServer(child);
   if (api?.listening) {
     api.closeAllConnections();
     await new Promise<void>((resolve) => api.close(() => resolve()));
@@ -92,7 +99,7 @@ afterAll(async () => {
 });
 it('retains sampled blocking call sites through the real server health endpoint', async () => {
   expect((await health()).eventLoop.cpuEvidence?.status).toBe('sampling');
-  writeFileSync(join(root, 'block-once'), 'fixture');
+  writeFileSync(join(data, 'block-once'), 'fixture');
   await waitFor(async () => (await health()).eventLoop.cpuEvidence?.status === 'sampled', 'lag CPU evidence');
   const stats = (await health()).eventLoop;
   expect(stats.maxLagMs).toBeGreaterThan(250);
@@ -105,4 +112,19 @@ it('retains sampled blocking call sites through the real server health endpoint'
   await waitFor(async () => (await health()).eventLoop.lastSampleLagMs < 250, 'loop recovery');
   expect((await health()).eventLoop.cpuEvidence).toMatchObject({ status: 'sampled', capturedAt: stats.cpuEvidence.capturedAt });
   expect(output).toContain('cpuEvidence=');
+}, 40000);
+it('keeps lag detection active without profiling when the evidence opt-in is absent', async () => {
+  const serverData = join(root, 'default-data');
+  mkdirSync(serverData);
+  const serverPort = await port();
+  const apiPort = (api.address() as { port: number }).port;
+  const serverChild = startServer(serverPort, apiPort, serverData);
+  try {
+    await waitFor(async () => (await health(serverPort)).eventLoop.samples > 0, 'default watchdog', serverChild);
+    expect((await health(serverPort)).eventLoop.cpuEvidence).toEqual({ status: 'unavailable', frames: [] });
+    writeFileSync(join(serverData, 'block-once'), 'fixture');
+    await waitFor(async () => (await health(serverPort)).eventLoop.maxLagMs > 250, 'default lag counter', serverChild);
+    expect((await health(serverPort)).eventLoop.cpuEvidence).toEqual({ status: 'unavailable', frames: [] });
+    await waitFor(async () => (await health(serverPort)).eventLoop.lastSampleLagMs < 250, 'default loop recovery', serverChild);
+  } finally { await stopServer(serverChild); }
 }, 40000);

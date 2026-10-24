@@ -18,7 +18,19 @@ function profile(): Profiler.Profile {
     node(22, 'https://example.invalid/private'));
   return { nodes, samples: [2, ...nodes.slice(2).map((n) => n.id)], timeDeltas: [500000, ...nodes.slice(2).map(() => 1)], startTime: 0, endTime: 500100 };
 }
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+it.each([undefined, '0', 'false', 'true', '1'])('starts the default profiler only for O8_WS_CPU_EVIDENCE=1 (received %s)', (value) => {
+  vi.useFakeTimers();
+  vi.stubEnv('O8_WS_CPU_EVIDENCE', value);
+  const start = vi.spyOn(WsCpuSampler.prototype, 'start').mockImplementation(() => {});
+  vi.spyOn(WsCpuSampler.prototype, 'stop').mockResolvedValue();
+  const watchdog = new WsWatchdog();
+  watchdog.start();
+  expect(start).toHaveBeenCalledTimes(value === '1' ? 1 : 0);
+  expect(watchdog.getStats().cpuEvidence).toEqual({ status: value === '1' ? 'sampling' : 'unavailable', frames: [] });
+  watchdog.stop();
+  expect(vi.getTimerCount()).toBe(0);
+});
 it('bounds output and charges native work once to its nearest repository caller', () => {
   const evidence = summarizeWsCpuProfile(profile(), root, 100, 200);
   expect(evidence).toMatchObject({ status: 'sampled', windowStartedAt: 100, capturedAt: 200 });
