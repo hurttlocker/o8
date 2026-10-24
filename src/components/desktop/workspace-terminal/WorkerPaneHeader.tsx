@@ -18,7 +18,12 @@ export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, s
   status: string; statusLabel: string; compact: boolean; actions?: ReactNode;
 }) {
   return <div data-worker-pane-header style={{
-    height: 28, minHeight: 28, display: 'flex', alignItems: 'center', gap: 6,
+    height: 28, minHeight: 28, display: 'grid', alignItems: 'center', gap: 6,
+    // Prefer the natural identity width, then give metadata the remaining space.
+    // A small metadata floor keeps its full-label tooltip reachable in narrow panes.
+    gridTemplateColumns: issueNumber
+      ? 'auto auto minmax(0, max-content) minmax(24px, 1fr) auto'
+      : 'auto minmax(0, max-content) minmax(24px, 1fr) auto',
     paddingLeft: 8, paddingRight: 4, flexShrink: 0,
     borderBottom: '1px solid var(--t-divider-subtle, var(--t-border))',
     fontFamily: 'var(--font-sans-system)', fontWeight: 300, letterSpacing: '-0.1px',
@@ -27,9 +32,9 @@ export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, s
       <AgentStatusDot state={agentStatusToDotState(status)} label={statusLabel} />
     </span>
     {issueNumber ? <span style={{ color: 'var(--t-text-faint)', fontSize: 12, flexShrink: 0 }}>#{issueNumber}</span> : null}
-    <span data-worker-title title={branch || title} style={{ ...ellipsis, flex: 1, color: 'var(--t-text)', fontSize: 13 }}>{title}</span>
+    <span data-worker-title title={branch || title} style={{ ...ellipsis, color: 'var(--t-text)', fontSize: 13 }}>{title}</span>
     <span title={[runtime, model].filter(Boolean).join(' · ')} style={{
-      ...ellipsis, display: 'flex', gap: 4, maxWidth: compact ? '30%' : '40%', flexShrink: 1,
+      ...ellipsis, display: 'flex', gap: 4, justifyContent: 'flex-end',
       color: 'var(--t-text-faint)', fontSize: compact ? 10 : 12,
     }}>
       <span style={{ ...ellipsis, flexShrink: 0 }}>{runtime}</span>
