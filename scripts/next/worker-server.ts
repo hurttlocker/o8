@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,8 @@ async function freePort() {
 }
 
 export async function startWorkerServer() {
-  const root = mkdtempSync(join(tmpdir(), 'o8-next-worker-'));
+  // History and durable queue keys must use the same workspace identity.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-worker-')));
   const data = join(root, 'data'); const repo = join(root, 'repo'); const profile = join(root, 'profile');
   mkdirSync(join(data, 'chat-history'), { recursive: true }); mkdirSync(repo); mkdirSync(profile);
   // No tool calls in this model fixture; an empty owned workspace suffices.
