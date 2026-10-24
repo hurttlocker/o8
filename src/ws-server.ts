@@ -995,6 +995,8 @@ interface TerminalAttachment {
   batchTimer: ReturnType<typeof setTimeout> | null;
   lastOutputAt: number; // latest PTY output
   lastInputAt: number;  // latest accepted input, used only by the resync idle barrier
+  /** One small output callback may bypass batching after accepted input. */
+  interactiveFlushUntil?: number;
   createdAt: number;    // timestamp of terminal creation
   orphanTimer: ReturnType<typeof setTimeout> | null;
   scrollbackChunks: string[];
@@ -1031,6 +1033,8 @@ const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
   ? new TerminalWorkloadStats()
   : null;
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
+const TERMINAL_INTERACTIVE_WINDOW_MS = 32;
+const TERMINAL_INTERACTIVE_MAX_BYTES = 1024;
 const TERMINAL_HIDDEN_BATCH_MS = 250;
 const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
@@ -1900,6 +1904,18 @@ function registerTerminalAttachment(attachment: TerminalAttachment, recordClient
     terminalWorkloadStats?.recordPty(sessionName, data, att.lastOutputAt);
     appendScrollback(att, data);
     att.batchBuffer += data;
+
+    // Spend the input credit on the first output callback, even if it is too
+    // large or too late. A flood must never turn into unbounded immediate sends.
+    const interactiveUntil = att.interactiveFlushUntil;
+    att.interactiveFlushUntil = undefined;
+    if (interactiveUntil !== undefined && performance.now() <= interactiveUntil
+      && !att.batchTimer && Buffer.byteLength(att.batchBuffer, 'utf8') <= TERMINAL_INTERACTIVE_MAX_BYTES) {
+      const buffered = att.batchBuffer;
+      att.batchBuffer = '';
+      deliverTerminalBatch(att, buffered);
+      return;
+    }
 
     if (!att.batchTimer) {
       att.batchTimer = setTimeout(() => {
@@ -7287,13 +7303,17 @@ function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) 
   if (attachment.controlClientId && attachment.controlClientId !== client.id) return;
 
   try {
+    // Arm before write: an inline PTY can emit its echo synchronously. Never
+    // expedite an existing batch, and keep rejected/read-only input above here.
+    attachment.interactiveFlushUntil = attachment.batchBuffer
+      ? undefined : performance.now() + TERMINAL_INTERACTIVE_WINDOW_MS;
     attachment.ptyProcess.write(data);
     // node-pty may not emit the command's first output callback before the next
     // WebSocket message is handled. Treat accepted input as stream activity so
     // an immediate reveal cannot pass the resync idle barrier on an old output
     // timestamp and snapshot bytes that are still in the PTY kernel buffer.
     attachment.lastInputAt = Date.now();
-  } catch { /* PTY may have exited */ }
+  } catch { attachment.interactiveFlushUntil = undefined; /* PTY may have exited */ }
 }
 
 function handleTerminalResize(client: ClientState, msg: Record<string, unknown>) {

@@ -5812,6 +5812,15 @@
       ]
     },
     {
+      "path": "tests/terminal-echo-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-output-wait-real-path.test.ts",
       "reasons": [
         "child-process",
