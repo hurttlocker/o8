@@ -405,7 +405,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // it here and a rerun/re-read would silently sever session-rule inheritance.
     orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim() ? packet.orchestratorThreadId.trim() : undefined,
     orchestratorTurnId: typeof packet.orchestratorTurnId === 'string' && packet.orchestratorTurnId.trim() ? packet.orchestratorTurnId.trim() : undefined,
-    reviewSource: normalizeReviewerPrSource(packet.reviewSource), dispatcher: normalizePacketDispatcher(packet.dispatcher), launchContext: normalizePacketLaunchContext(packet.launchContext),
+    reviewSource: normalizeReviewerPrSource(packet.reviewSource), repairSource: normalizeReviewerPrSource(packet.repairSource), dispatcher: normalizePacketDispatcher(packet.dispatcher), launchContext: normalizePacketLaunchContext(packet.launchContext),
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)

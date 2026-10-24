@@ -1,5 +1,7 @@
+import { findPrRepairOwner, PrRepairOwnerError, repairPacketStillOwned, samePrRepairRepo } from '@/lib/orchestrator/pr-repair-owner';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { withWsHealthHandler } from '@/lib/ws-server/handler-activity';
-import { resolveReviewerPrSource, reviewerCreationBase, ReviewerPrSourceError, ReviewerPrInputError, validateReviewPullRequest } from '@/lib/orchestrator/reviewer-pr-source';
+import { resolveReviewerPrSource, reviewerCreationBase, ReviewerPrSourceError, ReviewerPrInputError, validateReviewPullRequest, validateRepairPullRequest, StaleRepairHeadError } from '@/lib/orchestrator/reviewer-pr-source';
 import { NextRequest, NextResponse } from 'next/server';
 import { dispatch } from '@/lib/lane/commands';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -119,6 +121,17 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       repoPath, packetId, pullRequest: reviewPullRequest,
       existing: readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.reviewSource,
     });
+    const repairPullRequest = validateRepairPullRequest(body);
+    if (repairPullRequest !== undefined) {
+      const owner = findPrRepairOwner(repoPath, repairPullRequest, packetId);
+      if (owner) throw new PrRepairOwnerError(owner.id);
+    }
+    const repairSource = repairPullRequest === undefined ? undefined : await resolveReviewerPrSource({
+      repoPath, packetId, pullRequest: repairPullRequest,
+      existing: readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.repairSource,
+    });
+    if (repairSource && repairSource.headSha !== body.expectedRepairHeadSha) throw new StaleRepairHeadError();
+    const prSource = reviewSource ?? repairSource;
     const huddle = resolveWorkerHuddle({
       mode: defaults.workerStartMode,
       explicitHuddle: typeof body.huddle === 'boolean' ? body.huddle : undefined,
@@ -246,11 +259,12 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       huddle,
       prompt: launchPrompt,
       ...(reviewSource ? { reviewSource } : {}),
+      ...(repairSource ? { repairSource } : {}),
       launchContext,
     };
 
-    const completionContract = buildPacketCompletionInstructions(readOnly, baseBranch);
-    const governedLaunchPrompt = [launchPrompt, ...(reviewSource ? [`Review PR #${reviewSource.pullRequest} at exact HEAD ${reviewSource.headSha}. Its source is already checked out; do not fetch or switch branches.`] : []), ...completionContract].join('\n\n');
+    const completionContract = buildPacketCompletionInstructions(readOnly, repairSource?.headSha ?? baseBranch);
+    const governedLaunchPrompt = [launchPrompt, ...(reviewSource ? [`Review PR #${reviewSource.pullRequest} at exact HEAD ${reviewSource.headSha}. Its source is already checked out; do not fetch or switch branches.`] : []), ...(repairSource ? [`Repair PR #${repairSource.pullRequest} at exact starting HEAD ${repairSource.headSha}. Its source is already checked out; do not fetch or switch branches.`] : []), ...completionContract].join('\n\n');
 
     // Append the packet by MUTATING the state object passed into the
     // withLockedState callback. Critical: do NOT call writeOrchestratorControlPlaneState
@@ -260,6 +274,8 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     // reconcile re-reads the mutated fields from the same object.
     const { withLockedState } = await import('@/lib/orchestrator/control-plane');
     await withLockedState((current) => {
+      if (repairSource && current.packets.some(candidate => candidate.id !== packetId && repairPacketStillOwned(candidate, listLanes())
+        && candidate.workspaceTargetPath && samePrRepairRepo(candidate.workspaceTargetPath, repoPath) && candidate.repairSource?.pullRequest === repairSource.pullRequest)) throw new PrRepairOwnerError();
       if (!current.packets.some((candidate) => candidate.id === packet.id)) current.packets.push(packet);
       if (!current.missionId) current.missionId = `delegate-${Date.now().toString(36)}`;
       if (!current.prompt) current.prompt = `Delegated work: ${taskName}`;
@@ -282,9 +298,17 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       label: taskName,
       packetId,
       actor: 'orchestrator',
-    }, ...(reviewSource ? [{ packetCreationBase: reviewerCreationBase({ repoPath, packetId, branch, baseBranch, source: reviewSource }) }] as const : []));
+    }, ...(prSource ? [{ packetCreationBase: reviewerCreationBase({ repoPath, packetId, branch, baseBranch, source: prSource }) }] as const : []));
 
     if (!laneResult.ok || !laneResult.laneId) {
+      // Preserve the failed admission receipt, but do not reserve a PR forever
+      // when the registry proves no lane (and therefore no worker) was created.
+      if (repairSource && !listLanes().some(lane => lane.packetId === packetId)) {
+        await withLockedState(current => {
+          const failed = current.packets.find(candidate => candidate.id === packetId);
+          if (failed) { failed.status = 'failed'; failed.archivedAt = new Date().toISOString(); failed.lastEventLabel = 'repair_lane_admission_failed'; }
+        });
+      }
       return NextResponse.json({
         ok: false,
         packetId,
@@ -365,9 +389,12 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       baseBranch,
       workerRouting,
       reviewSource: reviewSource ?? null,
+      repairSource: repairSource ?? null,
       note: launchResult.note,
     });
   } catch (err) {
+    if (err instanceof PrRepairOwnerError) return NextResponse.json({ ok: false, code: err.code, ownerLaneId: err.ownerLaneId, error: err.message }, { status: 409 });
+    if (err instanceof StaleRepairHeadError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 409 });
     if (err instanceof ReviewerPrSourceError) return NextResponse.json({ ok: false, code: 'review_source_unavailable', error: err.message }, { status: 422 });
     if (err instanceof DelegationSelectionError || err instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
     console.error('[orchestrator-delegate]', err);
@@ -384,7 +411,8 @@ export function POST(request: NextRequest) {
 
 async function postDelegate(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
-  try { if (body) validateReviewPullRequest(body); } catch (error) {
+  if (body?.repairPullRequest !== undefined && resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ ok: false, error: 'Operator authority is required to start a PR repair.' }, { status: 403 });
+  try { if (body) { validateReviewPullRequest(body); validateRepairPullRequest(body); } } catch (error) {
     if (error instanceof DelegationSelectionError || error instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 400 });
     return NextResponse.json({ ok: false, code: 'invalid_review_pull_request', error: 'Unable to validate the PR review target.' }, { status: 400 });
   }
@@ -428,6 +456,8 @@ async function postDelegate(request: NextRequest) {
     huddle: body?.huddle ?? null,
     readOnly: body?.readOnly === true,
     reviewPullRequest: body?.reviewPullRequest ?? null,
+    repairPullRequest: body?.repairPullRequest ?? null,
+    expectedRepairHeadSha: body?.expectedRepairHeadSha ?? null,
   });
   const binding = bindIdempotencyClientMutation({
     namespace: 'orchestrator_delegate',
@@ -505,6 +535,7 @@ async function postDelegate(request: NextRequest) {
           baseBranch: lane.baseBranch,
           workerRouting: packet.workerRouting ?? null,
           reviewSource: packet.reviewSource ?? null,
+          repairSource: packet.repairSource ?? null,
           launchContext: packet.launchContext,
           note: 'Recovered the delegated worker from its durable packet and lane binding.',
         },
