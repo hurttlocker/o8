@@ -18,6 +18,8 @@
  *   current time in milliseconds, not 0, so it also stays above a cursor a
  *   client kept from before a ws-server restart (#3665). Restarting at 0 made
  *   the client drop every new event as an already-applied replay.
+ * - Both entry count and serialized UTF-8 bytes bound each retained tail.
+ *   Oversized events go out live but cannot remain in replay.
  * - A new turn (`status: busy`) starts the buffer fresh. A finished turn
  *   (`status: ready | dead`, or an `error`) drops the entries so a POST-turn
  *   (re)subscribe replays nothing and relies on persisted chat history instead
@@ -33,17 +35,20 @@ export interface OrchestratorReplayMessage {
 
 interface SessionBuffer {
   seq: number;
-  entries: { seq: number; raw: string }[];
+  entries: { seq: number; raw: Buffer }[];
+  bytes: number;
 }
 
 export class OrchestratorReplayBuffers {
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly maxBytes: number;
   private readonly buffers = new Map<string, SessionBuffer>();
 
-  constructor(maxEntries = 1500, now: () => number = Date.now) {
+  constructor(maxEntries = 1500, now: () => number = Date.now, maxBytes = 4 * 1024 * 1024) {
     this.maxEntries = maxEntries;
     this.now = now;
+    this.maxBytes = maxBytes;
   }
 
   /**
@@ -53,20 +58,25 @@ export class OrchestratorReplayBuffers {
   record(sessionName: string, msg: OrchestratorReplayMessage): string {
     let buf = this.buffers.get(sessionName);
     if (!buf) {
-      buf = { seq: Math.max(0, Math.floor(this.now())), entries: [] };
+      buf = { seq: Math.max(0, Math.floor(this.now())), entries: [], bytes: 0 };
       this.buffers.set(sessionName, buf);
     }
 
     const status = msg.event === 'status' ? msg.data?.status : undefined;
     // New turn → start the buffer fresh (seq stays monotonic).
-    if (status === 'busy') buf.entries = [];
+    if (status === 'busy') {
+      buf.entries = [];
+      buf.bytes = 0;
+    }
 
     buf.seq += 1;
     msg.seq = buf.seq;
     const raw = JSON.stringify(msg);
-    buf.entries.push({ seq: buf.seq, raw });
-    if (buf.entries.length > this.maxEntries) {
-      buf.entries.splice(0, buf.entries.length - this.maxEntries);
+    const compact = Buffer.from(raw, 'utf8');
+    buf.entries.push({ seq: buf.seq, raw: compact });
+    buf.bytes += compact.length;
+    while (buf.entries.length > 0 && (buf.entries.length > this.maxEntries || buf.bytes > this.maxBytes)) {
+      buf.bytes -= buf.entries.shift()!.raw.length;
     }
 
     // Turn finished → drop the entries. Persisted chat history is the source of
@@ -74,6 +84,7 @@ export class OrchestratorReplayBuffers {
     // double it on screen.
     if (status === 'ready' || status === 'dead' || msg.event === 'error') {
       buf.entries = [];
+      buf.bytes = 0;
     }
     return raw;
   }
@@ -86,8 +97,8 @@ export class OrchestratorReplayBuffers {
   since(sessionName: string, since: number): string[] {
     const buf = this.buffers.get(sessionName);
     if (!buf) return [];
-    if (!Number.isFinite(since) || since <= 0) return buf.entries.map((e) => e.raw);
-    return buf.entries.filter((e) => e.seq > since).map((e) => e.raw);
+    if (!Number.isFinite(since) || since <= 0) return buf.entries.map((e) => e.raw.toString('utf8'));
+    return buf.entries.filter((e) => e.seq > since).map((e) => e.raw.toString('utf8'));
   }
 
   /** Forget a session's buffer entirely (e.g. on terminal cleanup). */
@@ -97,4 +108,7 @@ export class OrchestratorReplayBuffers {
 }
 
 /** Process-wide singleton used by ws-server. */
-export const orchestratorReplay = new OrchestratorReplayBuffers();
+export const orchestratorReplay = new OrchestratorReplayBuffers(1500, Date.now, Math.max(
+  1,
+  Number.parseInt(process.env.O8_ORCHESTRATOR_REPLAY_BYTE_LIMIT ?? '', 10) || 4 * 1024 * 1024,
+));

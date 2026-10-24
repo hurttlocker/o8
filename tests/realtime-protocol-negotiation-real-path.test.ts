@@ -26,6 +26,7 @@ let serverOutput = '';
 let inboxMarker = 'initial';
 let historyVersion = 0;
 let historyUnavailable = false;
+let historyText = '';
 
 function inbox() {
   return {
@@ -153,7 +154,7 @@ beforeAll(async () => {
             entries: [{
               id: `history-${historyVersion}`,
               role: 'assistant',
-              text: `history ${historyVersion}`,
+              text: historyText || `history ${historyVersion}`,
             }],
             replace: true,
           },
@@ -194,10 +195,13 @@ beforeAll(async () => {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      O8_DATA_DIR: dataDir,
       CORTEX_IDE_DATA_DIR: dataDir,
+      CORTEX_IDE_DB_PATH: join(dataDir, 'cortex-ide.db'),
       O8_API_PORT: String(apiPort),
       O8_WS_PORT: String(wsPort),
       O8_REALTIME_LOG_LIMIT: '4',
+      O8_REALTIME_LOG_BYTE_LIMIT: '65536',
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
     },
   });
@@ -219,6 +223,37 @@ afterAll(async () => {
 });
 
 describe('versioned realtime protocol through the WebSocket entry point', () => {
+  it('resyncs after an oversized envelope while still delivering it live (#4422)', async () => {
+    const first = await connectClient();
+    first.socket.send(JSON.stringify({
+      type: 'realtime-subscribe', subscriptions: [{ stream: 'session:worker-protocol' }],
+    }));
+    await waitFor(() => realtimeEvents(first.frames).some((event) => event.event === 'history.snapshot'), 'seed history');
+    historyVersion += 1;
+    historyText = 'recorded-🧪-'.repeat(10_000);
+    try {
+      await requestRefresh('sessionHistory');
+      await waitFor(() => realtimeEvents(first.frames).some((event) => event.delivery === 'live'), 'large live history');
+      const live = realtimeBatches(first.frames).find((frame) => frame.data?.delivery === 'live');
+      const events = live?.data?.events as WireFrame[];
+      expect(JSON.stringify(events)).toContain(historyText);
+      const seq = Number(events.at(-1)?.seq);
+      const resumed = await connectClient();
+      resumed.socket.send(JSON.stringify({
+        type: 'realtime-subscribe',
+        subscriptions: [{ stream: 'session:worker-protocol', epoch: live?.data?.epoch, since: seq - 1 }],
+      }));
+      await waitFor(() => realtimeBatches(resumed.frames).length > 0, 'large-envelope reconnect');
+      const batch = realtimeBatches(resumed.frames)[0];
+      expect(batch.data?.delivery).toBe('bootstrap');
+      expect(batch.data?.gap).toMatchObject({ requestedSince: seq - 1 });
+      resumed.socket.close();
+    } finally {
+      historyText = '';
+      first.socket.close();
+    }
+  }, 30_000);
+
   it('rejects a malformed required-capability list without terminating the server', async () => {
     const client = await connectClient();
     client.socket.send(JSON.stringify({
@@ -280,6 +315,24 @@ describe('versioned realtime protocol through the WebSocket entry point', () => 
     expect(Number(liveFullSnapshot?.capturedSeq)).toBeLessThan(Number(liveFullSnapshot?.seq));
     const currentBatch = realtimeBatches(current.frames).find((frame) => frame.data?.epoch);
     expect(currentBatch?.data?.epoch).toBe(welcome?.data?.epoch);
+    // Record both negotiated audiences, then reconnect with the same epoch and
+    // cursor. Replay must preserve the exact delta/checkpoint envelopes each
+    // client saw live; storage compaction cannot change protocol semantics.
+    for (const [recordedClient, capabilities] of [
+      [current, ['mobile-inbox-delta-v1']], [oldest, []],
+    ] as const) {
+      const recordedBatches = realtimeBatches(recordedClient.frames).filter((frame) => frame.data?.delivery === 'live');
+      const recordedEvents = recordedBatches.flatMap((frame) => frame.data?.events as WireFrame[]);
+      const resumed = await connectClient();
+      resumed.socket.send(JSON.stringify({
+        type: 'realtime-subscribe', capabilities,
+        subscriptions: [{ stream: 'global', epoch: welcome?.data?.epoch, since: Number(recordedEvents[0].seq) - 1 }],
+      }));
+      await waitFor(() => realtimeBatches(resumed.frames).some((frame) => frame.data?.delivery === 'replay'), 'audience replay');
+      expect(realtimeBatches(resumed.frames).filter((frame) => frame.data?.delivery === 'replay')
+        .flatMap((frame) => frame.data?.events as WireFrame[])).toEqual(recordedEvents);
+      resumed.socket.close();
+    }
     current.socket.close();
     oldest.socket.close();
   }, 30_000);
@@ -398,6 +451,13 @@ describe('versioned realtime protocol through the WebSocket entry point', () => 
       () => realtimeEvents(replay.frames).some((event) => event.delivery === 'replay' && event.seq === retainedSeq),
       'retained replay',
     );
+    // Compare every wire field, including seq, capturedSeq, ts and payload.
+    const recorded = realtimeBatches(first.frames).find((frame) => frame.data?.delivery === 'live');
+    const replayed = realtimeBatches(replay.frames).find((frame) => frame.data?.delivery === 'replay');
+    expect(replayed?.data?.events).toEqual([
+      ...(recorded?.data?.events as WireFrame[]),
+      ...realtimeBatches(unbound.frames).flatMap((frame) => frame.data?.events as WireFrame[] ?? []),
+    ]);
 
     let latestSeq = retainedSeq;
     for (let version = 2; version <= 7; version += 1) {
