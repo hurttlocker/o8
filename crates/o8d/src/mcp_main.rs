@@ -27,7 +27,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("loopback listener required".into());
     }
     let upstream = option("--upstream").ok_or("upstream required")?;
-    let server = McpServer::new(&upstream)?;
+    let mut server = McpServer::new(&upstream)?;
+    if arguments.iter().any(|arg| arg == "--native-reads") {
+        let directory =
+            std::path::PathBuf::from(option("--data-dir").ok_or("data directory required")?);
+        if !directory.is_absolute() {
+            return Err("absolute data directory required".into());
+        }
+        let database = env::var_os("CORTEX_IDE_DB_PATH").map(std::path::PathBuf::from);
+        server = server.with_native_reads(directory, database);
+    }
     let listener = TcpListener::bind(address).await?;
     println!(
         "{}",

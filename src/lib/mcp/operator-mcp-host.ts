@@ -1,4 +1,5 @@
 import { safeErrorText } from '@/lib/mcp/api-error';
+import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
 import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -483,6 +484,7 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requ
       })) : [];
     return { jsonrpc: '2.0', id, result: {
       tools: activeTools, statusSources, profile: process.env.O8_OPERATOR_MCP_PROFILE?.trim() || 'full',
+      nativeGeneration: nativeReadGeneration,
     } };
   }
   if (method === 'tools/call') {

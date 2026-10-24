@@ -6,6 +6,7 @@ import type { RepoReadiness, RepoSetupConfig } from './types';
 import { checkRepoOriginConfigured, getRepoOriginConfiguredOverride } from './origin-readiness';
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
 import { PACKET_ENVIRONMENT_SKIP_NOTE } from './environment-policy';
+import { publishNativeRepoReadiness } from '@/lib/mcp/native-read-publication';
 
 interface RepoReadinessInput {
   localPath: string;
@@ -82,6 +83,7 @@ const inFlightRefreshes = new Map<string, Promise<RepoReadiness>>();
 export function invalidateRepoReadiness(...repoPaths: string[]) {
   for (const repoPath of repoPaths) {
     readinessCache.delete(repoPath);
+    publishNativeRepoReadiness(repoPath, undefined);
     inFlightRefreshes.delete(repoPath);
   }
 }
@@ -166,6 +168,7 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
       missingEnvFiles: [],
     };
     readinessCache.set(cacheKey, { value, ts: Date.now() });
+    publishNativeRepoReadiness(cacheKey, value.state);
     return value;
   }
 
@@ -258,6 +261,7 @@ async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<R
   };
 
   readinessCache.set(cacheKey, { value, ts: Date.now() });
+  publishNativeRepoReadiness(cacheKey, value.state);
   return value;
 }
 

@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::net::TcpListener;
 
+mod native_reads;
 mod projections;
 const READ_TOOLS: &[&str] = &[
     "o8_status",
@@ -27,6 +28,7 @@ const READ_TOOLS: &[&str] = &[
 pub struct McpServer {
     upstream: Url,
     client: Client,
+    native_reads: Option<std::sync::Arc<native_reads::NativeReads>>,
 }
 impl McpServer {
     pub fn new(upstream: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -48,7 +50,21 @@ impl McpServer {
             .redirect(Policy::none())
             .timeout(Duration::from_secs(180))
             .build()?;
-        Ok(Self { upstream, client })
+        Ok(Self {
+            upstream,
+            client,
+            native_reads: None,
+        })
+    }
+    pub fn with_native_reads(
+        mut self,
+        directory: std::path::PathBuf,
+        database: Option<std::path::PathBuf>,
+    ) -> Self {
+        self.native_reads = Some(std::sync::Arc::new(native_reads::NativeReads::new(
+            directory, database,
+        )));
+        self
     }
     async fn request(
         &self,
@@ -265,6 +281,57 @@ async fn handle(
     // correlation ids, notifications and all existing TypeScript side effects.
     if messages.is_empty() || messages.iter().any(|message| !native(message)) {
         return server.proxy(method, &headers, body).await;
+    }
+    if let Some(reader) = &server.native_reads {
+        // Read-only batches can safely retry through the original entry point.
+        // No partial native result is returned on an unsupported source or error.
+        let mut result = reader.read(&server.upstream, &headers, &messages);
+        if result.is_err() {
+            if let Some(generation) = reader.pending_generation() {
+                // Bind the live publisher to this upstream once per generation,
+                // using the caller's credential, never an ambient operator token.
+                let context =
+                    json!({"jsonrpc":"2.0","id":"o8d-native-bind","method":"o8d/read-context"});
+                let upstream = match server
+                    .request(
+                        Method::POST,
+                        "/api/mcp",
+                        &headers,
+                        Bytes::from(context.to_string()),
+                    )
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(_) => return unavailable(),
+                };
+                if !upstream.status().is_success() {
+                    return relay(upstream).await;
+                }
+                if let Ok(context) = upstream.json::<Value>().await {
+                    if context["result"]["nativeGeneration"] == generation {
+                        reader.verify_generation(generation);
+                        result = reader.read(&server.upstream, &headers, &messages);
+                    }
+                }
+            }
+        }
+        match result {
+            Ok(mut results) => {
+                return if results.is_empty() {
+                    (StatusCode::ACCEPTED, [("content-type", "application/json")]).into_response()
+                } else {
+                    response(
+                        StatusCode::OK,
+                        if batch {
+                            json!(results)
+                        } else {
+                            results.remove(0)
+                        },
+                    )
+                }
+            }
+            Err(()) => return server.proxy(method, &headers, body).await,
+        }
     }
     let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null() && !batch)
         .map(|(index, message)| json!({"index": index, "arguments":message["params"].get("arguments").cloned().unwrap_or(json!({}))})).collect();

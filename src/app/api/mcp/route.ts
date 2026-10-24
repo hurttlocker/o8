@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import {
   handleOperatorMcpMessage,
+  operatorToolsForProfile,
   type OperatorMcpRequest,
   type OperatorMcpResponse,
 } from '@/lib/mcp/operator-mcp-host';
 import { setApiBase } from '@/lib/mcp/operator-handlers/shared';
 import { getApiBase } from '@/lib/panel/api-port';
+import { publishNativeReadPolicy } from '@/lib/mcp/native-read-publication';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,6 +36,8 @@ export async function POST(request: Request): Promise<Response> {
   // in-app host resolves the live process base here, while the standalone
   // compatibility entrypoint continues to resolve it from ~/.o8/api-port.
   setApiBase(getApiBase());
+  publishNativeReadPolicy(getApiBase(), process.env.O8_OPERATOR_MCP_PROFILE?.trim() || 'full',
+    operatorToolsForProfile().map((tool) => tool.name));
 
   const responses: OperatorMcpResponse[] = [];
   for (const message of messages) {
