@@ -3262,7 +3262,9 @@
       "path": "tests/launch-provisioning-mission-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
+        "native-build",
         "real-path",
         "worktree-api"
       ]
