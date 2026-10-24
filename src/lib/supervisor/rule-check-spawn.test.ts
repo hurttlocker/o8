@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runRuleCheck } from './rule-check';
+import { runRepositoryRuleCheck } from './repository-rule-check';
 
 const directories: string[] = [];
 function fixture(files: Record<string, string>): string {
@@ -32,7 +32,7 @@ describe('child-process rule through the real git-backed entry point', () => {
     ["worker threads", "const { Worker: Launch } = require('node:worker_threads'); new Launch('tool');"],
     ["shell string", "import { execSync } from 'node:child_process'; execSync('tool --header=secret');"],
   ])('rejects uncovered launch form %s', async (_form, source) => {
-    const result = await runRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
+    const result = await runRepositoryRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'child-process-boundary')).toBe(true);
     expect(result.ok).toBe(false);
   });
@@ -51,7 +51,7 @@ describe('child-process rule through the real git-backed entry point', () => {
     "import 'node:child_process';",
     "import { type ChildProcess, spawn } from 'node:child_process';",
   ])('rejects a raw builtin boundary: %s', async source => {
-    const result = await runRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
+    const result = await runRepositoryRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'child-process-boundary')).toBe(true);
     expect(result.ok).toBe(false);
   });
@@ -75,7 +75,7 @@ describe('child-process rule through the real git-backed entry point', () => {
     "let pty; pty = require('node-pty'); pty.spawn('tool', [], { env: process.env });",
     "import { spawn } from '@/lib/providers/child-process'; const launch = spawn; launch('tool', [], { env: Object.assign({}, process.env) });",
   ])('rejects raw inherited launch environment: %s', async source => {
-    const result = await runRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
+    const result = await runRepositoryRuleCheck(fixture({ 'src/lib/example/launch.ts': source }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
   });
 
@@ -86,17 +86,17 @@ describe('child-process rule through the real git-backed entry point', () => {
     "import * as cp from 'child_process'; cp.fork('tool', [], { env: undefined });",
     "import * as pty from 'node-pty'; pty.spawn('tool', []);",
   ])('rejects implicit env at a raw launch boundary: %s', async source => {
-    const result = await runRuleCheck(fixture({ 'src/lib/providers/child-process.ts': source }), 'HEAD');
+    const result = await runRepositoryRuleCheck(fixture({ 'src/lib/providers/child-process.ts': source }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
   });
 
   it.each(['src/lib/mcp/test-connection.ts', 'src/lib/lane/solo-deferred-launch.ts'])('keeps the named follow-up boundary %s unchanged', async path => {
-    const result = await runRuleCheck(fixture({ [path]: "import { spawn } from 'node:child_process'; spawn('tool', [], { env: process.env });" }), 'HEAD');
+    const result = await runRepositoryRuleCheck(fixture({ [path]: "import { spawn } from 'node:child_process'; spawn('tool', [], { env: process.env });" }), 'HEAD');
     expect(result.violations).toEqual([]);
   });
 
   it('accepts the builder, typed wrapper, type-only imports, and unrelated spawn methods', async () => {
-    const result = await runRuleCheck(fixture({
+    const result = await runRepositoryRuleCheck(fixture({
       'src/lib/providers/spawn-environment.ts': 'export const buildEnvironment = () => ({ ...process.env });',
       'src/lib/providers/child-process.ts': "import { spawn as rawSpawn } from 'node:child_process'; import { buildEnvironment } from './spawn-environment'; export const spawn = () => rawSpawn('tool', [], { env: buildEnvironment() });",
       'src/launch.ts': "import type { ChildProcess } from 'node:child_process'; import { type SpawnOptions } from 'child_process'; export type { ExecOptions } from 'node:child_process'; type Module = typeof import('node:child_process'); import { spawn } from '@/lib/providers/child-process'; spawn('tool'); const packet = { spawn: (_options: unknown) => {} }; packet.spawn({ env: process.env });",
@@ -110,21 +110,21 @@ describe('child-process rule through the real git-backed entry point', () => {
   });
 
   it('resolves local wrapper imports in the providers directory', async () => {
-    const result = await runRuleCheck(fixture({
+    const result = await runRepositoryRuleCheck(fixture({
       'src/lib/providers/launch.ts': "import { spawn } from './child-process'; spawn('tool', [], { env: process.env });",
     }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
   });
 
   it('terminates alias analysis on circular assignments', async () => {
-    const result = await runRuleCheck(fixture({
+    const result = await runRepositoryRuleCheck(fixture({
       'src/lib/example/launch.ts': "let load; load = load.bind('fixture'); load('node:child_process');",
     }), 'HEAD');
     expect(result.violations).toEqual([]);
   });
 
   it('checks the structural inline PTY module at its known raw boundary', async () => {
-    const result = await runRuleCheck(fixture({
+    const result = await runRepositoryRuleCheck(fixture({
       'src/lib/ws-server/terminal-host-client.ts': "interface InlinePtyModule { spawn(...args: unknown[]): void } export function make(ptyModule: InlinePtyModule) { ptyModule.spawn('tool', [], { env: process.env }); }",
     }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
@@ -135,7 +135,7 @@ describe('child-process rule through the real git-backed entry point', () => {
     execFileSync('git', ['-C', cwd, 'add', '.']);
     execFileSync('git', ['-C', cwd, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'existing launch']);
     writeFileSync(join(cwd, 'src/launch.ts'), "import { spawn } from 'node:child_process';\nspawn('tool', [], { env: process.env });\nexport const unrelated = 2;\n");
-    const result = await runRuleCheck(cwd, 'HEAD');
+    const result = await runRepositoryRuleCheck(cwd, 'HEAD');
     expect(result.violations.some(v => v.rule === 'child-process-boundary' && v.line === 1)).toBe(true);
     expect(result.violations.some(v => v.rule === 'spawn-environment' && v.line === 2)).toBe(true);
   });

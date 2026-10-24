@@ -15,7 +15,7 @@ const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 const cp = await import('@/lib/providers/child-process');
 const { AcpClient } = await import('@/lib/acp/client');
-const { runRuleCheck } = await import('@/lib/supervisor/rule-check');
+const { runRepositoryRuleCheck } = await import('@/lib/supervisor/repository-rule-check');
 const saved = 'fixture-review-provider';
 beforeEach(() => {
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 73).toString('base64url'));
@@ -51,7 +51,7 @@ it('git-backed guard catches createRequire aliases and destructuring', async () 
   const dir = join(fixture, 'src/lib');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'launch.ts'), `import {createRequire} from 'node:module'; const require=createRequire(import.meta.url); const {spawn: launch}=require('node:child_process'); launch('codex');\n`);
-  const result = await runRuleCheck(fixture, 'HEAD');
+  const result = await runRepositoryRuleCheck(fixture, 'HEAD');
   expect(result.violations.some(v => v.rule === 'child-process-boundary')).toBe(true);
 });
 it('disabling OpenRouter through the API still disables native Symon', async () => {

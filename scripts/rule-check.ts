@@ -4,7 +4,8 @@ import { execFile } from 'node:child_process';
 import { devNull } from 'node:os';
 import { promisify } from 'node:util';
 
-import { buildRuleCheckFailureMessage, runRuleCheck, type RuleCheckGitReader } from '../src/lib/supervisor/rule-check';
+import { buildRuleCheckFailureMessage, type RuleCheckGitReader } from '../src/lib/supervisor/rule-check';
+import { runRepositoryRuleCheck } from '../src/lib/supervisor/repository-rule-check';
 
 const execFileAsync = promisify(execFile);
 
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
     console.warn(`[rule-check] Ignoring unrecognized args: ${passthrough.join(' ')}`);
   }
 
-  const result = await runRuleCheck(process.cwd(), baseRef, staticGitReader);
+  const result = await runRepositoryRuleCheck(process.cwd(), baseRef, staticGitReader);
   if (result.ok) {
     console.log(`[rule-check] OK — scanned ${result.scannedFiles} file(s), zero violations vs ${baseRef}`);
     return;
