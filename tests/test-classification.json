@@ -4893,6 +4893,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "process-signal",
         "real-path"
       ]
     },
