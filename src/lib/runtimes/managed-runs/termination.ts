@@ -27,11 +27,13 @@ const STEPS: ReadonlyArray<{ signal: ManagedRunTerminationSignal; waitMs: number
   { signal: 'SIGKILL', waitMs: 1_500 },
 ];
 
+export const MANAGED_RUN_PROCESS_PROBE_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
+
 function defaultRun(command: string, args: string[], timeoutMs: number): Promise<CommandReceipt> {
   return new Promise((resolve) => {
     execFile(command, args, {
       encoding: 'utf8',
-      maxBuffer: 2 * 1024 * 1024,
+      maxBuffer: MANAGED_RUN_PROCESS_PROBE_MAX_BUFFER_BYTES,
       timeout: timeoutMs,
       windowsHide: true,
     }, (error, stdout, stderr) => {
