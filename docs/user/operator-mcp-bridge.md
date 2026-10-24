@@ -72,6 +72,42 @@ Full-profile owned orchestrators can discover definitions through
 retain the complete catalog. See [deferred tool loading](../internals/deferred-mcp-tools.md)
 for runtime boundaries, worker opt-in and the full-loading override.
 
+## Stateless protocol requests
+
+The operator host supports `2026-07-28` requests alongside the existing
+`2024-11-05` initialization path. Modern clients may call `server/discover`
+or a tool directly, without initializing a transport session. Every request
+includes these fields in `params._meta`:
+
+```json
+{
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientCapabilities": {}
+}
+```
+
+HTTP requests also include `MCP-Protocol-Version: 2026-07-28`,
+`Mcp-Method` matching the JSON-RPC method, and `Mcp-Name` matching the tool
+name for `tools/call`. Each POST contains one request. Missing or mismatched
+routing fields are refused before dispatch. Modern responses include
+`resultType: "complete"` and do not issue a session ID. Catalog and discovery
+responses use a private, zero-duration cache hint because profile and runtime
+configuration can change. Existing operator authentication and profile limits
+still apply.
+
+`o8_task_dispatch` returns its persisted launch receipt before provisioning
+finishes. Modern `mission_tail` calls return the current event batch immediately,
+even when `timeoutMs` is supplied. Pass the returned `nextSince` cursor into the
+next poll, including after reconnecting or restarting the MCP process. Legacy
+clients retain the existing bounded long-poll behavior.
+
+The opt-in Rust endpoint forwards requests carrying protocol metadata or routing
+headers to the shared TypeScript host. Its native legacy read projections do not
+implement the modern envelope; this path requires the TypeScript service.
+Cortex and other separately hosted MCP servers retain their own protocol support.
+See the official [versioning contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
+and [HTTP binding](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http).
+
 ## Architecture Decision
 
 The user's Claude Code and o8's internal orchestrator are **peers**, not parent-child. Both can launch agents. Both can approve merges. The internal orchestrator handles missions from the dashboard chat. The MCP bridge handles intent from the terminal. They share the same API layer.

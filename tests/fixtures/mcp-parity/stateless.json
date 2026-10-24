@@ -1,0 +1,252 @@
+[
+  {
+    "name": "stateless discovery",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "stateless discovery",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "stateless catalog",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "stateless catalog",
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "tools/list"
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "stateless read",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "stateless read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_list_projects",
+        "arguments": {},
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "tools/call",
+      "Mcp-Name": "o8_list_projects"
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "unknown method",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "unknown method",
+      "method": "fixture/unknown",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "fixture/unknown"
+    },
+    "expectedStatus": 404
+  },
+  {
+    "name": "contradictory tool header",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "contradictory tool header",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_list_projects",
+        "arguments": {},
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "tools/call",
+      "Mcp-Name": "o8_delete_project"
+    },
+    "expectedStatus": 400
+  },
+  {
+    "name": "mismatched protocol header",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "mismatched protocol header",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "1900-01-01",
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 400
+  },
+  {
+    "name": "untrusted origin",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "untrusted origin",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "server/discover",
+      "Origin": "https://untrusted.invalid"
+    },
+    "expectedStatus": 403
+  },
+  {
+    "name": "unsupported protocol",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "unsupported protocol",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "1900-01-01",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "1900-01-01",
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 400
+  },
+  {
+    "name": "missing capabilities",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "missing capabilities",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 400
+  },
+  {
+    "name": "missing version header",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "missing version header",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 400
+  },
+  {
+    "name": "refused credential",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "refused credential",
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "server/discover"
+    },
+    "expectedStatus": 401,
+    "credential": "invalid"
+  },
+  {
+    "name": "legacy initialize",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "legacy initialize",
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2024-11-05"
+      }
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "legacy catalog",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "legacy catalog",
+      "method": "tools/list",
+      "params": {}
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "legacy read",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "legacy read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_list_projects",
+        "arguments": {}
+      }
+    },
+    "expectedStatus": 200
+  }
+]

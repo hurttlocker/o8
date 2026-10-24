@@ -3623,6 +3623,15 @@
       ]
     },
     {
+      "path": "tests/mcp-stateless-parity-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-check-stop-race-real-path.test.ts",
       "reasons": [
         "child-process",

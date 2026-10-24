@@ -8,6 +8,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { withVisualizationContext } from './visualization-context';
 import { deferredMcpRequest } from './deferred-tools';
 import type { McpTool } from './operator-handlers/shared';
+import { isModernMcpRequest, modernMcpError, modernMcpHeaders, modernMcpResult } from './operator-mcp-protocol';
 
 type JsonRpcId = number | string | null;
 
@@ -50,6 +51,7 @@ async function request(message: unknown): Promise<unknown> {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(process.env.O8_OPERATOR_MCP_PROFILE ? { 'x-o8-mcp-profile': process.env.O8_OPERATOR_MCP_PROFILE } : {}),
+      ...modernMcpHeaders(message),
     },
     body: JSON.stringify(withVisualizationContext(message, { repoPath: process.env.O8_VISUALIZATION_REPO_PATH,
       threadId: process.env.O8_VISUALIZATION_THREAD_ID })),
@@ -58,20 +60,36 @@ async function request(message: unknown): Promise<unknown> {
   if (response.status === 202) return;
   const text = await response.text();
   if (!response.ok) {
+    // Keep recognized JSON-RPC errors intact so modern clients can select a
+    // supported revision rather than mistaking a refusal for a dead server.
+    try {
+      const body = JSON.parse(text);
+      if (body?.jsonrpc === '2.0' && typeof body.error?.code === 'number') return body;
+    } catch { /* Non-protocol HTTP refusals retain the existing diagnostic. */ }
     throw new Error(`o8 MCP host returned HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ''}`);
   }
   if (text.trim()) return JSON.parse(text);
 }
 
 async function forward(message: unknown): Promise<void> {
+  const modern = isModernMcpRequest(message);
+  if (modern) {
+    const refusal = modernMcpError(message);
+    if (refusal) { send(refusal); return; }
+  }
   if (message && typeof message === 'object' && !Array.isArray(message) && 'method' in message) {
     const projected = await deferredMcpRequest(message as Parameters<typeof deferredMcpRequest>[0], async () => {
-      const response = await request({ jsonrpc: '2.0', id: requestId(message), method: 'tools/list' }) as
+      const response = await request({ jsonrpc: '2.0', id: requestId(message), method: 'tools/list',
+        ...(modern ? { params: { _meta: (message as { params?: Record<string, unknown> }).params?._meta } } : {}),
+      }) as
         { result?: { tools?: McpTool[] }; error?: unknown };
       if (!Array.isArray(response?.result?.tools)) throw new Error('Unable to read the o8 tool catalog');
       return response.result.tools;
     });
-    if (projected.response) { send(projected.response); return; }
+    if (projected.response) {
+      send(modern ? { ...projected.response, result: modernMcpResult(projected.response.result, message.method === 'tools/list') } : projected.response);
+      return;
+    }
     message = projected.message;
   }
   const response = await request(message);
