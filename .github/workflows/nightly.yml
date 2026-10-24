@@ -59,6 +59,8 @@ jobs:
         run: npm ci --prefer-offline
       - name: Check protocol, types, and test classification
         if: steps.freshness.outputs.run == 'true'
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           npm run protocol:check
           npm run typecheck
