@@ -1,0 +1,398 @@
+[
+  {
+    "name": "o8_status",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "get_mission_status",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "get_mission_status",
+      "method": "tools/call",
+      "params": {
+        "name": "get_mission_status",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "o8_task_list",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "o8_list_repos",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_list_repos",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_list_repos",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "o8_list_projects",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_list_projects",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_list_projects",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "o8_lease_list",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_list",
+        "arguments": {}
+      }
+    }
+  },
+  {
+    "name": "o8_status {'includeEvidence': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {
+          "includeEvidence": true
+        }
+      }
+    }
+  },
+  {
+    "name": "status preserves whitespace sessionKey",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "whitespace",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {
+          "sessionKey": " "
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_status {'sessionKey': 'missing'}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {
+          "sessionKey": "missing"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_mission_status {'includeCost': True, 'includeTiming': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "get_mission_status",
+      "method": "tools/call",
+      "params": {
+        "name": "get_mission_status",
+        "arguments": {
+          "includeCost": true,
+          "includeTiming": true
+        }
+      }
+    }
+  },
+  {
+    "name": "get_mission_status {'missionId': 'not-found'}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "get_mission_status",
+      "method": "tools/call",
+      "params": {
+        "name": "get_mission_status",
+        "arguments": {
+          "missionId": "not-found"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_task_list {'includeDone': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {
+          "includeDone": true
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_task_list {'includeDetails': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {
+          "includeDetails": true
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_task_list {'includeBrief': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {
+          "includeBrief": true
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_task_list {'projectId': 'not-found'}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {
+          "projectId": "not-found"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_task_list {'repoPath': '$FIXTURE_REPO', 'includeDone': True}",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_task_list",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_task_list",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO",
+          "includeDone": true
+        }
+      }
+    }
+  },
+  {
+    "name": "profile full",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "catalog",
+      "method": "tools/list"
+    },
+    "headers": {
+      "x-o8-mcp-profile": "full"
+    }
+  },
+  {
+    "name": "profile full",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {}
+      }
+    },
+    "headers": {
+      "x-o8-mcp-profile": "full"
+    }
+  },
+  {
+    "name": "profile dogfood",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "catalog",
+      "method": "tools/list"
+    },
+    "headers": {
+      "x-o8-mcp-profile": "dogfood"
+    }
+  },
+  {
+    "name": "profile dogfood",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {}
+      }
+    },
+    "headers": {
+      "x-o8-mcp-profile": "dogfood"
+    }
+  },
+  {
+    "name": "profile visualizations",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "catalog",
+      "method": "tools/list"
+    },
+    "headers": {
+      "x-o8-mcp-profile": "visualizations"
+    }
+  },
+  {
+    "name": "profile visualizations",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {}
+      }
+    },
+    "headers": {
+      "x-o8-mcp-profile": "visualizations"
+    }
+  },
+  {
+    "name": "profile unknown",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "catalog",
+      "method": "tools/list"
+    },
+    "headers": {
+      "x-o8-mcp-profile": "unknown"
+    }
+  },
+  {
+    "name": "profile unknown",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_status",
+        "arguments": {}
+      }
+    },
+    "headers": {
+      "x-o8-mcp-profile": "unknown"
+    }
+  },
+  {
+    "name": "notification",
+    "body": {
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    }
+  },
+  {
+    "name": "null id",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": null,
+      "method": "tools/list"
+    }
+  },
+  {
+    "name": "zero id",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "method": "tools/list"
+    }
+  },
+  {
+    "name": "batch",
+    "body": [
+      {
+        "jsonrpc": "2.0",
+        "id": "o8_list_repos",
+        "method": "tools/call",
+        "params": {
+          "name": "o8_list_repos",
+          "arguments": {}
+        }
+      },
+      {
+        "jsonrpc": "2.0",
+        "method": "tools/list"
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": "o8_lease_list",
+        "method": "tools/call",
+        "params": {
+          "name": "o8_lease_list",
+          "arguments": {}
+        }
+      }
+    ]
+  },
+  {
+    "name": "empty batch",
+    "body": []
+  },
+  {
+    "name": "parse error",
+    "body": "{"
+  },
+  {
+    "name": "unknown method",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "missing"
+    }
+  },
+  {
+    "name": "unknown tool",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "missing",
+      "method": "tools/call",
+      "params": {
+        "name": "missing",
+        "arguments": {}
+      }
+    }
+  }
+]

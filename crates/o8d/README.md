@@ -69,3 +69,5 @@ The TS entry uses its authenticated HTTP producer route; Rust consumes the same
 envelope shape through stdin. These are different producer hops, and Rust still
 needs TypeScript producers. RSS is per process, not a replacement-system memory
 estimate. No real account, desktop app, or model provider is used.
+
+The separate opt-in HTTP transport is documented in [Experimental MCP transport](MCP.md).

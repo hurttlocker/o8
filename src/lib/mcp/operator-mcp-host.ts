@@ -468,6 +468,11 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requ
   // A transport may narrow the server's own profile, never expand it.
   const activeTools = operatorToolsForProfile().filter(tool => !allowedNames || allowedNames.has(tool.name));
   if (method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: activeTools } };
+  // The opt-in Rust transport uses this metadata-only method after the same
+  // middleware gate as tools/call. No credential or tool execution is delegated.
+  if (method === 'o8d/read-context' && process.env.O8D_MCP_READS === '1') {
+    return { jsonrpc: '2.0', id, result: { tools: activeTools, profile: process.env.O8_OPERATOR_MCP_PROFILE?.trim() || 'full' } };
+  }
   if (method === 'tools/call') {
     const toolName = (params as Record<string, unknown> | undefined)?.name as string;
     const toolArgs = expandToolPathArgs(

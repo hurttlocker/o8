@@ -6,6 +6,9 @@ use tokio::sync::{broadcast, Mutex};
 #[cfg(feature = "experimental-ws")]
 pub mod websocket;
 
+#[cfg(feature = "experimental-mcp")]
+pub mod mcp;
+
 struct State {
     latest: u64,
     log: VecDeque<Value>,
