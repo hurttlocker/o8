@@ -123,6 +123,12 @@ const tag = releaseChannel.tag;
 const dryRun = process.argv.includes('--dry-run');
 const dryRunOutDir = optionValue('--out-dir') || join(tmpdir(), 'o8-public-release-out');
 let releaseSummary = null;
+let metadataRange = null;
+
+function releaseMetadataRange() {
+  metadataRange ??= releaseRange(tag);
+  return metadataRange;
+}
 
 // The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
 // Runtime ABI compatibility is independent of this guard: tauri-export now
@@ -167,6 +173,10 @@ if (process.argv[2] === '--ship') {
   }
 }
 
+// Resolve once before publication effects so every artifact uses the same
+// verified baseline, including when this candidate is published mid-process.
+if (!releaseChannel.preview) releaseMetadataRange();
+
 // `npm run ship` detaches stale DMGs before this script. Garbage-collect their
 // LaunchServices claims before publishing so dead o8:// handlers do not accrue.
 if (process.platform === 'darwin') {
@@ -194,10 +204,10 @@ if (process.argv[2] === '--announce-preview' || process.argv[2] === '--announce'
 try {
   const headTag = execFileSync('git', ['describe', '--tags', '--exact-match', 'HEAD'], { encoding: 'utf8' }).trim();
   if (headTag !== tag) {
-    console.warn(`[release] WARNING: HEAD is ${headTag}, not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
+    console.warn(`[release] WARNING: HEAD is ${headTag}, not ${tag}; fixed-report receipts will scan ${releaseMetadataRange()}.`);
   }
 } catch {
-  console.warn(`[release] WARNING: HEAD is not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
+  console.warn(`[release] WARNING: HEAD is not ${tag}; fixed-report receipts will scan ${releaseMetadataRange()}.`);
 }
 
 const artifacts = resolveMacosReleaseArtifacts(root, version);
@@ -377,7 +387,7 @@ if (releaseChannel.publishStableEffects) {
     console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);
     console.warn('[release]   only self-filed reports will resolve — fixes for other people\'s bugs will be skipped.');
   }
-  const { entries, missing: unknownFixes } = resolveNewFixes(releaseRange(tag), version);
+  const { entries, missing: unknownFixes } = resolveNewFixes(releaseMetadataRange(), version);
   pendingFixes = entries;
   const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
   writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
@@ -525,7 +535,7 @@ try {
   // publish:fixed picks up anything missed (published.json is the dedupe).
   if (pendingFixes.length > 0) {
     try {
-      await publishFixed({ range: releaseRange(tag) });
+      await publishFixed({ range: releaseMetadataRange() });
     } catch (err) {
       console.error(`[release] #fixed announce failed (release is fine):`, err?.message ?? err);
       console.error(`[release] re-run later with: npm run publish:fixed`);
@@ -567,14 +577,15 @@ function resolveReleasesWebhook() {
  * community announcement.
  */
 function composeReleaseAnnouncement() {
+  const range = releaseMetadataRange();
   let allSubjects = [];
   try {
-    allSubjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
+    allSubjects = execFileSync('git', ['log', '--format=%s', '--no-merges', range], { encoding: 'utf8' })
       .split('\n').filter(Boolean);
   } catch {}
   let subjects = [];
   try {
-    subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', releaseRange(tag)], { encoding: 'utf8' })
+    subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', range], { encoding: 'utf8' })
       .split('\n')
       .filter((s) => /^(feat|perf|design)(\(.*\))?:/.test(s));
   } catch {}
@@ -637,7 +648,7 @@ function releaseCommits() {
     'log',
     '--format=%H%x09%s',
     '--no-merges',
-    releaseRange(tag),
+    releaseMetadataRange(),
   ], { cwd: root, encoding: 'utf8' })
     .split('\n')
     .filter(Boolean)
