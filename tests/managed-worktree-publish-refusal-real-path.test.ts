@@ -320,6 +320,7 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
     })),
   }));
   let admitted = '';
+  const delegatedHydrationModes: string[] = [];
   vi.doMock('@/lib/worktree/materialization-leaf-io', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@/lib/worktree/materialization-leaf-io')>();
     return {
@@ -329,14 +330,19 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
         identity: Parameters<typeof actual.createPinnedWorkspaceBinding>[1],
         relativePath: string,
         input: Parameters<typeof actual.createPinnedWorkspaceBinding>[3],
-      ) => actual.createPinnedWorkspaceBinding(workspacePath, identity, relativePath, input, async (segment) => {
-        if (relativePath !== '.next/cache' || segment !== 'target-created') return;
-        const target = path.join(workspacePath, '.next', 'cache');
-        admitted = `${target}-admitted`;
-        renameSync(target, admitted);
-        mkdirSync(target);
-        writeFileSync(path.join(target, 'unrelated-sentinel'), 'preserve');
-      }),
+      ) => {
+        // This fixture targets copy hooks even when native directory cloning works.
+        if (input.mode === 'clone-tree') return 'unsupported';
+        delegatedHydrationModes.push(input.mode);
+        return actual.createPinnedWorkspaceBinding(workspacePath, identity, relativePath, input, async (segment) => {
+          if (relativePath !== '.next/cache' || segment !== 'target-created') return;
+          const target = path.join(workspacePath, '.next', 'cache');
+          admitted = `${target}-admitted`;
+          renameSync(target, admitted);
+          mkdirSync(target);
+          writeFileSync(path.join(target, 'unrelated-sentinel'), 'preserve');
+        });
+      },
     };
   });
   const { closeDb } = await import('@/lib/db');
@@ -365,6 +371,7 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
+  expect(delegatedHydrationModes).toEqual(['copy-tree']);
 }, 60_000);
 
 it('refuses launch and retains authority when direct cache hydration fails after a partial copy', async () => {
@@ -384,6 +391,7 @@ it('refuses launch and retains authority when direct cache hydration fails after
       macos: true, apfs: true, sameVolume: true, canCowClone: true,
     })),
   }));
+  const delegatedHydrationModes: string[] = [];
   vi.doMock('@/lib/worktree/materialization-leaf-io', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@/lib/worktree/materialization-leaf-io')>();
     let sourceSteps = 0;
@@ -394,11 +402,16 @@ it('refuses launch and retains authority when direct cache hydration fails after
         identity: Parameters<typeof actual.createPinnedWorkspaceBinding>[1],
         relativePath: string,
         input: Parameters<typeof actual.createPinnedWorkspaceBinding>[3],
-      ) => actual.createPinnedWorkspaceBinding(workspacePath, identity, relativePath, input, async (segment) => {
-        if (relativePath !== '.next/cache' || segment !== 'source') return;
-        sourceSteps += 1;
-        if (sourceSteps === 2) unlinkSync(failingSource);
-      }),
+      ) => {
+        // This fixture targets copy hooks even when native directory cloning works.
+        if (input.mode === 'clone-tree') return 'unsupported';
+        delegatedHydrationModes.push(input.mode);
+        return actual.createPinnedWorkspaceBinding(workspacePath, identity, relativePath, input, async (segment) => {
+          if (relativePath !== '.next/cache' || segment !== 'source') return;
+          sourceSteps += 1;
+          if (sourceSteps === 2) unlinkSync(failingSource);
+        });
+      },
     };
   });
   const { closeDb } = await import('@/lib/db');
@@ -426,4 +439,5 @@ it('refuses launch and retains authority when direct cache hydration fails after
   )).resolves.toBeDefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
+  expect(delegatedHydrationModes).toEqual(['copy-tree']);
 }, 60_000);
