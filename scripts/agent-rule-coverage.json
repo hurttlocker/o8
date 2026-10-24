@@ -1,0 +1,193 @@
+{
+  "schema": "o8/agent-rule-coverage/v1",
+  "baseline": {
+    "commit": "f8c0c58bb0a76ea823d78637c1b6d828731682d8",
+    "path": "AGENTS.md",
+    "bytes": 7287,
+    "sha256": "2ac39cb539983480669eec3dbe14658729aa925b538e4912fdd7568395ffa432",
+    "ruleCount": 30
+  },
+  "rules": [
+    {
+      "id": "R01",
+      "sourceSha256": "7545b3dde6be32ca8941636ad0f7a399d9bc3efd81cb03cb5d589776659ac538",
+      "sha256": "7545b3dde6be32ca8941636ad0f7a399d9bc3efd81cb03cb5d589776659ac538",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R02",
+      "sourceSha256": "efe18ff971a2b51c766eefe4fb7092f2c55e5d5dc176ef2cf34a04ec37ba92a2",
+      "sha256": "efe18ff971a2b51c766eefe4fb7092f2c55e5d5dc176ef2cf34a04ec37ba92a2",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R03",
+      "sourceSha256": "28dc1d721cee564c5267aa12f3f3edd894e4efe5ed48f4bb5a466cac4776bc21",
+      "sha256": "28dc1d721cee564c5267aa12f3f3edd894e4efe5ed48f4bb5a466cac4776bc21",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R04",
+      "sourceSha256": "3cb9f23c1aa5e35119d62057d96e9538ae60031d220e2b43541929ad12a945f0",
+      "sha256": "3cb9f23c1aa5e35119d62057d96e9538ae60031d220e2b43541929ad12a945f0",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R05",
+      "sourceSha256": "b162ba995bd7a2ddb5410f8631e7478e1617dc67d70a9067886bfe062081db81",
+      "sha256": "b162ba995bd7a2ddb5410f8631e7478e1617dc67d70a9067886bfe062081db81",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R06",
+      "sourceSha256": "07c951efa8b5328a0e11bf7dfd579a09f2e75c7c04548ff57b1a863e57a93167",
+      "sha256": "07c951efa8b5328a0e11bf7dfd579a09f2e75c7c04548ff57b1a863e57a93167",
+      "destination": "AGENTS.md"
+    },
+    {
+      "id": "R07",
+      "sourceSha256": "10cfd6cd6730953307131278680e87729ac59dc33f8f6b92af87dd845ea87889",
+      "sha256": "10cfd6cd6730953307131278680e87729ac59dc33f8f6b92af87dd845ea87889",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R08",
+      "sourceSha256": "3c904295cef7b23087e4440846063cede947b56cd35cb7e4f52679ff5f7dd7ca",
+      "sha256": "3c904295cef7b23087e4440846063cede947b56cd35cb7e4f52679ff5f7dd7ca",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R09",
+      "sourceSha256": "db8acb6ef19fda62e2608f49d250f4fd5433aa2f55abb1aca60bda8a44bd1afd",
+      "sha256": "db8acb6ef19fda62e2608f49d250f4fd5433aa2f55abb1aca60bda8a44bd1afd",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R10",
+      "sourceSha256": "4b3f53f0e5dc820cded3553cbb9530a97b30a712b7da23497f6ab54737000102",
+      "sha256": "4b3f53f0e5dc820cded3553cbb9530a97b30a712b7da23497f6ab54737000102",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R11",
+      "sourceSha256": "7d9967486e79113769047b407d7036bd94234626fac89a0f2deb669d18408041",
+      "sha256": "7d9967486e79113769047b407d7036bd94234626fac89a0f2deb669d18408041",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R12",
+      "sourceSha256": "12092d169ee4b95425bf86b3401a536aa0c889ddd7cee1ee9d3c0d0293951f70",
+      "sha256": "12092d169ee4b95425bf86b3401a536aa0c889ddd7cee1ee9d3c0d0293951f70",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R13",
+      "sourceSha256": "6d7ab8b04fbc2b6c6b07ed4aff0619cd5a7b4fe969bd81672eab63e019bf7f61",
+      "sha256": "6d7ab8b04fbc2b6c6b07ed4aff0619cd5a7b4fe969bd81672eab63e019bf7f61",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R14",
+      "sourceSha256": "2a6c547ec400cadb87448cfe9ec866c14e4f999c2903814d03c43f4206115a19",
+      "sha256": "2a6c547ec400cadb87448cfe9ec866c14e4f999c2903814d03c43f4206115a19",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R15",
+      "sourceSha256": "6c47e3769f6e5e9263e5270336bdf8432747f73b9a77b53b3e63a8f5d550fe25",
+      "sha256": "6c47e3769f6e5e9263e5270336bdf8432747f73b9a77b53b3e63a8f5d550fe25",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R16",
+      "sourceSha256": "aa4363e14e40ecee38f2cbe2046b9143017f984293b7bda441273e71b9969a96",
+      "sha256": "aa4363e14e40ecee38f2cbe2046b9143017f984293b7bda441273e71b9969a96",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R17",
+      "sourceSha256": "802e5eb730fb6f0d1f784a40fafc6afd38683a00ca6ffe9fec70f07359f2a639",
+      "sha256": "802e5eb730fb6f0d1f784a40fafc6afd38683a00ca6ffe9fec70f07359f2a639",
+      "destination": ".agents/skills/o8-ui/SKILL.md"
+    },
+    {
+      "id": "R18",
+      "sourceSha256": "094769f584a93cca30253b86944018a7688e32b09354f80f3609f8a7d462f224",
+      "sha256": "094769f584a93cca30253b86944018a7688e32b09354f80f3609f8a7d462f224",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R19",
+      "sourceSha256": "f9b09f59793e43db85c2ff1febc5092be4d7171e10b289aed54e0e6370fcdcc1",
+      "sha256": "f9b09f59793e43db85c2ff1febc5092be4d7171e10b289aed54e0e6370fcdcc1",
+      "destination": ".agents/skills/o8-checks/SKILL.md"
+    },
+    {
+      "id": "R20",
+      "sourceSha256": "6c114a88530c46c1a925eb936d68fad124f87f1c4cb35ffe71da6bc91a0835df",
+      "sha256": "6c114a88530c46c1a925eb936d68fad124f87f1c4cb35ffe71da6bc91a0835df",
+      "destination": ".agents/skills/o8-checks/SKILL.md"
+    },
+    {
+      "id": "R21",
+      "sourceSha256": "d328b21c2fd6dedf587f1d68646c68785336db0955bd75ebe1fc3324d6e806a0",
+      "sha256": "d328b21c2fd6dedf587f1d68646c68785336db0955bd75ebe1fc3324d6e806a0",
+      "destination": ".agents/skills/o8-checks/SKILL.md"
+    },
+    {
+      "id": "R22",
+      "sourceSha256": "614f5a83a22300b42c1297fd40bce504262d46251083be73da8cacc33a55c0bb",
+      "sha256": "614f5a83a22300b42c1297fd40bce504262d46251083be73da8cacc33a55c0bb",
+      "destination": ".agents/skills/o8-contribute/SKILL.md",
+      "locatorChange": "Private skill locator replaced by the existing repository GitHub contract."
+    },
+    {
+      "id": "R23",
+      "sourceSha256": "951d3e108f19fef797fd1a5b8c1878a8827f07c9557b8536943019c4244b1bd8",
+      "sha256": "951d3e108f19fef797fd1a5b8c1878a8827f07c9557b8536943019c4244b1bd8",
+      "destination": ".agents/skills/o8-contribute/SKILL.md"
+    },
+    {
+      "id": "R24",
+      "sourceSha256": "68c800f725c7c333479173c98ef70fca3c0fb3a4b2050144fc5f1a605769653f",
+      "sha256": "68c800f725c7c333479173c98ef70fca3c0fb3a4b2050144fc5f1a605769653f",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R25",
+      "sourceSha256": "7bc3fcb264ffc586473248057095bbff0572d9a01329441d967c59a445bf96ed",
+      "sha256": "7bc3fcb264ffc586473248057095bbff0572d9a01329441d967c59a445bf96ed",
+      "destination": ".agents/skills/o8-contribute/SKILL.md"
+    },
+    {
+      "id": "R26",
+      "sourceSha256": "bce4556276704be1d5211a2d5449cf69013cbef7961b487ce1d751b0f8d18a32",
+      "sha256": "bce4556276704be1d5211a2d5449cf69013cbef7961b487ce1d751b0f8d18a32",
+      "destination": ".agents/skills/o8-code/SKILL.md"
+    },
+    {
+      "id": "R27",
+      "sourceSha256": "49014a0b3c4c281d42a35d742d9c4718956fb7e3325509d48c0420ba93edbf9e",
+      "sha256": "49014a0b3c4c281d42a35d742d9c4718956fb7e3325509d48c0420ba93edbf9e",
+      "destination": ".agents/skills/o8-ui/SKILL.md"
+    },
+    {
+      "id": "R28",
+      "sourceSha256": "81306a1e1fe4b51c8944d0b8b2c924964dcf5c30cf1df582f16164256476ca1f",
+      "sha256": "81306a1e1fe4b51c8944d0b8b2c924964dcf5c30cf1df582f16164256476ca1f",
+      "destination": ".agents/skills/o8-release/SKILL.md"
+    },
+    {
+      "id": "R29",
+      "sourceSha256": "f6c0895165324c3934a17ce698d7861a00496c8a7e18ca2b75565cd9acdcab45",
+      "sha256": "f6c0895165324c3934a17ce698d7861a00496c8a7e18ca2b75565cd9acdcab45",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    },
+    {
+      "id": "R30",
+      "sourceSha256": "e676cd4b0cc9aa05cffbb4ede86aa4a0f94cca53071791ca199acc857f4589b8",
+      "sha256": "e676cd4b0cc9aa05cffbb4ede86aa4a0f94cca53071791ca199acc857f4589b8",
+      "destination": ".agents/skills/o8-delegate/SKILL.md"
+    }
+  ]
+}
