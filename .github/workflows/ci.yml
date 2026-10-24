@@ -130,6 +130,13 @@ jobs:
       - if: matrix.shard == 1
         run: node scripts/ci/check-hermetic-shards.mjs
       - run: npm run test:unit -- --shard=${{ matrix.shard }}/4
+        env:
+          O8_TEST_TIMING_REPORT_PATH: test-results/hermetic-timings-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hermetic-timings-${{ matrix.shard }}
+          path: test-results/hermetic-timings-${{ matrix.shard }}.json
 
   # Keep branch protection and the merge queue on one stable required name.
   # always() prevents a failed/cancelled matrix from skipping this check.

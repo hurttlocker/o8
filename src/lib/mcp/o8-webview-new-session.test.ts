@@ -121,9 +121,11 @@ async function mount(activeTabId: string, withBlank = true) {
     sendTerminalInput: vi.fn(), sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(),
   };
   await act(async () => reactRoot.render(createElement(WorkspaceTerminalRoot, { ...props, ref: handle })));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
-  expect(inventory()).toEqual(expectedIds);
-  expect(surface().getAttribute('data-o8-active-tab-id')).toBe(activeTabId);
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(inventory()).toEqual(expectedIds);
+    expect(surface().getAttribute('data-o8-active-tab-id')).toBe(activeTabId);
+  }, { interval: 5 });
   surface().addEventListener(FRESH_ORCHESTRATOR_EVENT, () => { dispatches += 1; });
 }
 beforeEach(() => {
@@ -149,7 +151,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); reactRoot = createRoot(host); handle = { current: null };
   panel.disabled = false; dispatches = 0; readsAfterDispatch = 0; dropAck = false; dropObservation = false; beforeMutation = null; afterMutation = null;
 });
-afterEach(async () => { await act(async () => reactRoot.unmount()); vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
+afterEach(async () => { await act(async () => reactRoot.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
 
 describe('registered genuine fresh-session action through the real root/controller', () => {
   for (const [activeTabId, withBlank] of [['used-tab', true], ['blank-tab', true], ['used-tab', false]] as const) {
@@ -296,8 +298,13 @@ describe('registered genuine fresh-session action through the real root/controll
   });
   it('settles disabled-composer verification timeout without claiming rollback or replaying', async () => {
     await mount('used-tab'); const before = inventory();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.spyOn(dom.window.Date, 'now').mockImplementation(() => Date.now());
     panel.disabled = true;
-    expect(await run()).toMatchObject({ ok: false, status: 'unknown', code: 'verification_timeout', actionDispatched: true, automaticReplay: false });
+    const pending = run();
+    await vi.waitFor(() => expect(readsAfterDispatch).toBeGreaterThan(0), { interval: 1 });
+    vi.advanceTimersByTime(8_000);
+    expect(await pending).toMatchObject({ ok: false, status: 'unknown', code: 'verification_timeout', actionDispatched: true, automaticReplay: false });
     expect(inventory()).toHaveLength(before.length + 1); expect(dispatches).toBe(1);
     const request = requestFromReceipt();
     surface().querySelector<HTMLTextAreaElement>('textarea')!.disabled = false;

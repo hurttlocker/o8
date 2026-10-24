@@ -29,10 +29,20 @@ const corpusPaths = [
   ...markdownFilesUnder(join(repoRoot, 'tests/fixtures/markdown')),
 ];
 
-const corpus = corpusPaths.map((path) => ({
-  name: relative(repoRoot, path),
-  source: readFileSync(path, 'utf8'),
-}));
+function freezeFixture<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) freezeFixture(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// All three corpus passes inspect the same parse. Freeze it deeply so an
+// editing assertion cannot contaminate a later assertion's fixture.
+const corpus = corpusPaths.map((path) => {
+  const source = readFileSync(path, 'utf8');
+  return { name: relative(repoRoot, path), source, doc: freezeFixture(parseDocument(source)) };
+});
 
 const criticMarkupPattern = /\{(?:==|>>|~~|\+\+|--)/;
 
@@ -62,12 +72,11 @@ function editFirstParagraph(node: MarkdownBlockNode, nextText: string): Markdown
 }
 
 describe('Markdown source transport corpus', () => {
-  it.each(corpus)('round-trips $name byte-for-byte with no edits', ({ source }) => {
-    expect(serializeDocument(parseDocument(source))).toBe(source);
+  it.each(corpus)('round-trips $name byte-for-byte with no edits', ({ source, doc }) => {
+    expect(serializeDocument(doc)).toBe(source);
   });
 
-  it.each(corpus)('keeps gap-free, non-overlapping positions for $name', ({ source }) => {
-    const doc = parseDocument(source);
+  it.each(corpus)('keeps gap-free, non-overlapping positions for $name', ({ source, doc }) => {
     expect(doc.blocks.map((block) => block.source).join('')).toBe(source);
 
     doc.blocks.forEach((block, index) => {
@@ -82,8 +91,7 @@ describe('Markdown source transport corpus', () => {
     });
   });
 
-  it.each(corpus)('isolates one paragraph edit in $name', ({ name, source }) => {
-    const doc = parseDocument(source);
+  it.each(corpus)('isolates one paragraph edit in $name', ({ name, doc }) => {
     const index = doc.blocks.findIndex((block) => (
       hasParagraph(block.node as unknown as MutableMdastNode)
       && !criticMarkupPattern.test(block.source)

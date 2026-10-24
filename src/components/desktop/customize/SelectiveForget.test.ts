@@ -15,7 +15,7 @@ let outcomes: Array<{ id: string; summary: string; outcome: string; runtime: str
 const deleted: Array<{ path: string; body: Record<string, unknown> }> = [];
 const timing = { totalSamples: 0, windowedSamples: 0, windowMs: 1, p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, errorCount: 0, byLabel: [] };
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => b.getAttribute('aria-label') === label || b.textContent === label)!;
-const click = async (label: string) => { expect(button(label), label).toBeTruthy(); await act(async () => { button(label).click(); await new Promise(resolve => setTimeout(resolve, 300)); }); };
+const click = async (label: string) => { expect(button(label), label).toBeTruthy(); await act(async () => { button(label).click(); }); };
 beforeEach(async () => {
   localStorage.clear(); setCustomizeTab('rules'); fail = false; deleted.length = 0;
   directives = ['remove', 'keep'].map(id => ({ id, title: `${id} instruction`, scope: 'global', body: `${id} guidance`, repoName: null, projects: [], file: `/fixture/directives/${id}.md` }));
@@ -51,7 +51,7 @@ it('confirms only the selected directive and refreshes Customize, recall and hea
   await click('Cancel'); expect(deleted).toEqual([]);
   await click('Delete instruction remove instruction'); await click('Delete');
   expect(deleted).toEqual([{ path: '/api/cortex/directives', body: { id: 'remove' } }]);
-  expect(host.textContent).not.toContain('remove instruction');
+  await vi.waitFor(() => expect(host.textContent).not.toContain('remove instruction'), { interval: 5 });
   expect(host.textContent).toContain('keep instruction');
   expect(host.textContent).toContain('1 authored instruction');
   const counter = [...host.querySelectorAll('span')].find(s => s.textContent === 'Directives count')!.parentElement!;
@@ -61,11 +61,11 @@ it('keeps a failed outcome delete visible, then removes only that outcome after 
   const recent = [...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('recent'))!;
   await act(async () => recent.click());
   await click('Delete outcome remove outcome'); fail = true; await click('Delete');
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Fixture delete refused');
+  await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Fixture delete refused'), { interval: 5 });
   expect(host.textContent).toContain('remove outcome'); expect(deleted).toEqual([]);
   fail = false; await click('Delete');
   expect(deleted).toEqual([{ path: '/api/cortex/recent-outcomes', body: { id: 'remove', repoPath: '/fixture/repo' } }]);
-  expect(host.textContent).not.toContain('remove outcome'); expect(host.textContent).toContain('keep outcome');
+  await vi.waitFor(() => expect(host.textContent).not.toContain('remove outcome'), { interval: 5 }); expect(host.textContent).toContain('keep outcome');
   const counter = [...host.querySelectorAll('span')].find(s => s.textContent === 'Outcomes count')!.parentElement!;
   expect(counter.textContent).toContain('1');
 });

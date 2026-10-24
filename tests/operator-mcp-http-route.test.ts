@@ -59,12 +59,15 @@ describe('/api/mcp — real operator host reachability', () => {
       expect(tool.inputSchema.properties, tool.name).toBeTypeOf('object');
     }
 
+    const unexpected: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith('/api/operator/status')) {
         return Response.json({ agents: [], approvals: { items: [], count: 0 }, recentActivity: [] });
       }
       if (url.endsWith('/api/panel/repos')) return Response.json({ repos: [] });
+      if (url.endsWith('/api/panel/operator-defaults')) return Response.json({});
+      unexpected.push(url);
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -82,6 +85,7 @@ describe('/api/mcp — real operator host reachability', () => {
     expect(JSON.parse(callBody.result.content[0].text)).toMatchObject({
       data: { agents: [], approvalCount: 0 },
     });
+    expect(unexpected).toEqual([]);
   });
 
   it('deletes a project through the public MCP tool and returns disk-preservation receipts', async () => {
