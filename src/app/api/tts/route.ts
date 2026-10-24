@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       return runEdgeTTS(trimmedText, voice);
     });
 
-    return new NextResponse(mp3, {
+    return new NextResponse(new Uint8Array(mp3), {
       status: 200,
       headers: {
         'Content-Type': 'audio/mpeg',

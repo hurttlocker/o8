@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
     if (mimeType === 'image/svg+xml') {
       headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
     }
-    return new Response(buffer, { status: range ? 206 : 200, headers });
+    return new Response(new Uint8Array(buffer), { status: range ? 206 : 200, headers });
   } catch {
     return new Response('File not found or path refused', { status: 404 });
   } finally {

@@ -335,6 +335,9 @@ describe('POST /api/feedback/report', () => {
     const names = form.getAll('files[0]').concat(form.getAll('files[1]')).map((f) => (f as File).name);
     expect(names).toContain('diagnostics.txt');
     expect(names).toContain('diagnostics-1.txt');
+    const screenshot = form.get('files[0]') as File;
+    expect(screenshot.type).toBe('image/png');
+    expect(new Uint8Array(await screenshot.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
   });
 
   it('renders the client state snapshot into the State field and the diagnostics file', async () => {

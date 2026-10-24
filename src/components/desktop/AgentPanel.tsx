@@ -40,7 +40,7 @@ const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
 const MINI_FLAT_BUTTON_BG = 'transparent';
 const MINI_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--t-divider-subtle) 62%, transparent)';
 
-export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) {
+export const AgentPanel = memo<AgentPanelProps>(function AgentPanel(props: AgentPanelProps = {}) {
   const {
     activeSessionKey,
     navigationRail = false,

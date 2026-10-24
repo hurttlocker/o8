@@ -724,7 +724,7 @@ export function listInboxItems(options: {
     .map((row) => {
       const payload = parsePayload(row.payload);
       const packet = row.packet_id ? packetById.get(row.packet_id) ?? null : null;
-      const lane = (row.packet_id ? laneByPacketId.get(row.packet_id) ?? null : null)
+      const lane = (row.packet_id ? laneByPacketId.get(row.packet_id) : undefined)
         ?? laneByRepoPath.get(row.repo_path)
         ?? null;
 

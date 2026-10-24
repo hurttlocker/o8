@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
     const filename = basename(filePath).replace(/"/g, '');
     const disposition = download ? 'attachment' : 'inline';
 
-    return new Response(buffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         'Content-Type': contentTypeForExtension(filePath),
         'Content-Length': String(buffer.byteLength),

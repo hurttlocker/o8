@@ -71,11 +71,11 @@ async function queryGenerationCost(registration: Registration, generationId: str
   }
 }
 
-async function requestBody(request: IncomingMessage): Promise<Buffer | undefined> {
+async function requestBody(request: IncomingMessage): Promise<Uint8Array<ArrayBuffer> | undefined> {
   if (request.method === 'GET' || request.method === 'HEAD') return undefined;
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks);
+  return new Uint8Array(Buffer.concat(chunks));
 }
 
 async function enforceCap(registration: Registration): Promise<boolean> {
