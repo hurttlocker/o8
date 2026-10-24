@@ -1,6 +1,6 @@
 'use client';
 
-import { Profiler, forwardRef, useCallback } from 'react';
+import { Profiler, forwardRef, memo, useCallback } from 'react';
 import type { ComponentPropsWithoutRef, ProfilerOnRenderCallback } from 'react';
 import { ChatMessageList } from './ChatMessageList';
 
@@ -30,7 +30,7 @@ function logListCommit(phase: string, actualDuration: number, count: number): vo
   );
 }
 
-export const ProfiledChatMessageList = forwardRef<HTMLDivElement, ProfiledChatMessageListProps>(
+export const ProfiledChatMessageList = memo(forwardRef<HTMLDivElement, ProfiledChatMessageListProps>(
   function ProfiledChatMessageList(props, ref) {
     const count = props.displayMessages.length;
     const handleRender = useCallback<ProfilerOnRenderCallback>((_id, phase, actualDuration) => {
@@ -43,4 +43,4 @@ export const ProfiledChatMessageList = forwardRef<HTMLDivElement, ProfiledChatMe
       </Profiler>
     );
   },
-);
+));
