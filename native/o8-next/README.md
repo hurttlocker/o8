@@ -83,6 +83,17 @@ assumes that updates append or that completed tool results are immutable.
 
 ## Verification
 
+For three macOS release composer runs against fresh disposable fixture hosts:
+
+```sh
+cargo +1.97.1 build --manifest-path native/o8-next/Cargo.toml --release --locked
+O8_NEXT_BINARY="$PWD/native/o8-next/target/release/o8-next" node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/macos-composer.ts
+```
+
+The runner always passes `--offscreen`, checks that the window stays inactive,
+and limits each child to nine seconds. It records CPU scene acknowledgement,
+not GPU presentation or physical input latency. See [macOS composer evidence](evidence/macos-composer.md).
+
 ```sh
 cargo +1.97.1 test --manifest-path native/o8-next/Cargo.toml --release --locked
 npx vitest run tests/next-render-parity.test.ts tests/next-stream-parity.test.ts

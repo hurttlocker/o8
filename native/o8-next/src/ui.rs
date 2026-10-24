@@ -1,3 +1,5 @@
+#[path = "composer_bench.rs"]
+mod composer_bench;
 #[path = "conversation.rs"]
 mod conversation;
 use crate::{
@@ -553,6 +555,7 @@ pub fn launch(
     offscreen: bool,
     unattended: bool,
     benchmark: Option<String>,
+    composer_benchmark: Option<String>,
     stream_benchmark: Option<(String, u64)>,
     started: Instant,
 ) {
@@ -566,6 +569,9 @@ pub fn launch(
                 surface.load_sessions(cx);
                 surface
             })).expect("GPUI window");
+        if let Some(path) = composer_benchmark {
+            composer_bench::start(handle, path, started, cx);
+        }
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
