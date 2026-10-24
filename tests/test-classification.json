@@ -1415,6 +1415,12 @@
       ]
     },
     {
+      "path": "tests/acp-catalogue-launch-config-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/acp-ended-after-tools-real-path.test.ts",
       "reasons": [
         "real-path"

@@ -48,7 +48,15 @@ export async function GET(request: NextRequest) {
         error: 'Muse could not report its models. Check its installation and retry.' });
     }
   }
-  const launch = resolveAcpLaunch(backend);
+  let launch: ReturnType<typeof resolveAcpLaunch>;
+  try {
+    launch = resolveAcpLaunch(backend);
+  } catch {
+    return NextResponse.json({
+      backend, available: false, groups: [], total: 0,
+      error: 'Could not read the agent launch configuration. Check its executable and arguments.',
+    }, { status: 503 });
+  }
   if (!launch) {
     // Not installed is a normal state, not an error — the picker renders an
     // install hint rather than a failure toast.
