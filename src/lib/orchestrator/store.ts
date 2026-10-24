@@ -1,3 +1,4 @@
+import { normalizeReviewerPrSource } from '@/lib/orchestrator/reviewer-pr-source-types';
 import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
@@ -92,7 +93,6 @@ let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 const CARDED_MISSIONS_STORAGE_KEY = 'o8:carded-mission-ids:v1';
 const CARDED_MISSIONS_MAX = 100;
 let cardedMissionIds: Set<string> | null = null;
-
 function loadCardedMissionIds(): Set<string> {
   if (cardedMissionIds) return cardedMissionIds;
   const ids = new Set<string>();
@@ -405,7 +405,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // it here and a rerun/re-read would silently sever session-rule inheritance.
     orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim() ? packet.orchestratorThreadId.trim() : undefined,
     orchestratorTurnId: typeof packet.orchestratorTurnId === 'string' && packet.orchestratorTurnId.trim() ? packet.orchestratorTurnId.trim() : undefined,
-    dispatcher: normalizePacketDispatcher(packet.dispatcher), launchContext: normalizePacketLaunchContext(packet.launchContext),
+    reviewSource: normalizeReviewerPrSource(packet.reviewSource), dispatcher: normalizePacketDispatcher(packet.dispatcher), launchContext: normalizePacketLaunchContext(packet.launchContext),
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)

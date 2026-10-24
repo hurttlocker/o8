@@ -486,6 +486,8 @@ export interface OrchestratorPacket {
   orchestratorTurnId?: string | null;
   /** Surface that created this packet. Review-worthy work routes back here. */
   dispatcher?: PacketDispatcherAttribution | null;
+  /** Exact host-fetched source for an isolated pull request reviewer. */
+  reviewSource?: import('@/lib/orchestrator/reviewer-pr-source-types').ReviewerPrSource;
   /** Outside-launch provenance and desktop reveal behavior. */
   launchContext?: WorkerLaunchContext | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
