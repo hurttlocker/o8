@@ -26,6 +26,9 @@ pub struct Grid {
     loading: HashSet<String>,
 }
 impl Grid {
+    pub(crate) fn shell_focus(&self, window: &mut Window, _: &mut Context<Self>) {
+        self.focus.focus(window);
+    }
     pub fn new(
         client: Client,
         options: Options,

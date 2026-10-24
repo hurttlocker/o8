@@ -44,6 +44,10 @@ async function main() {
       messages: seed.messages, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
       savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true }));
   }
+  if (process.argv.includes('--shell')) {
+    const { seedShellWorkspace } = await import('./shell-fixture');
+    seeds.push(seedShellWorkspace(dataDir, root));
+  }
   const composer = process.argv.includes('--composer');
   const transcriptFixtures = process.argv.includes('--transcript');
   if (transcriptFixtures) seeds.push(...seedTranscriptFixtures(dataDir, repo));
@@ -128,6 +132,10 @@ async function main() {
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');
     Object.assign(process.env, { O8_WS_PORT:String(address.port), WS_PORT:String(address.port), O8_API_PORT:String(address.port) });
     writeFileSync(join(dataDir,'ws-port'),String(address.port));
+    if (process.argv.includes('--shell')) {
+      writeFileSync(join(dataDir, 'api-port'), String(address.port));
+      process.stdout.write(`${JSON.stringify({ configDir: dataDir })}\n`);
+    }
     process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}` })}\n`);
   });
   function close() {

@@ -1,5 +1,7 @@
 # o8 next: live sessions and composer
 
+[Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
+
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
 Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
 session's latest 100 messages over HTTP, then subscribes to its existing WebSocket

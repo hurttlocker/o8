@@ -67,6 +67,7 @@ pub struct Client {
     origin: Url,
     agent: ureq::Agent,
     token: Option<String>,
+    workspace: Option<String>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
@@ -98,6 +99,7 @@ impl Client {
         }
         Ok(Self {
             origin,
+            workspace: None,
             token: token.filter(|s| !s.trim().is_empty()),
             agent: ureq::AgentBuilder::new()
                 .redirects(0)
@@ -135,6 +137,11 @@ impl Client {
         }
         serde_json::from_slice(&bytes)
             .map_err(|_| "Server returned an invalid transcript response".into())
+    }
+    pub fn in_workspace(&self, workspace: &str) -> Self {
+        let mut client = self.clone();
+        client.workspace = Some(workspace.into());
+        client
     }
     pub fn sessions(&self) -> Result<Vec<Session>, String> {
         let mut sessions = self
@@ -205,6 +212,9 @@ impl Client {
                 unread: false,
                 packet_header,
             });
+        }
+        if let Some(workspace) = &self.workspace {
+            sessions.retain(|session| session.repo_path.as_ref() == Some(workspace));
         }
         Ok(sessions)
     }

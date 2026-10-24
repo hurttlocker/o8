@@ -4,6 +4,8 @@ mod composer_bench;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "shell_session.rs"]
+mod shell_session;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
