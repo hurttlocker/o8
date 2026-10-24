@@ -1,0 +1,170 @@
+{
+  "schema": "o8/session-idle-memory-comparison/v1",
+  "issue": 4581,
+  "baselineCommit": "b8e12d0d356699c555f729c0259b19e5f796e426",
+  "node": "v22.23.4",
+  "platform": "linux",
+  "fixture": {
+    "entry": "Next standalone + ws-server bundle",
+    "sessions": 96,
+    "transcriptMiB": 4,
+    "payloadUtf8Bytes": 402707520,
+    "transcriptDigest": "a639f0884aa83cd6c23b264fa5cf3cb7d5114b4c2cfe22e3a5c3b2e7d7de59c4",
+    "completedSessions": 96,
+    "settleMs": 3000,
+    "persistedOutputUnchanged": true
+  },
+  "method": "Both servers are fresh. Warm empty-store HTTP modules, sample forced-GC idle, seed transcripts, read each over HTTP, subscribe and close each WS session, settle 3 seconds, force GC, sample both processes before either snapshot.",
+  "before": {
+    "idle": {
+      "next": {
+        "rssMiB": 124.2,
+        "heapUsedMiB": 57.14,
+        "heapTotalMiB": 59.7,
+        "externalMiB": 3.67,
+        "arrayBuffersMiB": 0.07
+      },
+      "ws": {
+        "rssMiB": 172.19,
+        "heapUsedMiB": 81.79,
+        "heapTotalMiB": 83.96,
+        "externalMiB": 5.75,
+        "arrayBuffersMiB": 2.07
+      }
+    },
+    "after": {
+      "next": {
+        "rssMiB": 549.61,
+        "heapUsedMiB": 442.59,
+        "heapTotalMiB": 469.42,
+        "externalMiB": 3.67,
+        "arrayBuffersMiB": 0.08
+      },
+      "ws": {
+        "rssMiB": 593.4,
+        "heapUsedMiB": 468.57,
+        "heapTotalMiB": 494.71,
+        "externalMiB": 5.82,
+        "arrayBuffersMiB": 2.07
+      }
+    }
+  },
+  "after": {
+    "idle": {
+      "next": {
+        "rssMiB": 135.43,
+        "heapUsedMiB": 56.45,
+        "heapTotalMiB": 61.2,
+        "externalMiB": 3.67,
+        "arrayBuffersMiB": 0.07
+      },
+      "ws": {
+        "rssMiB": 172.43,
+        "heapUsedMiB": 82.02,
+        "heapTotalMiB": 84.21,
+        "externalMiB": 5.75,
+        "arrayBuffersMiB": 2.07
+      }
+    },
+    "after": {
+      "next": {
+        "rssMiB": 151.05,
+        "heapUsedMiB": 55.84,
+        "heapTotalMiB": 60.67,
+        "externalMiB": 3.67,
+        "arrayBuffersMiB": 0.08
+      },
+      "ws": {
+        "rssMiB": 189.91,
+        "heapUsedMiB": 81.14,
+        "heapTotalMiB": 84.02,
+        "externalMiB": 5.82,
+        "arrayBuffersMiB": 2.07
+      }
+    }
+  },
+  "combinedPostActivityIdleMiB": {
+    "beforeRss": 1143.01,
+    "afterRss": 340.96,
+    "rssReductionPercent": 70.17,
+    "beforeHeap": 911.16,
+    "afterHeap": 136.98
+  },
+  "retainers": [
+    {
+      "process": "next",
+      "beforeOwner": "transcript parse cache Map",
+      "beforeRetainedBytes": 403173160,
+      "afterOwner": "bounded serialized thread summary cache",
+      "afterRetainedBytes": 65416
+    },
+    {
+      "process": "ws",
+      "beforeOwner": "transcript parse cache Map",
+      "beforeRetainedBytes": 403173440,
+      "afterOwner": "bounded serialized thread summary cache",
+      "afterRetainedBytes": 67648
+    },
+    {
+      "process": "next",
+      "beforeOwner": "compiled TypeScript module",
+      "beforeRetainedBytes": 10832256,
+      "afterOwner": "compiled TypeScript module",
+      "afterRetainedBytes": 10832256
+    },
+    {
+      "process": "ws",
+      "beforeOwner": "compiled WS bundle script",
+      "beforeRetainedBytes": 56509176,
+      "afterOwner": "compiled WS bundle script",
+      "afterRetainedBytes": 56514504
+    }
+  ],
+  "retainerMethod": "Immediate dominators over reachable non-weak snapshot edges. Summary-cache objects identified by their entries Map containing serialized json records; WS constructor ThreadSummaryCache, minified Next constructor C. Sizes include descendants and must not be added to ancestor sizes.",
+  "cacheLimits": {
+    "entries": 256,
+    "chargedUtf16Bytes": 1048576,
+    "eviction": "LRU; stat/write invalidation; deleted paths evicted during discovery"
+  },
+  "ciBudget": {
+    "sessions": 12,
+    "transcriptMiB": 4,
+    "postActivityIdleHeapMiBPerProcess": 96,
+    "retainedHeapGrowthMiBPerProcess": 24,
+    "entry": "Production HTTP route handlers in disposable host plus real ws-server bundle; no full Next build required"
+  },
+  "verification": {
+    "red": {
+      "testFile": "tests/session-idle-memory-real-path.test.ts",
+      "tail": "Test Files  1 failed (1)\n      Tests  1 failed (1)",
+      "postActivityHeapMiB": {
+        "routeHost": 120.99,
+        "ws": 131.07
+      },
+      "retainedHeapGrowthMiB": {
+        "routeHost": 49.23,
+        "ws": 48.92
+      }
+    },
+    "green": {
+      "testFiles": [
+        "tests/session-idle-memory-real-path.test.ts",
+        "tests/thread-summary-discovery-real-path.test.ts",
+        "src/lib/mobile/orchestrator-thread-history.test.ts"
+      ],
+      "tail": "Test Files  3 passed (3)\n      Tests  15 passed (15)"
+    },
+    "fullNpmTest": "Test Files  1224 passed | 3 skipped (1227)\n      Tests  8754 passed | 4 skipped (8758)",
+    "checks": [
+      "NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0",
+      "NODE_OPTIONS=--max-old-space-size=8192 npm run typecheck:fast: exit 0 (tsc fallback)",
+      "ESLint on all six touched TS/MJS files: exit 0",
+      "npm run rule-check -- --base=b8e12d0d3: 3 files, zero violations",
+      "node scripts/classify-tests.mjs --check: manifest matches",
+      "npm run build: exit 0",
+      "Standalone after fixture --check: exit 0"
+    ]
+  },
+  "reproduce": "node --max-old-space-size=8192 scripts/bench/session-memory.mjs --standalone --sessions=96 --transcript-mib=4 --snapshots --check --output=work/session-memory",
+  "scope": "Linux Node 22 fixture for Next standalone and ws-server. Day-long live traffic and the desktop shell were not measured. Raw snapshots and logs remain private under work/."
+}
