@@ -116,7 +116,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_lane_events',
     description:
-      'Stream lane lifecycle events. Pass `since` cursor from the previous response to long-poll for new events. Returns events in chronological order. Blocks up to `timeoutMs` (default 5000, max 12000) waiting for new events when the buffer is empty. Example: o8_lane_events() returns the current buffer. o8_lane_events({since: 47, timeoutMs: 8000}) long-polls for events newer than seq 47.',
+      'Stream lane lifecycle events. Pass `since` cursor from the previous response to long-poll for new events. Returns events in chronological order and a durable terminalReasons snapshot (latest 50, terminalReasonsTruncated when capped), including failures before a session exists. Filter lanes to retrieve older reasons. Blocks up to `timeoutMs` (default 5000, max 12000) waiting for new events when the buffer is empty. Example: o8_lane_events() returns the current buffer. o8_lane_events({since: 47, timeoutMs: 8000}) long-polls for events newer than seq 47.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -139,7 +139,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_packet_transcript',
     description:
-      'Read a paginated tail of a packet\'s codex transcript with normalized events (tool_call / tool_result / assistant / error / done). Pass `tail: true` for the last N events, or `cursor: N` to fetch events with seq > N. Example: o8_packet_transcript({packetId: "P1", tail: true, limit: 20}) returns the last 20 events. o8_packet_transcript({packetId: "P1", cursor: 47}) returns events after seq 47.',
+      'Returns terminalReason code and cause even when no session exists. Read a paginated tail of a packet\'s codex transcript with normalized events (tool_call / tool_result / assistant / error / done). Pass `tail: true` for the last N events, or `cursor: N` to fetch events with seq > N. Example: o8_packet_transcript({packetId: "P1", tail: true, limit: 20}) returns the last 20 events. o8_packet_transcript({packetId: "P1", cursor: 47}) returns events after seq 47.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -595,6 +595,8 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
         approvalCount,
         recentActivity,
         spendCapHits,
+        terminalReasons: data.terminalReasons ?? [],
+        terminalReasonsTruncated: data.terminalReasonsTruncated === true,
       },
     });
   } catch (err) {
@@ -678,6 +680,8 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
       data: {
         events,
         nextSince,
+        terminalReasons: data.terminalReasons ?? [],
+        terminalReasonsTruncated: data.terminalReasonsTruncated === true,
         timeoutMs,
         ...(requestedTimeoutMs > timeoutMs ? { requestedTimeoutMs } : {}),
       },
@@ -733,6 +737,7 @@ export async function handleTranscript(args: Record<string, unknown>): Promise<M
     const nextCursor = typeof nextCursorRaw === 'number' && Number.isFinite(nextCursorRaw)
       ? nextCursorRaw
       : null;
+    const reason = data.terminalReason as { code?: string; cause?: string } | null;
     const note = typeof data.note === 'string' ? data.note : '';
 
     const summary = events.length === 0
@@ -740,13 +745,14 @@ export async function handleTranscript(args: Record<string, unknown>): Promise<M
       : `${events.length} transcript events (nextCursor: ${nextCursor ?? 'null'})`;
 
     return jsonResult({
-      summary,
+      summary: reason ? `${summary}: ${reason.code}${reason.cause ? `: ${reason.cause}` : ''}` : summary,
       data: {
         packetId,
         sessionKey: data.sessionKey ?? null,
         events,
         nextCursor,
         note: note || null,
+        terminalReason: reason ?? null,
       },
     });
   } catch (err) {

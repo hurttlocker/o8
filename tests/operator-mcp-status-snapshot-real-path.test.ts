@@ -126,6 +126,7 @@ describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
     const { snapshot, ...data } = result.data;
     expect(data).toEqual({ agents: legacy.agents, approvals: legacy.approvals.items,
       approvalCount: legacy.approvals.count, recentActivity: legacy.recentActivity, spendCapHits: legacy.spendCapHits,
+      terminalReasons: legacy.terminalReasons, terminalReasonsTruncated: legacy.terminalReasonsTruncated,
       runtimeConnections: { status: 'available', runtimes: connections.dispatchableRuntimes } });
     expect(data.agents.map((agent) => agent.sessionKey)).toEqual(expect.arrayContaining(['pi-owned:snapshot', 'pi-owned:fallback']));
     expect(snapshot).toMatchObject({ capturedAt: new Date(clock).toISOString(), ageMs: 0 });

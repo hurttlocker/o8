@@ -97,6 +97,7 @@ export async function GET(request: NextRequest) {
         sessionKey: readback.sessionKey || null,
         events: windowed,
         nextCursor,
+        terminalReason: readback.terminalReason ?? null,
         ...(readback.note ? { note: readback.note } : {}),
       },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },

@@ -6,6 +6,7 @@ import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orches
 import { readTranscriptActivityBySession } from '@/lib/orchestrator/operator-mission-service/mission-status-transcript';
 import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
 import { applyOperatorStatusFreshness } from '@/lib/orchestrator/operator-status-freshness';
+import { laneTerminalReasonSnapshot } from '@/lib/lane/terminal-reason';
 import { approvalAge } from '@/lib/orchestrator/status-age';
 
 export const runtime = 'nodejs';
@@ -168,7 +169,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { summary, agents, approvals, recentActivity, spendCapHits },
+      { summary, agents, approvals, recentActivity, spendCapHits, ...laneTerminalReasonSnapshot(lanes.filter((lane) => !sessionKeyFilter || lane.sessionKey === sessionKeyFilter)) },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {

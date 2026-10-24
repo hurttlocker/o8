@@ -5,7 +5,8 @@ import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getOwnedCodexSessionIdentityId, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
-import { getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { readLaneTerminalReason, type LaneTerminalReason } from '@/lib/lane/terminal-reason';
+import { findLatestLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { getSqlite } from '@/lib/db';
 import { operatorSteerFailure, QUEUED_STEER_NOTE } from '@/lib/orchestrator/operator-mission-service/steer-queue';
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
@@ -45,6 +46,7 @@ export interface SessionTranscriptReadback {
 export interface PacketTranscriptReadback extends SessionTranscriptReadback {
   packetId: string;
   note?: string;
+  terminalReason?: LaneTerminalReason | null;
 }
 
 type LaneSteerTranscriptEvent = Extract<TranscriptEvent, { type: 'steer' }>;
@@ -54,19 +56,6 @@ function findPacket(packetId: string): OrchestratorPacket | null {
   try {
     const mission = readOrchestratorControlPlaneState();
     return mission.packets.find((packet) => packet.id === packetId) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Lane-registry fallback for fast-completing packets whose control-plane lane
- * binding may lag behind the durable lane row.
- */
-function resolveSessionKeyFromLaneRegistry(packetId: string): string | null {
-  try {
-    const lane = listLanes().find((candidate) => candidate.packetId === packetId);
-    return lane?.sessionKey?.trim() || null;
   } catch {
     return null;
   }
@@ -381,24 +370,27 @@ export async function readSessionTranscriptEvents(sessionKey: string): Promise<S
 export async function readPacketTranscriptEvents(packetId: string): Promise<PacketTranscriptReadback> {
   const packet = findPacket(packetId);
   const packetSessionKey = packet?.lane?.sessionKey?.trim() ?? '';
-  const sessionKey = packetSessionKey || resolveSessionKeyFromLaneRegistry(packetId);
+  const packetLane = findLatestLaneByPacket(packetId);
+  // A new sessionless attempt must never inherit a prior attempt's transcript.
+  const sessionKey = packetLane ? packetLane.sessionKey?.trim() || '' : packetSessionKey;
+  const terminalReason = readLaneTerminalReason(packetLane);
 
-  if (!packet && !sessionKey) {
+  if (!packet && !sessionKey && !packetLane) {
     return { packetId, sessionKey: '', runtime: null, events: [], note: 'packet_not_found' };
   }
 
   if (!sessionKey) {
-    return { packetId, sessionKey: '', runtime: null, events: [], note: 'no_session_binding' };
+    return { packetId, sessionKey: '', runtime: null, events: [], note: 'no_session_binding', terminalReason };
   }
 
   const readback = await readSessionTranscriptEvents(sessionKey);
-  const packetLane = listLanes().find((lane) => lane.packetId === packetId);
   const packetEvents = packetLane && packetLane.sessionKey !== sessionKey
     ? [...laneHuddleEvents(packetLane.id), ...laneSteerEvents(packetLane.id)]
     : [];
   return {
     packetId,
     ...readback,
+    terminalReason,
     events: mergeTranscriptEvents(readback.events, packetEvents),
   };
 }

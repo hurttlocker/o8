@@ -1,3 +1,5 @@
+import { buildHistoricalMissionStatus } from './historical-status';
+import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import { missionDispatchQueue } from './dispatch-queue';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
@@ -8,7 +10,7 @@ import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestra
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
-import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { getOperatorDefaultsSync, resolveBranchPrefixSync } from '@/lib/operator/defaults';
@@ -483,130 +485,6 @@ export async function dispatchMission(input: DispatchMissionInput) {
   };
 }
 
-/**
- * Build a lite mission status snapshot from the SQLite archive + live lanes.
- *
- * Used by `getMissionStatus` when the requested mission isn't the current
- * file-based active mission. Packet wave grouping, queue/release states, and
- * review results aren't reconstructed (we don't archive that depth) — just
- * the lane lifecycle (status, branch, last event), which is the answer to
- * "is my parallel mission done yet?"
- */
-function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').MissionRecord) {
-  const lanesByPacket = new Map<string, ReturnType<typeof findLaneByPacket>>();
-  const mergePolicy = currentLaneMergePolicy();
-  for (const meta of record.packetMeta) {
-    lanesByPacket.set(meta.id, findLaneByPacket(meta.id));
-  }
-
-  const inferPacketStatus = (lane: ReturnType<typeof findLaneByPacket>): string => {
-    if (!lane) return 'unknown';
-    switch (lane.status) {
-      case 'completed':
-      case 'archived':
-        return 'completed';
-      case 'reviewing':
-        return 'awaiting_review';
-      case 'merging':
-        return 'merging';
-      case 'failed':
-      case 'recovering':
-        return 'failed';
-      case 'launching':
-      case 'running':
-        return 'running';
-      case 'awaiting_input':
-      case 'awaiting_orchestrator':
-      case 'awaiting_human':
-        return 'blocked';
-      case 'idle':
-      case 'paused':
-        return lane.status;
-      default:
-        return 'unknown';
-    }
-  };
-
-  const inferReleaseState = (lane: ReturnType<typeof findLaneByPacket>) => (
-    lane?.status === 'completed' ? 'released' : 'pending'
-  );
-
-  const packets = record.packetMeta.map((meta) => {
-    const lane = lanesByPacket.get(meta.id) ?? null;
-    const recovery = lane?.outcome === 'merged' ? null : lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
-    return {
-      id: meta.id,
-      referenceLabel: meta.referenceLabel,
-      title: meta.title,
-      wave: 1,
-      status: inferPacketStatus(lane), runtime: lane?.runtime ?? null, model: lane?.model ?? null,
-      queueState: lane ? 'released' : 'unknown',
-      releaseState: inferReleaseState(lane),
-      blockedBy: [] as string[],
-      blockedReason: null,
-      summary: null,
-      recovery,
-      lane: lane ? {
-        laneId: lane.id,
-        sessionKey: lane.sessionKey,
-        runtime: lane.runtime, model: lane.model,
-        status: lane.status,
-        branch: lane.branch,
-        repoPath: lane.worktreePath ?? lane.repoPath,
-        lastEventAt: lane.lastEventAt,
-        lastLifecycleEventAt: lane.lastEventAt,
-        lastTranscriptAt: null,
-        lastActivityAt: lane.lastEventAt,
-        lastActivityLabel: lane.lastEventLabel,
-        transcriptUnsupportedReason: null,
-        lastEventLabel: lane.lastEventLabel,
-        mergeMode: mergePolicy.mode,
-        mergeModeNote: mergePolicy.note,
-      } : null,
-      review: null,
-    };
-  });
-
-  const agents = record.packetMeta
-    .map((meta) => {
-      const lane = lanesByPacket.get(meta.id) ?? null;
-      if (!lane) return null;
-      return {
-        packetId: meta.id,
-        laneId: lane.id,
-        sessionKey: lane.sessionKey,
-        label: lane.label,
-        runtime: lane.runtime, model: lane.model,
-        status: lane.status,
-        branch: lane.branch,
-        repoPath: lane.worktreePath ?? lane.repoPath,
-        lastEventAt: lane.lastEventAt,
-        lastLifecycleEventAt: lane.lastEventAt,
-        lastTranscriptAt: null,
-        lastActivityAt: lane.lastEventAt,
-        lastActivityLabel: lane.lastEventLabel,
-        transcriptUnsupportedReason: null,
-        lastEventLabel: lane.lastEventLabel,
-      };
-    })
-    .filter((agent): agent is NonNullable<typeof agent> => agent !== null);
-
-  return {
-    missionId: record.id,
-    prompt: record.prompt,
-    summary: record.summary,
-    repoPath: record.repoPath,
-    runtime: record.runtime,
-    constraints: record.constraints,
-    currentWave: 1,
-    totalWaves: record.totalWaves,
-    packets,
-    agents,
-    blockers: [] as Array<{ packetId: string; blockedBy: string[]; reason: string | null }>,
-    historical: true,
-  };
-}
-
 export async function getMissionStatus(input: MissionStatusInput) {
   const currentState = currentMissionState();
   const requestedMissionId = input.missionId?.trim();
@@ -636,10 +514,10 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const queueById = new Map(missionDispatchQueue(state).map((entry) => [entry.packetId, entry]));
   const dag = buildDagMetadata(state.packets);
   const packetById = new Map(state.packets.map((packet) => [packet.id, packet] as const));
-  const laneByPacketId = new Map(state.packets.map((packet) => [packet.id, findLaneByPacket(packet.id)] as const));
+  const laneByPacketId = new Map(state.packets.map((packet) => [packet.id, findLatestLaneByPacket(packet.id)] as const));
   const sessionKeys = state.packets.flatMap((packet) => {
     const lane = laneByPacketId.get(packet.id);
-    const sessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
+    const sessionKey = lane ? lane.sessionKey : packet.lane?.sessionKey ?? null;
     return sessionKey ? [sessionKey] : [];
   });
   const transcriptActivityBySession = await readTranscriptActivityBySession(sessionKeys);
@@ -674,6 +552,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
         transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
         lastEventLabel: lane.lastEventLabel,
+        terminalReason: readLaneTerminalReason(lane),
         mergeMode: mergePolicy.mode,
         mergeModeNote: mergePolicy.note,
       };
@@ -725,7 +604,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
       const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged') ? null : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
-      const laneSessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
+      const laneSessionKey = lane ? lane.sessionKey : packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
       const laneLastEventAt = lane?.lastEventAt ?? packet.lane?.lastEventAt ?? null;
@@ -745,6 +624,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         blockedBy: node.blockedBy,
         blockedReason: queueById.get(packet.id)?.detail ?? packet.blockedReason ?? null,
         dispatchQueue: queueById.get(packet.id) ?? null,
+        terminalReason: readLaneTerminalReason(lane),
         summary: packet.completionSummary?.trim()
           || completionContext?.selfReview?.outcome?.trim()
           || completionContext?.summary?.trim()
@@ -766,6 +646,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
           lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
           lastEventLabel: lane.lastEventLabel,
+          terminalReason: readLaneTerminalReason(lane),
           mergeMode: mergePolicy.mode,
           mergeModeNote: mergePolicy.note,
         } : packet.lane ? {
