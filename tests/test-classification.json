@@ -4888,6 +4888,14 @@
       ]
     },
     {
+      "path": "tests/release-feed-recovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-native-module-check.test.ts",
       "reasons": [
         "child-process"

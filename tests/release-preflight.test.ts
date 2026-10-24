@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parseReleaseNotes } from '../scripts/lib/public-release.mjs';
 import {
   acquireReleaseLock,
   performShipPreflight,
@@ -57,6 +58,28 @@ function passingRun(head: string) {
 }
 
 describe('ship preflight', () => {
+  it.each(['# Release notes', 'A plain paragraph.', '- Valid bullet\nInvalid paragraph'])
+  ('rejects invalid release notes before running any preflight command: %s', (notes) => {
+    const { root, head, env } = fixture();
+    mkdirSync(join(root, 'release-notes'));
+    writeFileSync(join(root, 'release-notes/next.md'), notes);
+    const run = vi.fn(passingRun(head));
+    expect(() => performShipPreflight({ root, version: '0.1.999', env, run }))
+      .toThrow('release-notes/next.md must contain Markdown bullets only');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('accepts valid release notes without changing their bytes or public-text filtering', () => {
+    const { root, head, env } = fixture();
+    const notes = '- Clearer workspace feedback.\n\n* Faster navigation.\n+ Rotate a password.\n';
+    mkdirSync(join(root, 'release-notes'));
+    writeFileSync(join(root, 'release-notes/next.md'), notes);
+    expect(performShipPreflight({ root, version: '0.1.999', env, run: passingRun(head) }).tag)
+      .toBe('v0.1.999');
+    expect(readFileSync(join(root, 'release-notes/next.md'), 'utf8')).toBe(notes);
+    expect(parseReleaseNotes(notes)).toEqual(['Clearer workspace feedback.', 'Faster navigation.']);
+  });
+
   it('accepts and verifies a profile without reading the fallback credentials or reporting profile output', () => {
     const { root, head, env } = fixture();
     env.APPLE_KEYCHAIN_PROFILE = 'synthetic-profile';

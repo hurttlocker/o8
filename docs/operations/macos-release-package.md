@@ -1,5 +1,32 @@
 # macOS release package
 
+## Release notes and feed recovery
+
+`release-notes/next.md` accepts blank lines and Markdown bullets beginning with
+`-`, `*`, or `+`. Headings and plain paragraphs fail ship preflight before
+native work starts. The preflight uses the same parser and public-text scrub
+as the feed publisher. Missing or empty notes retain the commit-based fallback.
+
+If installer publication succeeded but public feed generation failed, recover
+the metadata separately. From the intended release's source checkout, correct
+the notes and generate a local preview:
+
+```sh
+node scripts/release.mjs --dry-run --out-dir "$TMPDIR/o8-feed-preview"
+```
+
+Inspect the generated `latest-ship.json`, version, publication date and public
+text. With operator authorization to update the public feed, use:
+
+```sh
+bash scripts/sync-public-changelog.sh --latest-ship "$TMPDIR/o8-feed-preview/latest-ship.json"
+```
+
+The recovery script commits only `CHANGELOG.md`, `STATS.md` and
+`latest-ship.json` in the feed mirror. It does not replace installers, updater
+manifests, archives or signatures. Do not rerun installer publication to repair
+a feed-only failure.
+
 ## Notarization credentials in Keychain
 
 Store notarization credentials once in a notarytool Keychain profile. Run this

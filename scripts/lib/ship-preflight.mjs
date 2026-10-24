@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { resolveNotarizationCredentials } from './notarization.mjs';
+import { parseReleaseNotes } from './public-release.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -176,6 +177,10 @@ export function performShipPreflight(options) {
     env = process.env,
     run = commandReceipt,
   } = options;
+  // Run the publishing parser before credentials, commands, or native work.
+  // Missing notes remain valid: the feed can be built from public commits.
+  const notesPath = join(root, 'release-notes', 'next.md');
+  parseReleaseNotes(existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '');
   const tag = `v${version}`;
   const head = requireSuccess(
     run('git', ['rev-parse', 'HEAD'], { cwd: root, env }),
