@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { clearDesktopAuthError, getDesktopAuthError, subscribeDesktopAuthError, type DesktopAuthError } from '@/lib/auth/desktop-auth-error';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
+import { SignInDisclosure } from '@/components/auth/SignInDisclosure';
 import { APP_FONT_STACK, RamsButton, SETTINGS_CONTENT_MAX_WIDTH, TabHeading } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
@@ -66,10 +67,10 @@ export function AccountTab() {
           label={identity}
           subtitle={signedIn ? auth.user?.email : 'Connect your account to sync across devices.'}
           divider={signedIn}
-          accessory={<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          accessory={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '60%', minWidth: 0 }}>
             {signedIn ? <RamsButton onClick={auth.openManageAccount}>Manage account</RamsButton>
               : auth.accountConnection ? <RamsButton disabled={!unavailable} onClick={auth.retryAccountConnection}>{unavailable ? 'Retry account connection' : 'Connecting account…'}</RamsButton>
-              : auth.clerkEnabled ? <RamsButton onClick={auth.signIn}>Sign in to o8</RamsButton> : <ValuePill>Local</ValuePill>}
+              : auth.clerkEnabled ? <><RamsButton aria-describedby="account-sign-in-disclosure" onClick={auth.signIn}>Sign in to o8</RamsButton><SignInDisclosure id="account-sign-in-disclosure" /></> : <ValuePill>Local</ValuePill>}
           </div>}
         />
         {signedIn ? <SettingsRow icon={<AccountIcon />} label="Session" subtitle="Sign out of this o8 account." accessory={<RamsButton disabled={signingOut} onClick={() => { void signOut(); }}>{signingOut ? waitingForSignOut ? 'Waiting for sign-out…' : 'Signing out…' : 'Sign out'}</RamsButton>} /> : null}

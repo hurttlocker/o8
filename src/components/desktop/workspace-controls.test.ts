@@ -19,7 +19,10 @@ vi.mock('@/lib/theme/context', () => ({ useTheme: () => ({ workspaceGlass: true,
 vi.mock('./use-o8-browser-tabs', () => ({ useO8BrowserTabs: () => fixture.tabs }));
 vi.mock('@/lib/browser/pane-state', () => ({ readBrowserPaneState: () => ({ activeTabId: fixture.activeId }) }));
 vi.mock('@/lib/operator/use-native-browser-view', () => ({ useNativeBrowserViewFlag: () => false }));
-vi.mock('@/lib/auth/start-desktop-sign-in', () => ({ startDesktopSignIn: fixture.signIn }));
+vi.mock('@/lib/auth/start-desktop-sign-in', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/auth/start-desktop-sign-in')>(),
+  startDesktopSignIn: fixture.signIn,
+}));
 vi.mock('./O8EnginePane', () => ({ O8EnginePane: () => null }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
