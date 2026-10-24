@@ -566,6 +566,7 @@ export function createOrchestratorMessageHandler(
             options.currentAssistantRef.current = null;
           }
           if (newStatus === 'dead') {
+            options.flushCurrentAssistant();
             options.finalizeFirstTurnPlanCapture();
           }
           if (newStatus === 'ready' && options.activeTurnBackendRef) {
@@ -778,6 +779,7 @@ export function createOrchestratorMessageHandler(
         if (options.statusRef.current !== 'busy' && options.messagesRef.current.length === 0) break;
         const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
         console.error('[orchestrator-stream] Error:', error);
+        options.flushCurrentAssistant();
         options.finalizeFirstTurnPlanCapture();
         options.setStatus('error');
         setTranscriptMessages((prev) => [...prev, {

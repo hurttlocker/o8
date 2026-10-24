@@ -55,6 +55,8 @@ export interface OrchestratorSendOptions {
 }
 
 export interface OrchestratorStreamOptions {
+  /** Hidden tabs retain the stream while throttling text paints. */
+  visible?: boolean;
   projectId?: string | null;
   seededPlanText?: string | null;
   hasHistory?: boolean;

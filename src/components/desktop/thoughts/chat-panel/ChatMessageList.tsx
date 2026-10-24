@@ -287,7 +287,7 @@ export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListPr
               missionEntries={item.kind === 'mission-group' ? item.entries : undefined}
               isLast={index === displayMessages.length - 1 && !displayWaiting}
               isStreaming={index === lastAssistantIndex && displayWaiting}
-              repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
+              animateStreaming={active} repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
               visualizations={visualsByIndex.get(index)} artifacts={taskArtifactsByIndex.get(index)}
               taskArtifactThreadBusy={taskArtifactsByIndex.has(index) && taskArtifactThreadBusy} onTaskArtifactDeliver={onTaskArtifactDeliver}
               showChips={Boolean(index === lastAssistantIndex && hasSuggestedReplies && msg.id === suggestedReplyMessageId)}
@@ -365,13 +365,14 @@ interface ChatMessageItemProps extends Pick<ChatMessageListProps,
   missionEntries?: MobileTranscriptEntry[];
   isLast: boolean;
   isStreaming: boolean;
+  animateStreaming: boolean;
   visualizations?: VisualizationReference[];
   artifacts?: TaskArtifactView[];
   showChips: boolean;
   displayWaiting: boolean;
 }
 
-function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, repoPath, onRetryDelivery, composerQueue,
+function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, animateStreaming, repoPath, onRetryDelivery, composerQueue,
   visualizations, artifacts, taskArtifactThreadBusy, onTaskArtifactDeliver, showChips, displayWaiting,
   suggestedReplies, onSelectSuggestion, onDismissSuggestions, suggestedRepliesCollapsed,
   onRestoreSuggestions, suggestedRepliesPending,
@@ -384,7 +385,7 @@ function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, repoPath, o
   return <Fragment>
     {msg.role === 'assistant' && msg.receipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
     <div data-o8-message-id={msg.id} style={{ minWidth: 0 }}>
-      <DesktopAgentMessage entry={msg} isLast={isLast} isStreaming={isStreaming}
+      <DesktopAgentMessage entry={msg} isLast={isLast} isStreaming={isStreaming} animateStreaming={animateStreaming}
         repoPath={repoPath} onRetryDelivery={onRetryDelivery}
         visualizations={msg.role === 'assistant' ? visualizations : undefined}
         userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />} />

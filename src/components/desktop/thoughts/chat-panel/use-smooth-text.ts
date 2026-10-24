@@ -50,13 +50,13 @@ function prefersReducedMotion(): boolean {
  * churn between deltas), and reads the target via a ref so it never streams a
  * stale closure's text.
  */
-export function useSmoothText(text: string, streaming: boolean): string {
+export function useSmoothText(text: string, streaming: boolean, visible = true): string {
   const reduced = prefersReducedMotion();
   // Once a message has streamed, keep pacing its leftover tail after
   // `streaming` flips false. A never-streamed history message shows in full.
   const [everStreamed, setEverStreamed] = useState(streaming);
   if (streaming && !everStreamed) setEverStreamed(true);
-  const animate = (streaming || everStreamed) && !reduced;
+  const animate = visible && (streaming || everStreamed) && !reduced;
   const [revealed, setRevealed] = useState(animate ? 0 : text.length);
   const visibleReveal = !animate ? text.length : revealed > text.length ? 0 : revealed;
   if (visibleReveal !== revealed) setRevealed(visibleReveal);
