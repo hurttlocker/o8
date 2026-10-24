@@ -287,7 +287,7 @@ export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListPr
               missionEntries={item.kind === 'mission-group' ? item.entries : undefined}
               isLast={index === displayMessages.length - 1 && !displayWaiting}
               isStreaming={index === lastAssistantIndex && displayWaiting}
-              animateStreaming={active} repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
+              animateStreaming={active && index === lastAssistantIndex} repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
               visualizations={visualsByIndex.get(index)} artifacts={taskArtifactsByIndex.get(index)}
               taskArtifactThreadBusy={taskArtifactsByIndex.has(index) && taskArtifactThreadBusy} onTaskArtifactDeliver={onTaskArtifactDeliver}
               showChips={Boolean(index === lastAssistantIndex && hasSuggestedReplies && msg.id === suggestedReplyMessageId)}
