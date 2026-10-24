@@ -45,7 +45,7 @@ process.env.O8_CODEX_BIN = fakeCodex;
 
 const lanesRoute = await import('@/app/api/lanes/route');
 const { closeDb } = await import('@/lib/db');
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { addRepo } = await import('@/lib/repos/registry');
 const { WorktreeManager } = await import('@/lib/worktree/manager');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
@@ -376,6 +376,65 @@ describe('finished packet checkout retirement', () => {
     const snapshot = getWorkspaceSnapshot(repo.id, 'finished-missing-session')!;
     expect(snapshot).toMatchObject({ state: 'retired', headCommit: head });
     expect(git(repoPath, 'rev-parse', snapshot.recoveryRef)).toBe(head);
+    finished = true;
+  }, 120_000);
+
+  it.each([false, true])('closes an externally merged archived packet with artifact helpers and outside holder=%s', async (outsideHolder) => {
+    const packetId = 'finished-merged-holder-' + outsideHolder;
+    const { repo, source, head } = await finishedPacket(packetId);
+    // The remote adopts the packet's commit before Close, as with a PR merged
+    // outside the app. Ignored unique content requires preservation readers.
+    const remote = path.join(root, 'merged-remote-' + outsideHolder + '.git');
+    git(repoPath, 'clone', '--bare', '--quiet', repoPath, remote);
+    const ignorePath = path.join(source.workspacePath, '.gitignore');
+    writeFileSync(ignorePath, readFileSync(ignorePath, 'utf8') + 'review-notes/\n');
+    git(source.workspacePath, 'commit', '-qam', 'ignore review artifacts');
+    const preservedHead = git(source.workspacePath, 'rev-parse', 'HEAD');
+    git(source.workspacePath, 'push', '--quiet', remote, 'HEAD:refs/heads/main');
+    mkdirSync(path.join(source.workspacePath, 'review-notes'));
+    writeFileSync(path.join(source.workspacePath, 'review-notes', 'result.txt'), 'retained review evidence\n');
+    const holder = outsideHolder ? spawn(process.execPath, ['-e', 'process.stdout.write("ready");setInterval(() => {}, 1000)'], {
+      cwd: source.workspacePath, stdio: ['ignore', 'pipe', 'pipe'],
+    }) : null;
+    if (holder) await new Promise(resolve => holder.stdout!.once('data', resolve));
+    try {
+      const closed = await cli(['packet', 'close', packetId, '--reason', 'adopted_elsewhere']);
+      if (holder) {
+        expect(closed.exitCode).not.toBe(0);
+        expect(existsSync(source.workspacePath)).toBe(true);
+        expect(closed.stderr + closed.stdout).toContain(`PID ${holder.pid} (node)`);
+        expect(getLaneEvents(source.lane.id).some(event => event.payload.phase === 'archive_cleanup_held'
+          && String(event.payload.detail).includes(`PID ${holder.pid} (node)`))).toBe(true);
+        expect(readFileSync(path.join(source.workspacePath, 'review-notes', 'result.txt'), 'utf8')).toBe('retained review evidence\n');
+      } else {
+        expect(closed.exitCode, closed.stderr + closed.stdout).toBe(0);
+        expect(existsSync(source.workspacePath)).toBe(false);
+        const snapshot = getWorkspaceSnapshot(repo.id, packetId)!;
+        expect(snapshot).toMatchObject({ state: 'retired', headCommit: preservedHead });
+        expect(git(repoPath, 'rev-parse', snapshot.recoveryRef)).toBe(preservedHead);
+        const { getWorkspaceRetirementPreservationId } = await import('@/lib/workspace/workspace-materialization-retirement');
+        const { readWorkspacePreservation } = await import('@/lib/workspace/preservation-store');
+        const preservation = await readWorkspacePreservation(getWorkspaceRetirementPreservationId(source.workspacePath)!);
+        expect(preservation.payload.capture.entries).toContainEqual(expect.objectContaining({
+          path: 'review-notes/result.txt', content: Buffer.from('retained review evidence\n').toString('base64'),
+        }));
+        expect(getLaneEvents(source.lane.id).some(event => event.verb === 'close_timing'
+          && Number(event.payload.artifactHelperStarts) > 0)).toBe(true);
+      }
+      expect(git(remote, 'rev-parse', 'main')).toBe(preservedHead);
+      expect(git(remote, 'merge-base', '--is-ancestor', head, 'main')).toBe('');
+    } finally {
+      if (holder) {
+        const closed = new Promise(resolve => holder.once('close', resolve));
+        holder.kill(); await closed;
+      }
+    }
+    if (holder) {
+      const retried = await cli(['packet', 'close', packetId, '--reason', 'adopted_elsewhere']);
+      expect(retried.exitCode, retried.stderr + retried.stdout).toBe(0);
+      expect(existsSync(source.workspacePath)).toBe(false);
+      expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired', headCommit: preservedHead });
+    }
     finished = true;
   }, 120_000);
 

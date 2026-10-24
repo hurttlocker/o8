@@ -346,11 +346,11 @@ async function closePacketUnmergedUnlocked(input: {
       };
     }
     const hadCheckout = Boolean(priorLane?.worktreePath && existsSync(priorLane.worktreePath));
-    const removed = hadCheckout && priorLane
-      ? await import('@/lib/lane/retire-finished-worktree').then(({ retireFinishedWorktree }) => retireFinishedWorktree(priorLane))
-      : false;
-    if (hadCheckout && !removed) return { ok: false, code: 'close_failed', status: 409,
-      message: 'Archived packet checkout retirement was not confirmed. The checkout remains held.' };
+    const cleanup = hadCheckout && priorLane
+      ? await import('@/lib/lane/retire-finished-worktree').then(({ retireFinishedWorktreeWithResult }) => retireFinishedWorktreeWithResult(priorLane))
+      : null;
+    if (cleanup && !cleanup.removed) return { ok: false, code: 'close_failed', status: 409,
+      message: cleanup.detail ?? `Archived packet checkout retirement was not confirmed (${cleanup.reason ?? 'unknown'}). The checkout remains held.` };
     return {
       ok: true,
       result: {
