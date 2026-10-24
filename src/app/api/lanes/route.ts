@@ -35,6 +35,25 @@ async function reconcileLanesIfDue(): Promise<void> {
 
 export async function GET(req: NextRequest) {
   const startedAt = performance.now();
+  // Cross-packet safety checks need occupancy, never task content or credentials.
+  // Resolve authority here too: middleware recognition alone survives revocation.
+  if (req.nextUrl.searchParams.get('view') === 'live') {
+    const principal = resolveRequestPrincipalContext(req);
+    if (principal.role !== 'operator'
+      && !(principal.role === 'worker' && !principal.readOnly && principal.packetId && principal.tokenId)) {
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'live_status_forbidden', message: 'Live status requires an operator or packet-bound worker credential.' },
+      }, { status: 403 });
+    }
+    // Deliberately skip reconciliation: this bounded read must not mutate lanes.
+    const lanes = listActiveLanes().map(({ id, packetId, status, worktreePath }) => (
+      { id, packetId, status, worktreePath }
+    ));
+    return NextResponse.json({ lanes }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
   const denied = requirePanelAuth(req);
   if (denied) return denied;
   const principal = resolveRequestPrincipalContext(req);
