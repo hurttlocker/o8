@@ -12,6 +12,37 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
+it('loads both preloads through the real launcher from a path containing spaces and a URL fragment', async () => {
+  const root = await createRetainedGeneratedOutputFixture('o8-preload-url-');
+  const repo = path.join(root, 'prebuild # fixture');
+  mkdirSync(path.join(repo, 'scripts/lib'), { recursive: true });
+  writeFileSync(path.join(repo, 'tsconfig.json'), '{}\n');
+  writeFileSync(path.join(repo, 'package.json'), '{"type":"module"}\n');
+  symlinkSync(path.join(source, 'node_modules'), path.join(repo, 'node_modules'), 'junction');
+  for (const name of ['lib/generated-output-launch.mjs', 'register-server-only-stub.mjs']) {
+    writeFileSync(path.join(repo, 'scripts', name), readFileSync(path.join(source, 'scripts', name)));
+  }
+  // The payload stands in for the compiler. Its typed source needs the tsx
+  // preload and its server-only require needs the other preload to run first.
+  writeFileSync(path.join(repo, 'scripts/generated-output-run.ts'), `
+    import { createRequire } from 'node:module';
+    import { writeFileSync } from 'node:fs';
+    const answer: number = 42;
+    createRequire(import.meta.url)('server-only');
+    writeFileSync('preload-proof.json', JSON.stringify({ answer, mode: process.argv[2] }));
+  `);
+  const launcher = pathToFileURL(path.join(repo, 'scripts/lib/generated-output-launch.mjs')).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const { runGeneratedOutputLaunch } = await import(${JSON.stringify(launcher)});
+    process.exitCode = await runGeneratedOutputLaunch('prebuild');
+  `], { cwd: repo, encoding: 'utf8', timeout: 30_000, env: { ...process.env,
+    TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') } });
+
+  expect(result.status, result.stderr + result.stdout).toBe(0);
+  expect(JSON.parse(readFileSync(path.join(repo, 'preload-proof.json'), 'utf8')))
+    .toEqual({ answer: 42, mode: 'prebuild' });
+});
+
 it('preserves managed linked prebuild ownership through native producers', async () => {
   const root = await createRetainedGeneratedOutputFixture('o8-managed-prebuild-');
   const repo = path.join(root, 'repo');

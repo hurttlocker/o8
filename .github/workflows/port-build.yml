@@ -93,6 +93,9 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci --prefer-offline
+      # Exercise the production launcher with the runner's native absolute paths
+      # before starting the expensive build (Windows drive paths need file URLs).
+      - run: npx vitest run tests/generated-output-launch.test.ts
       # Public release AppImages are signed with o8's durable Linux release
       # identity. Scheduled build artifacts remain unsigned diagnostics.
       - name: Configure Linux release signing
