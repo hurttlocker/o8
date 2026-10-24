@@ -109,9 +109,7 @@ export function O8HandoffsPane({
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
   const scopeVersionRef = useRef(0);
-  const scopedRepoRef = useRef(scopedRepo);
   const selectionRef = useRef(selection);
-  scopedRepoRef.current = scopedRepo;
   selectionRef.current = selection;
 
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
@@ -183,6 +181,7 @@ export function O8HandoffsPane({
   const send = async () => {
     const text = draft.trim();
     if (!scopedRepo || !target || !replyToId || !agents.some((agent) => agent.name === target && agent.live !== false) || !text || sendInFlightRef.current) return;
+    const scopeVersion = scopeVersionRef.current;
     sendInFlightRef.current = true;
     setSending(true);
     setSendError(null);
@@ -194,13 +193,13 @@ export function O8HandoffsPane({
       });
       const body = await response.json() as { message?: AgentMessage } & BusErrorBody;
       if (!response.ok || !body.message) throw new Error(errorText(response, body));
-      if (scopedRepoRef.current !== scopedRepo) return;
+      if (scopeVersionRef.current !== scopeVersion) return;
       setMessages((current) => [body.message!, ...current.filter((message) => message.id !== body.message!.id)].slice(0, MESSAGE_LIMIT));
       setDraft('');
       setReplyToId(null);
       setTarget('');
     } catch (caught) {
-      if (scopedRepoRef.current === scopedRepo) setSendError(caught instanceof Error ? caught.message : 'Message could not be sent.');
+      if (scopeVersionRef.current === scopeVersion) setSendError(caught instanceof Error ? caught.message : 'Message could not be sent.');
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
