@@ -144,17 +144,61 @@ export function defaultRange() {
 }
 
 /**
- * The commits carried by one versioned release. Unlike defaultRange(), this is
- * anchored to the supplied tag so a concurrent commit that reaches HEAD while
- * the build or notarization runs cannot replace the release's receipt range.
+ * Anchor versioned metadata to a published stable ancestor, never an unused
+ * local tag. Missing API evidence or Git history must stop publication rather
+ * than silently shorten its notes, credits, and report receipts.
  */
 export function releaseRange(tag) {
-  try {
-    return `${git(['describe', '--tags', '--abbrev=0', `${tag}^`])}..${tag}`;
-  } catch {
-    // The release tag is the only tag in history.
-    return `${tag}~20..${tag}`;
+  const stableTag = /^v\d+\.\d+\.\d+$/;
+  if (!/^v\d+\.\d+\.\d+(?:-preview\.\d+)?$/.test(tag)) {
+    throw new Error('Cannot resolve published release range: invalid release tag.');
   }
+  let releases;
+  try {
+    const evidence = execFileSync('gh', [
+      'api', '--paginate', 'repos/o8-run/o8/releases?per_page=100',
+      '--jq', '.[] | {tag_name,draft,prerelease,published_at} | @json',
+    ], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    releases = evidence.trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  } catch {
+    throw new Error('Cannot read published release evidence. Check GitHub access and retry.');
+  }
+  if (!releases.every(release => release && typeof release.tag_name === 'string'
+    && typeof release.draft === 'boolean' && typeof release.prerelease === 'boolean'
+    && (release.draft || (typeof release.published_at === 'string'
+      && Number.isFinite(Date.parse(release.published_at)))))) {
+    throw new Error('Cannot resolve published release range: malformed release evidence.');
+  }
+  releases = releases
+    .filter(release => !release.draft && !release.prerelease
+      && stableTag.test(release.tag_name) && release.tag_name !== tag)
+    .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
+  let target;
+  try {
+    target = git(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`]);
+  } catch {
+    throw new Error(`Cannot resolve published release range: release tag ${tag} is missing locally.`);
+  }
+  for (const release of releases) {
+    const baseline = release.tag_name;
+    let ancestor;
+    try {
+      ancestor = git(['rev-parse', '--verify', `refs/tags/${baseline}^{commit}`]);
+    } catch {
+      throw new Error(`Cannot verify published release ${baseline}. Fetch release tags and full history before retrying.`);
+    }
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', ancestor, target], { stdio: 'ignore' });
+      return `${baseline}..${tag}`;
+    } catch (error) {
+      // A published release on another branch or after this candidate is not
+      // its baseline. Other Git failures are unavailable evidence, not absence.
+      if (error.status !== 1) {
+        throw new Error('Cannot verify published release ancestry. Fetch full history before retrying.');
+      }
+    }
+  }
+  throw new Error(`Cannot resolve published release range for ${tag}: no published stable ancestor.`);
 }
 
 /**
