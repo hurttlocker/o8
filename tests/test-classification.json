@@ -3027,6 +3027,12 @@
       ]
     },
     {
+      "path": "tests/governance-smoke-teardown-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/governed-terminal-write-real-path.test.ts",
       "reasons": [
         "child-process",
