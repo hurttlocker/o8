@@ -23,6 +23,12 @@ fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
 }
 impl Surface {
     pub(super) fn send(&mut self, promote: Option<String>, cx: &mut Context<Self>) {
+        self.mutate_message(promote, false, cx);
+    }
+    pub(super) fn remove_queued(&mut self, id: String, cx: &mut Context<Self>) {
+        self.mutate_message(Some(id), true, cx);
+    }
+    fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
         if self.saving || !self.queue_ready || self.composer.read(cx).composing() {
             return;
         }
@@ -42,7 +48,7 @@ impl Surface {
         let fresh = !self.pending.contains_key(&session.id);
         let (method, body) = if let Some(id) = promote {
             (
-                "PATCH",
+                if remove { "DELETE" } else { "PATCH" },
                 json!({"repoPath":repo,"threadId":session.id,"id":id}),
             )
         } else {
@@ -81,7 +87,12 @@ impl Surface {
         self.generation += 1;
         let generation = self.generation;
         self.saving = true;
-        self.notice = "Saving message…".into();
+        self.notice = if remove {
+            "Removing queued message…"
+        } else {
+            "Saving message…"
+        }
+        .into();
         cx.notify();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
@@ -91,7 +102,12 @@ impl Surface {
                     error.status.is_some_and(|code| (400..500).contains(&code)),
                 )
             })?;
-            if !receipt_matches(method, &body, &response) {
+            let matches = if method == "DELETE" {
+                response["ok"] == true
+            } else {
+                receipt_matches(method, &body, &response)
+            };
+            if !matches {
                 return Err((
                     "Message receipt did not match. Draft retained; inspect the shared queue."
                         .into(),
@@ -117,7 +133,12 @@ impl Surface {
                                 this.composer.update(cx, |i, cx| i.clear(cx));
                             }
                         }
-                        this.notice = "Message saved. Delivery status is shown below.".into();
+                        this.notice = if method == "DELETE" {
+                            "Queued message removed."
+                        } else {
+                            "Message saved. Delivery status is shown below."
+                        }
+                        .into();
                         match queue {
                             Ok(queue) => this.queue = queue,
                             Err(error) => this.notice = error,
@@ -160,20 +181,33 @@ impl Surface {
             return;
         };
         let generation = self.generation;
+        let captured = self.transcript.as_ref().map(|t| t.checkpoint());
+        self.reconcile_revision += 1;
+        let revision = self.reconcile_revision;
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { Ok::<_, String>((client.sessions()?, client.queue(&session)?)) });
+        let task = cx.background_executor().spawn(async move {
+            Ok::<_, String>((
+                client.sessions()?,
+                client.queue(&session)?,
+                client.history(&session.id)?,
+            ))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if generation != this.generation {
+                if generation != this.generation || revision != this.reconcile_revision {
                     return;
                 }
                 match result {
-                    Ok((sessions, queue)) => {
+                    Ok((sessions, queue, history)) => {
                         this.sessions = sessions;
                         this.queue = queue;
+                        if let Some(transcript) = &mut this.transcript {
+                            if captured.is_some_and(|stamp| transcript.saved_tail(history, stamp)) {
+                                let rows = transcript.rows.clone();
+                                this.install_rows(rows);
+                            }
+                        }
                     }
                     Err(error) => this.notice = format!("{error}. Refresh to retry."),
                 }
@@ -185,6 +219,11 @@ impl Surface {
     pub(super) fn composer_panel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let enabled = self.queue_ready && !self.saving;
         let can_steer = self.queue["canSteer"] == true;
+        let mode = if self.send_next || !can_steer {
+            "Queued for after this turn"
+        } else {
+            "Steers the running turn"
+        };
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
             .into_iter()
@@ -208,7 +247,7 @@ impl Surface {
             .flex_col()
             .gap(px(8.))
             .child(self.composer.clone())
-            .child(div().text_size(px(9.5)).text_color(rgb(0x8a93a0)).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued"))
+            .child(div().text_size(px(9.5)).text_color(rgb(0x8a93a0)).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued · F7: remove queued"))
             .child(
                 div()
                     .text_size(px(10.))
@@ -226,11 +265,7 @@ impl Surface {
                             .py(px(5.))
                             .rounded(px(7.))
                             .cursor_pointer()
-                            .child(if self.send_next || !can_steer {
-                                "Send next"
-                            } else {
-                                "Steer"
-                            })
+                            .child(div().id("mode-description").debug_selector(move || mode.into()).child(mode))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if !this.saving {
                                     this.send_next = !this.send_next;
@@ -251,6 +286,9 @@ impl Surface {
             )
             .child(div().id("composer-queue").max_h(px(120.)).overflow_y_scroll().children(queue.map(|item| {
                 let id = item["id"].as_str().unwrap_or("").to_owned();
+                let remove_id = id.clone();
+                let cancellable = enabled && (item["status"] == "queued" || item["status"] == "held"
+                    || (item["status"] == "dispatching" && item["admittedAt"].is_null()));
                 let steerable = enabled
                     && item["status"] == "queued"
                     && item["intent"] == "send-next"
@@ -281,6 +319,12 @@ impl Surface {
                                     this.send(Some(id.clone()), cx)
                                 })),
                         )
+                    })
+                    .when(cancellable, |d| {
+                        d.child(div().id(gpui::ElementId::Name(format!("remove-{remove_id}").into()))
+                            .debug_selector(|| "remove-queued".into())
+                            .cursor_pointer().child("Remove")
+                            .on_click(cx.listener(move |this, _, _, cx| this.remove_queued(remove_id.clone(), cx))))
                     })
             })))
             .into_any_element()

@@ -48,6 +48,7 @@ pub(crate) struct Surface {
     focus: FocusHandle,
     notice: String,
     generation: u64,
+    reconcile_revision: u64,
     list_generation: u64,
     history_loading: bool,
     key_revision: u64,
@@ -78,6 +79,7 @@ impl Surface {
             focus,
             notice: String::new(),
             generation: 0,
+            reconcile_revision: 0,
             list_generation: 0,
             history_loading: false,
             key_revision: 0,
@@ -376,6 +378,23 @@ impl Render for Surface {
                             .map(str::to_owned);
                         if let Some(id) = id {
                             this.send(Some(id), cx);
+                        }
+                    }
+                    "f7" => {
+                        let id = this.queue["items"]
+                            .as_array()
+                            .and_then(|items| {
+                                items.iter().find(|item| {
+                                    item["status"] == "queued"
+                                        || item["status"] == "held"
+                                        || (item["status"] == "dispatching"
+                                            && item["admittedAt"].is_null())
+                                })
+                            })
+                            .and_then(|item| item["id"].as_str())
+                            .map(str::to_owned);
+                        if let Some(id) = id {
+                            this.remove_queued(id, cx);
                         }
                     }
                     "home" => this.navigate(false, cx),

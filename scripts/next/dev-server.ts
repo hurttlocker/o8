@@ -12,6 +12,10 @@ import { isolateTranscriptDiscovery, seedTranscriptFixtures } from './transcript
 import { attachTranscriptSocket } from './transcript-socket';
 
 async function main() {
+  if (process.argv.includes('--worker')) {
+    await (await import('./worker-server')).startWorkerServer();
+    return;
+  }
   const root = mkdtempSync(join(tmpdir(), 'o8-next-dev-'));
   const dataDir = join(root, 'data');
   const repo = join(root, 'fixture-repo');
@@ -104,7 +108,7 @@ async function main() {
       requests.push(`${req.method} ${url.pathname}`);
       const route = req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
-          ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : null
+          ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
           : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.

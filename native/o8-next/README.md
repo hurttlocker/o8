@@ -57,7 +57,7 @@ The launcher requires both the opt-in flag and an explicit absolute executable
 path. The native client requires an explicit numeric loopback HTTP origin with a
 port; it does not discover installed configuration, read app data files, follow
 redirects or use environment proxies. The composer requires an explicit HTTP
-operator bearer in `O8_NEXT_API_TOKEN`; queue POST/PATCH are its only mutations.
+operator bearer in `O8_NEXT_API_TOKEN`; queue POST/PATCH/DELETE are its only mutations.
 Responses are bounded to 16 MiB and requests time out after five seconds.
 
 ## Existing contracts
@@ -211,6 +211,10 @@ use Working, Review and Recent groups. Review sorts attention before recency;
 other groups sort by last message. Queue reconciliation preserves the live
 transcript and its retained row layouts.
 
+The mode control says "Steers the running turn" or "Queued for after this turn".
+Queued messages also expose Remove; F7 removes the first cancellable message.
+Removal uses the existing DELETE endpoint and cannot stop an admitted turn.
+
 Set `O8_NEXT_API_TOKEN` to the selected server's operator bearer through the
 environment. The native process sends it only to that numeric loopback HTTP
 origin, without redirects or proxies; it never logs the token or discovers
@@ -337,3 +341,34 @@ for 1,000 and 20,000 added lines in both modes. The test text system supplies no
 native font shaping or GPU/compositor presentation; this does not establish
 on-screen frame cadence. See [diff verification](evidence/diff/verification.md)
 for raw samples, audit results and remaining acceptance.
+
+## Real worker composer (#4532)
+
+Add `--worker` to the disposable dev-server command to run the production HTTP
+handlers and `src/ws-server.ts` with a real Pi SDK child process. The fixture
+replaces only model inference and external tool servers. Its owned temporary
+workspace and session store never use accounts or installed app data. It supports
+the existing queue POST/PATCH/DELETE and production mobile history/sync handlers;
+it adds no application routes. The original replay fixture remains available.
+
+Send `Start streaming` to start the fixture's 20 Hz response. Subsequent steers
+are delivered to that running Pi session. Queue mode waits for its turn to end.
+Writing `release` followed by a newline to the dev server's stdin releases the
+fixture model response; this is test control outside the application protocol.
+The fixture recognizes `Steered instruction`, `Promoted instruction`,
+`Queued instruction` and `Idle message` in later model contexts.
+
+```sh
+npx vitest run tests/composer-next-worker-real-path.test.ts
+cargo test --locked --manifest-path native/o8-next/Cargo.toml
+O8_NEXT_WORKER_RESULTS=work/worker-run.json cargo test --release --locked --manifest-path native/o8-next/Cargo.toml worker_send_steer_queue_promote_remove_and_streaming_latency -- --nocapture
+```
+
+The headless test types and submits through the GPUI composer, observes actual
+worker output through the production WebSocket history bridge, and clicks queue
+actions. Timers acknowledge changed input and worker content in CPU scene paint.
+The existing one-second reconciliation tick refreshes the saved history tail,
+including changes to an existing assistant id that the sync cursor omits. Older
+retained rows survive; sequence/boot and request revisions reject stale reads.
+Linux TestAppContext uses a no-op text system; these are neither GPU presentation
+nor physical keyboard timings. See [worker composer evidence](evidence/worker-composer.md).

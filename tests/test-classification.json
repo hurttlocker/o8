@@ -2333,6 +2333,14 @@
       ]
     },
     {
+      "path": "tests/composer-next-worker-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-queue-real-path.test.ts",
       "reasons": [
         "real-path"

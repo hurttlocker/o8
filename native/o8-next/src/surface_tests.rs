@@ -15,18 +15,25 @@ impl Drop for Server {
     }
 }
 fn fixture() -> (Server, Client) {
+    fixture_mode(false)
+}
+fn fixture_mode(worker: bool) -> (Server, Client) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut child = Command::new("node")
-        .current_dir(root)
-        .args([
-            "--import",
-            "./scripts/register-server-only-stub.mjs",
-            "--import",
-            "tsx",
-            "scripts/next/dev-server.ts",
-            "--composer",
-        ])
+    let mut command = Command::new("node");
+    command.current_dir(root).args([
+        "--import",
+        "./scripts/register-server-only-stub.mjs",
+        "--import",
+        "tsx",
+        "scripts/next/dev-server.ts",
+        "--composer",
+    ]);
+    if worker {
+        command.arg("--worker");
+    }
+    let mut child = command
         .env("O8_NEXT_API_TOKEN", "fixture-operator-bearer")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -52,7 +59,7 @@ fn fixture() -> (Server, Client) {
         .unwrap();
     let body = json!({"repoPath":session.repo_path,"threadId":session.id,"id":"fixture-denied"});
     let invalid = Client::authenticated(&origin, Some("fixture-invalid-bearer".into())).unwrap();
-    for method in ["POST", "PATCH"] {
+    for method in ["POST", "PATCH", "DELETE"] {
         for denied in [&anonymous, &invalid] {
             assert_eq!(
                 denied.mutate_queue(method, &body).unwrap_err().message,
@@ -62,6 +69,9 @@ fn fixture() -> (Server, Client) {
     }
     (Server(child), client)
 }
+
+#[path = "worker_tests.rs"]
+mod worker_tests;
 
 #[gpui::test]
 fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
