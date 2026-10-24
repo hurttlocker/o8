@@ -258,6 +258,50 @@ describe('O8HandoffsPane', () => {
     await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Conversation already closed.'));
   });
 
+  it.each([
+    { outcome: 'success', returnToOriginal: false },
+    { outcome: 'failure', returnToOriginal: false },
+    { outcome: 'success', returnToOriginal: true },
+    { outcome: 'failure', returnToOriginal: true },
+  ])('ignores old action $outcome after a repository switch (return=$returnToOriginal)', async ({ outcome, returnToOriginal }) => {
+    const otherRepo = { ...repo, id: 'repo-other', name: 'other', localPath: '/workspace/other' };
+    let finishAction!: (response: Response) => void;
+    const pendingAction = new Promise<Response>((resolve) => { finishAction = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/agents/conversation' && init?.method === 'POST') return pendingAction;
+      const scope = new URL(url, 'http://fixture.test').searchParams.get('repo');
+      if (url.startsWith('/api/agents/presence?')) return jsonResponse({ agents: [{ ...agent, repo: scope }] });
+      if (url.startsWith('/api/agents/message?')) return jsonResponse({ messages: [{ ...incoming, repo: scope }] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const renderScope = async (repoPath: string) => {
+      await act(async () => root.render(createElement(O8HandoffsPane, {
+        active: true, repoPath, registeredRepos: [repo, otherRepo], allRepos: false,
+      })));
+      await vi.waitFor(() => expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')).not.toBeNull());
+    };
+    await renderScope(repo.localPath);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-agent-conversation-id="conversation-reply"]')?.click());
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Stop')?.click());
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String(posts[0][1]?.body))).toEqual({
+      id: 'conversation-reply', repo: repo.localPath, action: 'close',
+    });
+
+    await renderScope(otherRepo.localPath);
+    if (returnToOriginal) await renderScope(repo.localPath);
+    const readsBeforeCompletion = fetchMock.mock.calls.filter(([, init]) => init?.method !== 'POST').length;
+    await act(async () => finishAction(outcome === 'success'
+      ? jsonResponse({ conversation: { id: 'conversation-reply', status: 'closed' } })
+      : jsonResponse({ error: { message: 'Old repository action failed.' } }, 409)));
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(readsBeforeCompletion);
+    expect(host.querySelector('[data-agent-conversation-id="conversation-reply"]')).not.toBeNull();
+  });
+
   it('restores a selected exchange after remount and reopens an exact transcript link', async () => {
     const linked: AgentMessage = {
       ...message,

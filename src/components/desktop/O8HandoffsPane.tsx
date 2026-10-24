@@ -108,6 +108,7 @@ export function O8HandoffsPane({
   const [detailOpen, setDetailOpen] = useState(rememberedSelection(scopedRepo)?.open ?? false);
   const [refreshKey, setRefreshKey] = useState(0);
   const sendInFlightRef = useRef(false);
+  const scopeVersionRef = useRef(0);
   const scopedRepoRef = useRef(scopedRepo);
   const selectionRef = useRef(selection);
   scopedRepoRef.current = scopedRepo;
@@ -116,6 +117,7 @@ export function O8HandoffsPane({
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
 
   useEffect(() => {
+    scopeVersionRef.current += 1;
     setAgents([]);
     setMessages([]);
     setTarget('');
@@ -207,6 +209,7 @@ export function O8HandoffsPane({
 
   const changeConversation = async (id: string, action: 'close' | 'extend') => {
     if (!scopedRepo || sendInFlightRef.current) return;
+    const scopeVersion = scopeVersionRef.current;
     sendInFlightRef.current = true;
     setSending(true);
     setActionError(null);
@@ -217,10 +220,13 @@ export function O8HandoffsPane({
         body: JSON.stringify({ id, repo: scopedRepo, action }),
       });
       const body = await response.json() as { conversation?: unknown } & BusErrorBody;
+      if (scopeVersionRef.current !== scopeVersion) return;
       if (!response.ok || !body.conversation) throw new Error(errorText(response, body));
       refresh();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : 'Conversation could not be updated.');
+      if (scopeVersionRef.current === scopeVersion) {
+        setActionError(caught instanceof Error ? caught.message : 'Conversation could not be updated.');
+      }
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
