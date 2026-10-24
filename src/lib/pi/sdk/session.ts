@@ -146,7 +146,8 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
           { timeoutMs: options.commandTimeoutMs, authorize: options.authorize, confine, continuity }));
       toolTail = turn.catch(() => {});
-      return turn;
+      const stopWarming = transport.duringTool?.(signal);
+      return turn.finally(() => stopWarming?.());
     }
     if (request.method === 'model') {
       if (++modelCalls > (options.maxModelCalls ?? 8)) throw new Error('Model-call budget exhausted');
@@ -173,7 +174,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       else peer.respondError(request.id, -32001, 'Host operation denied or unavailable');
     }).catch(() => { run?.abort(); });
   });
-  let ready: { sessionFile: string; sessionId: string; tools: string[]; messageCount: number };
+  let ready: { sessionFile: string; sessionId: string; tools: string[]; messageCount: number; cacheContext?: Context };
   try {
     ready = await peer.request('initialize', { cwd: root, stateDir, sessionFile,
       model: { id: options.model.id, name: options.model.name, reasoning: false, input: ['text'],
@@ -183,8 +184,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}) });
   } catch (error) { await peer.close(); throw error; }
   surfaceId = `pi-sdk:${ready.sessionId}`;
+  const { cacheContext, ...sessionInfo } = ready;
   return {
-    ...ready,
+    ...sessionInfo,
     surfaceId,
     get pid() { return peer.pid; },
     get running() { return peer.running; },
@@ -196,12 +198,18 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       if (closed || run) throw new Error('Session is closed or busy');
       if (!message.trim() || Buffer.byteLength(message) > PI_PROMPT_MAX_BYTES) throw new Error('Invalid prompt');
       run = new AbortController(); modelCalls = 0; toolCalls = 0; settled = false; operatorStopped = false;
+      let preparation: Promise<void> | undefined;
       const timeoutMs = options.runTimeoutMs ?? 120_000;
       const timeout = setTimeout(() => {
         run?.abort();
         void peer.request('abort').catch(() => peer.close());
       }, timeoutMs);
       try {
+        // The worker renders its own prompt so warming and the real request
+        // share the same SDK serialization. Start while it prepares the turn.
+        if (cacheContext && transport.prepare) {
+          preparation = transport.prepare(cacheContext, run.signal).catch(() => {});
+        }
         const result = await peer.request<PiRunResult>('prompt', { message }, timeoutMs + 5_000);
         if (!settled) throw new Error('Worker returned before settled completion');
         if (result.errorMessage !== undefined) result.errorMessage = o8FailureText(result.errorMessage);
@@ -211,7 +219,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
         await peer.close();
         closed = true;
         throw error;
-      } finally { clearTimeout(timeout); run = undefined; }
+      } finally { clearTimeout(timeout); run?.abort(); await preparation; run = undefined; }
     },
     async abort() {
       if (run) operatorStopped = true;

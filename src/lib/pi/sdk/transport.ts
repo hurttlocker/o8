@@ -1,7 +1,11 @@
 import type { Context, Model, AssistantMessageEvent } from '@earendil-works/pi-ai/compat';
 import type { InferenceRoute } from '@/lib/cortex/qa/llm/inference-route';
 
-export type PiModelTransport = (context: Context, signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>;
+export type PiModelTransport = ((context: Context, signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>) & {
+  /** Host lifecycle hooks, absent on managed and subscription transports. */
+  prepare?: (context: Context, signal: AbortSignal) => Promise<void>;
+  duringTool?: (signal: AbortSignal) => () => Promise<void>;
+};
 export interface ManagedPiTransportOptions {
   model: Model<'openai-completions'>;
   resolveRoute?: () => Promise<InferenceRoute | null>;
