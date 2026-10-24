@@ -160,7 +160,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
             />
           </>
         ) : null}
-        {tab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} /> : null}
+        {tab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} repo={repoSlug || detail.resolvedRepo} number={prNumber} /> : null}
         {tab === 'reviews' ? (
           <ReviewsTab
             reviewComments={detail.reviewComments}

@@ -488,6 +488,8 @@ export interface OrchestratorPacket {
   dispatcher?: PacketDispatcherAttribution | null;
   /** Exact host-fetched source for an isolated pull request reviewer. */
   reviewSource?: import('@/lib/orchestrator/reviewer-pr-source-types').ReviewerPrSource;
+  /** Exact host-fetched source for an isolated failed-check repair. */
+  repairSource?: import('@/lib/orchestrator/reviewer-pr-source-types').ReviewerPrSource;
   /** Outside-launch provenance and desktop reveal behavior. */
   launchContext?: WorkerLaunchContext | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */

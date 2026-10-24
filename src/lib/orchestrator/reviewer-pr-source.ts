@@ -21,6 +21,20 @@ export function validateReviewPullRequest(body: Record<string, unknown>): number
   return number;
 }
 
+export function validateRepairPullRequest(body: Record<string, unknown>): number | undefined {
+  if (body.repairPullRequest === undefined) return undefined;
+  const source = normalizeReviewerPrSource({ pullRequest: body.repairPullRequest, headSha: body.expectedRepairHeadSha });
+  if (!source || body.reviewPullRequest !== undefined || body.readOnly === true || body.checkoutMode === 'shared' || body.isolate === false) {
+    throw new ReviewerPrInputError('invalid_repair_source', 'A repair requires a PR number, exact head SHA and an editable isolated checkout.');
+  }
+  return source.pullRequest;
+}
+
+export class StaleRepairHeadError extends Error {
+  readonly code = 'stale_pr_head';
+  constructor() { super('The PR head changed after these checks were selected. Refresh the checks before starting a repair.'); }
+}
+
 /** Fetch on the host before the read-only worker starts. Keep a packet-specific GC root. */
 export async function resolveReviewerPrSource(input: {
   repoPath: string; packetId: string; pullRequest: number; existing?: ReviewerPrSource;
@@ -63,10 +77,19 @@ export async function assertReviewerPrCheckout(packetId: string | undefined, cwd
     const { listMissionRegistryEntries } = await import('@/lib/orchestrator/mission-registry');
     packet = listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets).find(p => p.id === packetId);
   }
-  if (!packet?.reviewSource) return;
-  const source = normalizeReviewerPrSource(packet.reviewSource);
+  if (!packet?.reviewSource && !packet?.repairSource) return;
+  const source = normalizeReviewerPrSource(packet.reviewSource ?? packet.repairSource);
   const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], { cwd, timeout: 5_000 });
-  if (!source || packet.launchContext?.workMode !== 'read-only' || stdout.trim() !== source.headSha) {
+  let matches = Boolean(source && stdout.trim() === source.headSha);
+  if (!matches && source && packet.repairSource) {
+    const { listLanes } = await import('@/lib/lane/registry');
+    const previouslyStarted = packet.lane?.sessionKey || listLanes().some(lane => lane.packetId === packetId && lane.sessionKey);
+    if (previouslyStarted) {
+      try { await execFileAsync('git', ['merge-base', '--is-ancestor', source.headSha, stdout.trim()], { cwd, timeout: 5_000 }); matches = true; }
+      catch { /* An unrelated checkout is never a continuation of this repair. */ }
+    }
+  }
+  if (!source || packet.launchContext?.workMode !== (packet.repairSource ? 'edit' : 'read-only') || !matches) {
     throw new ReviewerPrSourceError('Reviewer checkout does not match its pinned PR head. No reviewer was launched.');
   }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { PrCheckRepair } from '../pr-panel/PrCheckRepair';
 import { checkBucket } from '@/components/desktop/pr-panel/check-status';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -48,6 +49,7 @@ function PRChecksSectionBase({
 
   return (
     <div>
+      {repo ? <PrCheckRepair key={`${repo}:${pr.number}`} repo={repo} number={pr.number} failed={failedChecks.length > 0} /> : null}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {failedChecks.length > 0 && onInjectChatContext ? (
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

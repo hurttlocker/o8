@@ -182,6 +182,7 @@ function fullPacketFixture() {
     orchestratorTurnId: 'assistant-456',
     dispatcher: { surface: 'orchestrator', id: 'thoughts-123' },
     reviewSource: { pullRequest: 7, headSha: 'a'.repeat(40) },
+    repairSource: { pullRequest: 8, headSha: 'b'.repeat(40) },
     launchContext: {
       source: 'mcp',
       presentation: 'split',

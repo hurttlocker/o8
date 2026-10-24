@@ -46,6 +46,21 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); invalidateSWR('pr-detail'); host.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('compact PR detail snapshots through PrPanel', () => {
+  it('exposes the failed-check repair flow through the live compact panel', async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'Tests', status: 'completed', conclusion: 'failure' }] } }));
+    await render();
+    const checks = host.querySelector<HTMLButtonElement>('[role="tab"][id$="-checks"]');
+    expect(checks).not.toBeNull(); await act(async () => checks!.click());
+    const panel = host.querySelector<HTMLElement>('[role="tabpanel"][id$="-checks-panel"]');
+    expect(panel?.hidden).toBe(false);
+    const fix = [...panel!.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks');
+    expect(fix).toBeDefined();
+    fetchMock.mockResolvedValueOnce(Response.json({ ok: true, headSha: 'a'.repeat(40), checks: [{ key: '1', name: 'Tests' }] }));
+    await act(async () => fix!.click());
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/panel/prs/7/repair?repo=Org%2FSample');
+    expect(panel?.textContent).toContain('Select failed checks');
+  });
+
   it('joins concurrent aliases while preserving the original request spelling', async () => {
     const held = deferred(); fetchMock.mockReturnValue(held.promise);
     await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]); expect(reads()).toHaveLength(1);

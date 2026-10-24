@@ -52,6 +52,13 @@ describe('failed-check batch evidence from the rendered PR checks section', () =
       .find((button) => button.textContent?.trim() === label);
   }
 
+  it('offers the repair journey through the live checks section only for failures', async () => {
+    await render([{ name: 'Tests', status: 'completed', conclusion: 'failure' }]);
+    expect(batchButton('Fix failing checks')).toBeDefined();
+    await render([{ name: 'Tests', status: 'completed', conclusion: 'neutral' }]);
+    expect(batchButton('Fix failing checks')).toBeUndefined();
+  });
+
   it.each([
     ['SUCCESS', 'COMPLETED', 'passed', '\u2713'],
     ['', 'in_progress', 'pending', '\u25CB'],

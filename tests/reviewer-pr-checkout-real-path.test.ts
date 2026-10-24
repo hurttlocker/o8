@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -31,6 +31,19 @@ vi.mock('@/lib/runtimes', async (original) => ({
   } }),
 }));
 
+const githubFixture = vi.hoisted(() => ({ sha: '', repo: 'fixture/repair' }));
+vi.mock('@/lib/github-broker/auth', () => ({
+  hasGitHubBrokerAccess: () => false,
+  getInstallationForRepo: vi.fn(),
+  getInstallationToken: vi.fn(),
+  verifyGitHubWebhookSignature: vi.fn(),
+  githubInstallationFetch: vi.fn(async (_repo: string, path: string) => ({ scope: 'fixture-scope', response:
+    path.endsWith('/logs') ? new Response('fixture failing assertion: expected green') : Response.json(
+      path.includes('/pulls/') ? { state: 'open', head: { sha: githubFixture.sha, ref: 'fork-only-branch', repo: { full_name: 'fixture/fork' } }, base: { ref: 'main' } }
+        : path.includes('/check-runs') ? { check_runs: [{ id: 1, name: 'CI tests', status: 'completed', conclusion: 'failure', html_url: 'https://github.com/fixture/repair/actions/runs/10/job/20' }] }
+        : { head_sha: githubFixture.sha, workflow_name: 'Fixture CI' }) })),
+}));
+
 const launches: LaunchOptions[] = [];
 const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 function quote(value: string) { return `'${value.replaceAll("'", "'\\''")}'`; }
@@ -41,11 +54,17 @@ process.env.O8_DATA_DIR = data;
 process.env.CORTEX_IDE_DATA_DIR = data;
 process.env.O8_WORKTREE_ROOT = join(root, 'workspaces');
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+// Fixture Git processes must never inherit the operator's provider credentials.
+const { providerCredentialName } = await import('@/lib/providers/spawn-environment');
+for (const name of Object.keys(process.env)) if (providerCredentialName(name)) vi.stubEnv(name, undefined);
 const { createCortexDelegationHandlers } = await import('@/lib/mcp/cortex-delegation-handlers');
 const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
 const { POST } = await import('@/app/api/orchestrator/delegate/route');
+const repairPreparation = await import('@/app/api/panel/prs/[number]/repair/route');
+const laneCommands = await import('@/lib/lane/commands');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-const { getLane } = await import('@/lib/lane/registry');
+const { getLane, createLane, updateLane, archiveLane } = await import('@/lib/lane/registry');
 const { readPinnedLaneCreationBaseCommit } = await import('@/lib/lane/creation-base');
 const { addRepo } = await import('@/lib/repos/registry');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -58,12 +77,13 @@ afterAll(() => {
     try { execFileSync(tmux, ['-S', socket, 'kill-server'], { stdio: 'ignore' }); } catch {}
   }
   closeDb();
+  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
 function git(cwd: string, ...args: string[]) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
 }
-async function fixture(label: string) {
+async function fixture(label: string, github = false) {
   const repo = join(root, label);
   mkdirSync(repo);
   git(repo, 'init', '-qb', 'main');
@@ -87,12 +107,18 @@ async function fixture(label: string) {
   git(repo, 'reflog', 'expire', '--expire=now', '--all');
   git(repo, 'gc', '--prune=now');
   expect(() => git(repo, 'cat-file', '-e', head)).toThrow();
+  if (github) {
+    const remote = `https://github.com/${githubFixture.repo}.git`;
+    git(repo, 'remote', 'set-url', 'origin', remote);
+    githubFixture.sha = head;
+  }
   await addRepo(repo);
+  if (github) git(repo, 'config', `url.${origin}.insteadOf`, `https://github.com/${githubFixture.repo}.git`);
   await updateOperatorDefaults({ workerRuntimes: ['claude-code'] });
   return { repo, origin, base, head };
 }
 function request(repoPath: string, extra: Record<string, unknown> = {}) {
-  return new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', body: JSON.stringify({
+  return new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` }, body: JSON.stringify({
     clientMutationId: `review-pr-${crypto.randomUUID()}`, repoPath, runtime: 'claude-code',
     taskName: 'Review fixture PR', prompt: 'Review PR 7 and run its test.', readOnly: true,
     reviewPullRequest: 7, ...extra,
@@ -100,11 +126,134 @@ function request(repoPath: string, extra: Record<string, unknown> = {}) {
 }
 
 describe('reviewer PR checkout through delegate dispatch', () => {
+  it('runs selected failing job evidence through preparation, normal dispatch, real Git and persisted state', async () => {
+    process.env.O8_APFS_COW_WORKSPACES = '0';
+    const f = await fixture('repair-selected-entry', true);
+    const response = await repairPreparation.POST(new NextRequest('http://localhost/api/panel/prs/7/repair?repo=fixture%2Frepair', {
+      method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+      body: JSON.stringify({ expectedHeadSha: f.head, checks: ['1'], clientMutationId: 'selected-repair' }),
+    }), { params: Promise.resolve({ number: '7' }) });
+    expect(response.status).toBe(200);
+    const prepared = await response.json();
+    expect(prepared.delegation.prompt).toContain('fixture failing assertion');
+    expect(prepared.delegation.prompt).toContain('Source repository: fixture/fork');
+    expect(prepared.delegation.baseBranch).toBe('main');
+    const launchedResponse = await POST(request(f.repo, { reviewPullRequest: undefined, ...prepared.delegation }));
+    const result = await launchedResponse.json();
+    expect(launchedResponse.status, JSON.stringify(result)).toBe(200);
+    expect(git(launches.at(-1)!.cwd!, 'rev-parse', 'HEAD')).toBe(f.head);
+    expect(readOrchestratorControlPlaneState().packets.find(p => p.id === result.packetId)?.repairSource)
+      .toEqual({ pullRequest: 7, headSha: f.head });
+    // The ordinary completion contract compares only the repair against its immutable source.
+    expect(launches.at(-1)!.prompt).toContain(`git diff ${f.head}...HEAD`);
+    const replay = await POST(request(f.repo, { reviewPullRequest: undefined, ...prepared.delegation }));
+    expect((await replay.json()).laneId).toBe(result.laneId);
+    expect(getLane(result.laneId)?.prNumber).toBeNull();
+  }, 90_000);
+
+  it('refuses repair dispatch without operator authority before creating any state', async () => {
+    const count = launches.length;
+    const response = await POST(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', body: JSON.stringify({
+      clientMutationId: 'anonymous-repair', repoPath: root, prompt: 'fix', repairPullRequest: 7, expectedRepairHeadSha: 'a'.repeat(40),
+    }) }));
+    expect(response.status).toBe(403); expect(launches).toHaveLength(count);
+  });
+
+  it('defers repair to a durably associated owning lane, including an idle worker', async () => {
+    const f = await fixture('repair-owner');
+    const owner = createLane({ repoPath: f.repo, branch: 'existing-pr', baseBranch: 'main', runtime: 'claude-code', label: 'Existing PR worker' });
+    updateLane(owner.id, { prNumber: 7 });
+    const count = launches.length;
+    const response = await POST(request(f.repo, { reviewPullRequest: undefined, readOnly: false,
+      repairPullRequest: 7, expectedRepairHeadSha: f.head }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'pr_has_owner', ownerLaneId: owner.id });
+    expect(launches).toHaveLength(count);
+  }, 90_000);
+
+  it('allows a fresh repair after lane admission failed without creating a worker', async () => {
+    const f = await fixture('repair-admission-retry');
+    const open = vi.spyOn(laneCommands, 'dispatch').mockResolvedValueOnce({ ok: false, laneId: '', note: 'fixture lane admission refused' });
+    const body = { reviewPullRequest: undefined, readOnly: false, repairPullRequest: 7, expectedRepairHeadSha: f.head };
+    const first = await POST(request(f.repo, body));
+    open.mockRestore();
+    expect(first.status).toBe(422);
+    const result = await first.json();
+    expect(readOrchestratorControlPlaneState().packets.find(p => p.id === result.packetId)?.archivedAt).toBeTruthy();
+    const retry = await POST(request(f.repo, body));
+    expect(retry.status, JSON.stringify(await retry.json())).toBe(200);
+  }, 90_000);
+
+  it('allows a new repair after the previous repair lane was explicitly archived', async () => {
+    const f = await fixture('repair-retired-owner');
+    const body = { reviewPullRequest: undefined, readOnly: false, repairPullRequest: 7, expectedRepairHeadSha: f.head };
+    const first = await POST(request(f.repo, body));
+    const receipt = await first.json(); expect(first.status).toBe(200);
+    archiveLane(receipt.laneId);
+    const retry = await POST(request(f.repo, body));
+    expect(retry.status, JSON.stringify(await retry.json())).toBe(200);
+  }, 90_000);
+
+  it('admits only one repair owner when two normal dispatches race', async () => {
+    const f = await fixture('repair-race');
+    const body = { reviewPullRequest: undefined, readOnly: false, repairPullRequest: 7, expectedRepairHeadSha: f.head };
+    const results = await Promise.all([POST(request(f.repo, body)), POST(request(f.repo, body))]);
+    expect(results.map(result => result.status).sort()).toEqual([200, 409]);
+  }, 90_000);
+
+  it('starts an editable repair at the selected PR head and durably records that source', async () => {
+    process.env.O8_APFS_COW_WORKSPACES = '0';
+    const f = await fixture('repair-head');
+    const response = await POST(request(f.repo, { reviewPullRequest: undefined, readOnly: false,
+      repairPullRequest: 7, expectedRepairHeadSha: f.head }));
+    const result = await response.json();
+    expect(response.status, JSON.stringify(result)).toBe(200);
+    const launched = launches.at(-1)!;
+    expect(launched.workMode).toBe('edit');
+    expect(git(launched.cwd!, 'rev-parse', 'HEAD')).toBe(f.head);
+    expect(readPinnedLaneCreationBaseCommit(result.laneId)).toBe(f.head);
+    expect(readOrchestratorControlPlaneState().packets.find(p => p.id === result.packetId))
+      .toMatchObject({ repairSource: { pullRequest: 7, headSha: f.head } });
+    expect(result.repairSource).toEqual({ pullRequest: 7, headSha: f.head });
+    expect(git(f.repo, 'rev-parse', 'HEAD')).toBe(f.base);
+    const { assertReviewerPrCheckout } = await import('@/lib/orchestrator/reviewer-pr-source');
+    writeFileSync(join(launched.cwd!, 'repair.txt'), 'repair commit\n');
+    git(launched.cwd!, 'add', 'repair.txt'); git(launched.cwd!, 'commit', '-qm', 'repair');
+    await expect(assertReviewerPrCheckout(result.packetId, launched.cwd!)).resolves.toBeUndefined();
+    git(launched.cwd!, 'checkout', '--detach', f.base);
+    await expect(assertReviewerPrCheckout(result.packetId, launched.cwd!)).rejects.toThrow('pinned PR head');
+  }, 90_000);
+
+  it('refuses stale repair evidence before creating a packet, lane or worker', async () => {
+    const f = await fixture('repair-stale');
+    git(f.origin, 'update-ref', 'refs/pull/7/head', f.base);
+    const count = launches.length;
+    const packets = readOrchestratorControlPlaneState().packets.length;
+    const response = await POST(request(f.repo, { reviewPullRequest: undefined, readOnly: false,
+      repairPullRequest: 7, expectedRepairHeadSha: f.head }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ ok: false, code: 'stale_pr_head' });
+    expect(launches).toHaveLength(count);
+    expect(readOrchestratorControlPlaneState().packets).toHaveLength(packets);
+  }, 90_000);
+
+  it('binds repair source pins to the normal delegation mutation identity', async () => {
+    const f = await fixture('repair-replay');
+    const body = { clientMutationId: 'repair-source-replay', reviewPullRequest: undefined, readOnly: false,
+      repairPullRequest: 7, expectedRepairHeadSha: f.head };
+    expect((await POST(request(f.repo, body))).status).toBe(200);
+    const count = launches.length;
+    const response = await POST(request(f.repo, { ...body, expectedRepairHeadSha: f.base }));
+    expect(response.status).toBe(409); expect(launches).toHaveLength(count);
+  }, 90_000);
+
   it.skipIf(!tmux).each(['git-worktree', 'clone'])('pins the PR head in a %s, runs its test with CLI receipts, and replays the same head', async isolation => {
     process.env.O8_APFS_COW_WORKSPACES = isolation === 'clone' ? '1' : '0';
     const f = await fixture('exact-head-' + isolation);
     const artifacts = join(root, 'artifacts-' + isolation);
     mkdirSync(artifacts);
+    // Keep the real native SQLite package external to the disposable ESM bundle.
+    symlinkSync(join(process.cwd(), 'node_modules'), join(artifacts, 'node_modules'), 'dir');
     const body = { clientMutationId: 'review-pr-exact-head-' + isolation };
     const response = await POST(request(f.repo, body));
     const result = await response.json();
@@ -121,11 +270,16 @@ describe('reviewer PR checkout through delegate dispatch', () => {
     expect(existsSync(join(f.repo, 'pr-only.test.cjs'))).toBe(false);
 
     const bundle = join(artifacts, 'o8.mjs');
-    await build({ entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
-      define: { __O8_CLI_VERSION__: JSON.stringify('test') }, banner: { js: "import { createRequire as __fixtureRequire } from 'node:module'; const require = __fixtureRequire(import.meta.url);" } });
+    await build({ entryPoints: ['cli/src/index.ts'], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22', external: ['better-sqlite3'],
+      define: { __O8_CLI_VERSION__: JSON.stringify('test') }, banner: { js: `import { createRequire as __fixtureRequire } from 'node:module';
+import { fileURLToPath as __fixtureFileURLToPath } from 'node:url';
+import { dirname as __fixtureDirname } from 'node:path';
+const require = __fixtureRequire(${JSON.stringify(join(process.cwd(), 'package.json'))}); globalThis.require = require;
+const __filename = __fixtureFileURLToPath(import.meta.url); const __dirname = __fixtureDirname(__filename);` } });
     const bin = join(artifacts, 'bin');
     mkdirSync(bin);
-    const socket = join(root, isolation + '.sock');
+    // Darwin's Unix-domain socket limit is shorter than the isolated test root.
+    const socket = join(process.platform === 'darwin' ? '/tmp' : tmpdir(), `o8-review-${crypto.randomUUID()}.sock`);
     sockets.push(socket);
     writeFileSync(join(bin, 'tmux'), `#!/bin/sh\nexec ${quote(tmux)} -S ${quote(socket)} "$@"\n`, { mode: 0o700 });
     chmodSync(join(bin, 'tmux'), 0o700);

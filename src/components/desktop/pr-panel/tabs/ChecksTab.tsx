@@ -4,9 +4,12 @@ import { memo, useMemo } from 'react';
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2, Minus, XCircle } from '../../lucide-shims';
 import type { CheckBucket, PrCheck } from '../types';
 import { checkBucket } from '../check-status';
+import { PrCheckRepair } from '../PrCheckRepair';
 
 interface ChecksTabProps {
   checks: PrCheck[];
+  repo?: string;
+  number?: number;
 }
 
 const BUCKET_ORDER: CheckBucket[] = ['failing', 'running', 'passed', 'neutral', 'skipped'];
@@ -91,7 +94,7 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
   );
 });
 
-export const ChecksTab = memo(function ChecksTab({ checks }: ChecksTabProps) {
+export const ChecksTab = memo(function ChecksTab({ checks, repo, number }: ChecksTabProps) {
   const grouped = useMemo(() => {
     const map = new Map<CheckBucket, PrCheck[]>();
     for (const bucket of BUCKET_ORDER) map.set(bucket, []);
@@ -112,6 +115,7 @@ export const ChecksTab = memo(function ChecksTab({ checks }: ChecksTabProps) {
 
   return (
     <div>
+      {repo && number ? <PrCheckRepair key={`${repo}:${number}`} repo={repo} number={number} failed={Boolean(grouped.get('failing')?.length)} /> : null}
       {BUCKET_ORDER.map((bucket) => {
         const items = grouped.get(bucket) ?? [];
         if (items.length === 0) return null;
