@@ -9,6 +9,9 @@ pub mod websocket;
 #[cfg(feature = "experimental-mcp")]
 pub mod mcp;
 
+#[cfg(all(feature = "experimental-supervisor", target_os = "linux"))]
+pub mod supervisor;
+
 struct State {
     latest: u64,
     log: VecDeque<Value>,

@@ -2,7 +2,9 @@ import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
-import { assertLaunchCredentialPolicy, spawnCredentialCheckedChild } from './credential-spawn';
+import { assertLaunchCredentialPolicy, spawnCredentialCheckedChild, spawnCredentialCheckedSupervised } from './credential-spawn';
+import { processSupervisorEnabled, type SupervisorReceipt } from '@/lib/runtime/o8d-supervisor';
+import { reconcileSupervisedSession } from './supervised-run';
 import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
@@ -351,6 +353,7 @@ export function createOwnedRunController({
     for (let index = 0; index < session.recentRuns.length; index += 1) {
       const run = session.recentRuns[index];
       if (!run || run.spawnState !== 'prepared') continue;
+      if (run.supervisor) continue; // Only the authenticated daemon can reconcile uncertain submissions.
       const markerState = await probeOwnedRunMarker(run.processMarker);
       if (markerState !== 'clear') continue;
       const reconciled: OwnedRunRecord = {
@@ -368,8 +371,9 @@ export function createOwnedRunController({
   }
 
   async function refreshSession(session: OwnedSessionRecord, surfaceLockHeld = false, allowRetry = true) {
+    const supervisedDirty = await reconcileSupervisedSession(session);
     await assertOwnedSessionProcessIdentity(session, runtimeId);
-    let dirty = false;
+    let dirty = supervisedDirty;
 
     for (const run of session.recentRuns) {
       // A prepared journal is deliberately preserved until the binding path,
@@ -381,6 +385,10 @@ export function createOwnedRunController({
         session.threadId = parsed.threadId;
         dirty = true;
       }
+
+      // A second liveness probe may observe exit after reconciliation saw a
+      // live worker. Only the next immutable daemon receipt can finish it.
+      if (run.supervisor && !run.childExit) continue;
 
       const runAlive = await isOwnedRunAlive(run);
       if (runAlive) {
@@ -419,6 +427,7 @@ export function createOwnedRunController({
     }
 
     if (session.activeRun
+      && !session.activeRun.supervisor
       && session.activeRun.spawnState !== 'prepared'
       && !(await isOwnedRunAlive(session.activeRun))) {
       session.activeRun = undefined;
@@ -571,6 +580,8 @@ export function createOwnedRunController({
     let terminalSessionName: string | undefined;
     let detachMode: 'bridge' | 'detached' = 'bridge';
     let detachedChild: ChildProcess | undefined;
+    let supervised: SupervisorReceipt | undefined;
+    const useSupervisor = processSupervisorEnabled(runtimeId) && session.executionPolicy === undefined && !carrierLaunch.carried;
     let runPersisted = false;
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
@@ -626,6 +637,7 @@ export function createOwnedRunController({
           prompt,
           startedAt: nowIso(),
           pid: 0,
+          ...(useSupervisor ? { supervisor: { id: runId, owner: session.surfaceId, epoch: '', cursor: 0 } } : {}),
           processIdentityRequired: crashSurvivableWorkersEnabled() && Boolean(session.packetId) && process.platform !== 'win32',
           commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
@@ -649,7 +661,7 @@ export function createOwnedRunController({
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
@@ -678,25 +690,32 @@ export function createOwnedRunController({
                 stdinFd = openSync(stdinPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | constants.O_NONBLOCK);
                 if (!fstatSync(stdinFd).isFile()) throw new Error('Owned worker input is not a regular file.');
               }
-              const child = spawnCredentialCheckedChild({
+              const launchInput = {
                 session, runtimeId, policy: credentialPolicy, runId,
                 binary: spawnBinary, args: spawnArgs, env: spawnEnv,
                 stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
-              });
-              detachedChild = child;
-              observeChildExit(child, (childExit) => {
-                if (!runPersisted) {
-                  pendingDetachedExit = childExit;
-                  return;
-                }
-                void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
-                  console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
+              };
+              if (useSupervisor) {
+                supervised = await spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath });
+                pid = supervised.pid;
+                detachMode = 'detached';
+              } else {
+                const child = spawnCredentialCheckedChild(launchInput);
+                detachedChild = child;
+                observeChildExit(child, (childExit) => {
+                  if (!runPersisted) {
+                    pendingDetachedExit = childExit;
+                    return;
+                  }
+                  void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
+                    console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
+                  });
                 });
-              });
-              child.unref();
-              pid = child.pid ?? 0;
-              detachMode = 'detached';
+                child.unref();
+                pid = child.pid ?? 0;
+                detachMode = 'detached';
+              }
             } finally {
               if (stdinFd !== undefined) closeSync(stdinFd);
               closeSync(stdoutFd);
@@ -721,8 +740,10 @@ export function createOwnedRunController({
           tmuxSession: terminalSessionName,
           detachMode,
           stdinPath,
+          ...(supervised ? { supervisor: { id: runId, owner: session.surfaceId, epoch: supervised.epoch, cursor: 0 },
+            processIdentity: supervised.identity, processIdentitySource: 'platform' as const, processIdentityRequired: true } : {}),
         };
-        await captureOwnedRunIdentity(session, runtimeId, run);
+        if (!supervised) await captureOwnedRunIdentity(session, runtimeId, run);
 
         if (session.packetId && session.executionPolicy === undefined) {
           try {

@@ -9,19 +9,26 @@ import { assertControlledLaunchGrantCurrent } from '@/lib/mcp/task-execution-adm
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertOwnedActionAdmission } from './action-admission';
 import type { OwnedSessionRecord } from './types';
+import { withChildEnvironment } from '@/lib/providers/child-process';
+import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
+import { ownedSupervisorClient, type SupervisorReceipt } from '@/lib/runtime/o8d-supervisor';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { join } from 'node:path';
 
 export function assertLaunchCredentialPolicy(runtimeId: string, expected: string): void {
   if (credentialPolicyFingerprint(runtimeId) !== expected) throw new Error('Credentials or billing changed during launch preparation. Retry the launch.');
 }
 
-/** No await between the shared policy check and OS process creation. */
-export function spawnCredentialCheckedChild(input: {
+/** Shared inputs for direct spawn and authenticated supervisor submission. */
+type LaunchInput = {
   session: OwnedSessionRecord; runtimeId: string; policy: string; runId: string;
   binary: string; args: string[]; env: Record<string, string>;
   stdinFd?: number; stdoutFd: number; stderrFd: number; mcpConfigPath?: string;
   mcpServers?: readonly { name: string; env?: Record<string, string> | null }[];
   materializationIdentity: Parameters<typeof guardedWorkspaceInvocation>[2];
-}): ChildProcess {
+};
+
+function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: string; args: string[] }, env: ReturnType<typeof ownedSpawnEnvironment>) => T): T {
   return withProviderStoreLock(() => {
     assertLaunchCredentialPolicy(input.runtimeId, input.policy);
     const env = ownedSpawnEnvironment(input.session, input.env);
@@ -35,10 +42,44 @@ export function spawnCredentialCheckedChild(input: {
       ? bindDeferredCodexMcpLaunch(env, input.args, input.mcpServers ?? [], build) : build(input.args);
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
-    return spawn(launch.command, launch.args, {
+    return create(launch, env);
+  });
+}
+
+/** No await between the shared policy check and direct OS process creation. */
+export function spawnCredentialCheckedChild(input: LaunchInput): ChildProcess {
+  return withCheckedLaunch(input, (launch, env) => spawn(launch.command, launch.args, {
       windowsHide: true, cwd: input.session.repoPath, detached: true,
       stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd],
       env,
-    });
-  });
+  }));
+}
+
+/** Only native, finite-input Codex uses this opt-in submission boundary. */
+export async function spawnCredentialCheckedSupervised(input: LaunchInput & {
+  stdoutPath: string; stderrPath: string; stdinPath?: string;
+}): Promise<SupervisorReceipt> {
+  const lease = reserveWorkLaunch(input.binary);
+  lease.started(process.pid);
+  let submitted = false;
+  try {
+    const receipt = await ownedSupervisorClient().spawn(() => withCheckedLaunch(input, (launch, env) => (
+      withChildEnvironment(env, [launch.command, ...launch.args], resolved => {
+        lease.started(process.pid);
+        submitted = true;
+        const workerEnv = { ...resolved };
+        for (const name of ['O8D_SUPERVISOR_TOKEN', 'O8D_SUPERVISOR_SOCKET', 'O8_PROCESS_SUPERVISOR']) delete workerEnv[name];
+        return { id: input.runId, owner: input.session.surfaceId, ...launch, env: workerEnv,
+          cwd: input.session.repoPath, stdoutPath: input.stdoutPath, stderrPath: input.stderrPath,
+          admissionPath: join(getDataDir(), 'work-launches', `${lease.id}.json`),
+          ...(input.stdinPath ? { stdinPath: input.stdinPath } : {}) };
+      }, true, input.session.repoPath)
+    )));
+    // The daemon transferred the admission reader before exec and releases it
+    // after output and exit settle, independently of this server's lifetime.
+    return receipt;
+  } catch (error) {
+    if (!submitted) lease.release();
+    throw error;
+  }
 }

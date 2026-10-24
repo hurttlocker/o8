@@ -84,6 +84,7 @@ export async function probeOwnedSignalIdentity(run: OwnedProcessEvidence): Promi
 /** Never settle or retry an unidentified survivor as though it were a dead run. */
 export async function assertOwnedSessionProcessIdentity(session: OwnedSessionRecord, runtimeId: string): Promise<void> {
   const run = session.activeRun;
+  if (run?.supervisor) return; // The daemon validates its original child and persisted ownership on attach.
   if (!run || run.spawnState === 'prepared' || run.finishedAt || run.tmuxSession
     || process.platform === 'win32' || !session.packetId
     || (runtimeId !== 'codex' && run.detachMode !== 'detached' && !run.processIdentityRequired && !run.processIdentity)

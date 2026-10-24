@@ -1,4 +1,5 @@
 import { providerFromConfig } from './controlled-provider';
+import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 /**
  * createOwnedSessionStore — the generic primitive.
  *
@@ -341,7 +342,7 @@ export function createOwnedSessionStore(
       if (session.activeRun?.spawnState === 'prepared') {
         throw new Error(`This owned ${adapter.squadShortName} session has an unresolved prepared run. Wait for marker reconciliation before resuming it.`);
       }
-      if (session.activeRun && isPidAlive(session.activeRun.pid)) {
+      if (session.activeRun && (session.activeRun.supervisor || isPidAlive(session.activeRun.pid))) {
         throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
       }
       if (!session.threadId) {
@@ -392,7 +393,7 @@ export function createOwnedSessionStore(
         note: `The owned ${adapter.squadShortName} run has a durable prepared marker but no signalable PID yet; it remains unresolved rather than being reported stopped.`,
       };
     }
-    if (!session.activeRun || !isPidAlive(session.activeRun.pid)) {
+    if (!session.activeRun || (!session.activeRun.supervisor && !isPidAlive(session.activeRun.pid))) {
       const latest = session.recentRuns[0];
       if (latest?.outcome === 'failed' && adapter.modelCompatibilityFallback) {
         // A stop also cancels recovery that lifecycle polling has not started yet.
@@ -403,7 +404,9 @@ export function createOwnedSessionStore(
     }
 
     try {
-      if (session.activeRun.tmuxSession) {
+      if (session.activeRun.supervisor) {
+        await ownedSupervisorClient().signal(session.activeRun.supervisor, 'SIGINT');
+      } else if (session.activeRun.tmuxSession) {
         await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
       } else {
         const commandIdentity = session.activeRun.commandIdentity ?? adapter.binaryName;

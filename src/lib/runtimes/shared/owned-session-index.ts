@@ -27,9 +27,11 @@ import { readOwnedSessionMetadata } from './owned-session/metadata-read';
 import type { OwnedSessionRecord } from './owned-session/types';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import type { OwnedIdentitySource } from './owned-session/process-identity';
+import type { SupervisorReference } from '@/lib/runtime/o8d-supervisor';
 
 export interface OwnedActiveRun {
   id?: string;
+  supervisor?: SupervisorReference;
   pid?: number;
   processIdentity?: MetadataLockProcessIdentity;
   processIdentitySource?: OwnedIdentitySource;
@@ -185,6 +187,7 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
     index.runs.set(parsed.surfaceId, parsed.activeRun
       ? {
           id: typeof parsed.activeRun.id === 'string' ? parsed.activeRun.id : undefined,
+          supervisor: parsed.activeRun.supervisor,
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
           processIdentity: parsed.activeRun.processIdentity,
           processIdentitySource: parsed.activeRun.processIdentitySource,
