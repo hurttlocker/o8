@@ -6196,6 +6196,12 @@
       ]
     },
     {
+      "path": "tests/worker-drop-scroll-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-live-status-real-path.test.ts",
       "reasons": [
         "network-listener",

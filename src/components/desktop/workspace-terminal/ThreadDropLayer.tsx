@@ -166,14 +166,35 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
       if (
         prev?.leafId === next?.leafId
         && prev?.zone === next?.zone
+        && prev?.leafRect.left === next?.leafRect.left
+        && prev?.leafRect.top === next?.leafRect.top
+        && prev?.leafRect.width === next?.leafRect.width
+        && prev?.leafRect.height === next?.leafRect.height
       ) return;
       hoverRef.current = next;
       setHover(next);
     };
 
+    let lastPoint: ThreadDragMoveDetail | null = null;
+    let scrollFrame: number | null = null;
+    const stopScrollRefresh = () => {
+      lastPoint = null;
+      if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
+    };
+    const handleScroll = () => {
+      if (!payloadRef.current || !lastPoint || scrollFrame !== null) return;
+      scrollFrame = window.requestAnimationFrame(() => {
+        scrollFrame = null;
+        if (payloadRef.current && lastPoint) applyHover(resolveTarget(lastPoint.clientX, lastPoint.clientY));
+      });
+    };
+
     const handleStart = (event: Event) => {
       const detail = (event as CustomEvent<ThreadDragStartDetail>).detail;
       if (!detail?.payload || detail.payload.navigationOnly) return;
+      stopScrollRefresh();
+      lastPoint = detail;
       payloadRef.current = detail.payload;
       setDragPayload(detail.payload);
       applyHover(resolveTarget(detail.clientX, detail.clientY));
@@ -182,12 +203,14 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
       if (!payloadRef.current) return;
       const detail = (event as CustomEvent<ThreadDragMoveDetail>).detail;
       if (!detail) return;
+      lastPoint = detail;
       applyHover(resolveTarget(detail.clientX, detail.clientY));
     };
     const handleEnd = (event: Event) => {
       const payload = payloadRef.current;
       const detail = (event as CustomEvent<ThreadDragEndDetail>).detail;
       const target = payload && detail ? resolveTarget(detail.clientX, detail.clientY) : null;
+      stopScrollRefresh();
       payloadRef.current = null;
       hoverRef.current = null;
       setDragPayload(null);
@@ -210,6 +233,7 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
       });
     };
     const handleCancel = () => {
+      stopScrollRefresh();
       payloadRef.current = null;
       hoverRef.current = null;
       setDragPayload(null);
@@ -240,7 +264,13 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
     window.addEventListener(THREAD_DRAG_MOVE_EVENT, handleMove);
     window.addEventListener(THREAD_DRAG_END_EVENT, handleEnd);
     window.addEventListener(THREAD_DRAG_CANCEL_EVENT, handleCancel);
+    // Scroll does not bubble. Capture only this surface's nested scrolls and
+    // re-hit-test the last pointer at most once per frame, without polling.
+    const scrollHost = useRenderedLeafRects ? hostRef.current?.parentElement : null;
+    scrollHost?.addEventListener('scroll', handleScroll, { capture: true, passive: true });
     return () => {
+      stopScrollRefresh();
+      scrollHost?.removeEventListener('scroll', handleScroll, true);
       if (adoptTimer !== null) window.clearTimeout(adoptTimer);
       window.removeEventListener(THREAD_DRAG_START_EVENT, handleStart);
       window.removeEventListener(THREAD_DRAG_MOVE_EVENT, handleMove);
@@ -249,7 +279,7 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
       payloadRef.current = null;
       hoverRef.current = null;
     };
-  }, [active, onDrop, resolveTarget]);
+  }, [active, onDrop, resolveTarget, useRenderedLeafRects]);
 
   // The host div stays mounted even when idle (display stays cheap — it's
   // one empty absolutely-positioned div): hit-testing needs its rect from
