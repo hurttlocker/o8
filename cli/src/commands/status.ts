@@ -11,6 +11,7 @@ import { apiFetch } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { approvalAge } from '../../../src/lib/orchestrator/status-age.js';
 import { runtimeConnectionRows, connectionDetail, connectionLabel } from '../../../src/lib/runtimes/shared/connection-evidence.js';
+import type { TerminalWorktreeStorage } from '../../../src/lib/lane/terminal-worktree-storage.js';
 import {
   color,
   printHumanHeading,
@@ -147,7 +148,9 @@ export async function runStatus(mode: OutputMode): Promise<number> {
 
   const [activeRes, allRes, approvalsRes, missionRes, panelStatusRes, operatorRes] = await Promise.all([
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),
-    apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } }),
+    apiFetch<{ lanes: Lane[]; terminalStorage?: TerminalWorktreeStorage }>(cfg, '/api/lanes', {
+      query: { active: 'false', storage: 'terminal' },
+    }),
     apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
     apiFetch<MissionStatusResponse>(cfg, '/api/orchestrator/status', { allowNotFound: true }),
     apiFetch<PanelStatusResponse>(cfg, '/api/panel/status', { allowNotFound: true }),
@@ -163,6 +166,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     .catch(() => null);
   const runtimeConnections = runtimeConnectionRows(connectionResponse?.data);
   const allLanes = allRes.data?.lanes ?? [];
+  const terminalStorage = allRes.data?.terminalStorage ?? null;
   const approvals = approvalsRes.data?.approvals ?? [];
   const storageHolds = (missionRes.data?.result?.packets ?? [])
     .filter((packet) => packet.storageAdmission?.state === 'held')
@@ -243,6 +247,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     storageHolds,
     terminalReasons,
     terminalReasonsTruncated: operatorRes?.data?.terminalReasonsTruncated === true,
+    terminalStorage,
     shippedDarkAudit,
     shippedDarkWarnings,
     shippedDarkByDesign,
@@ -302,6 +307,17 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         process.stdout.write(`  ${item.packetId}  ${item.terminalReason.code}${item.terminalReason.cause ? `: ${item.terminalReason.cause}` : ''}\n`);
       }
     }
+    printHumanHeading('terminal checkout storage');
+    if (terminalStorage) {
+      const size = terminalStorage.allocatedBytes === null
+        ? `allocated bytes unknown (${terminalStorage.observedAllocatedBytes} observed; ${terminalStorage.unknownCheckouts} unknown checkouts)`
+        : `${terminalStorage.allocatedBytes} allocated bytes`;
+      process.stdout.write(`  ${terminalStorage.checkoutCount} retained checkouts, ${size}\n`);
+      for (const checkout of terminalStorage.checkouts) {
+        process.stdout.write(`  ${checkout.packetId}  ${checkout.detail ?? checkout.reason ?? 'Retirement pending; no refusal recorded.'}\n`);
+      }
+      if (terminalStorage.checkoutsTruncated) process.stdout.write('  Showing the first 50 retained checkouts. Totals include all checkouts.\n');
+    } else process.stdout.write('  Storage accounting unavailable.\n');
     if (storageHolds.length > 0) {
       printHumanHeading('storage holds');
       for (const hold of storageHolds) {

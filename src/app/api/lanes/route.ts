@@ -17,6 +17,7 @@ import { getSqlite } from '@/lib/db';
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { repoActionLeaseMaxWaitMsForTests } from '@/lib/lane/lane-route-test-seams';
 import { resolveLaneTranscriptHealth } from '@/lib/lane/transcript-health';
+import { readTerminalWorktreeStorage } from '@/lib/lane/terminal-worktree-storage';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import type { LaneCommand } from '@/lib/lane/types';
 
@@ -119,7 +120,11 @@ export async function GET(req: NextRequest) {
     };
   }));
 
-  return NextResponse.json({ lanes }, {
+  // Use principal-filtered lanes so display collapsing cannot hide bytes.
+  // Ordinary lane polling does not start storage walks.
+  const terminalStorage = url.searchParams.get('storage') === 'terminal'
+    ? await readTerminalWorktreeStorage(baseLanes) : undefined;
+  return NextResponse.json({ lanes, ...(terminalStorage ? { terminalStorage } : {}) }, {
     headers: serverTimingHeaders(startedAt, { 'Cache-Control': 'no-store, max-age=0' }),
   });
 }
