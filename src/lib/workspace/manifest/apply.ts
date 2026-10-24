@@ -145,14 +145,16 @@ function resolveTemplate(
   return resolved;
 }
 
-function tcpHealth(port: number, timeoutMs: number): Promise<{ ok: boolean; error?: string }> {
+function tcpHealth(port: number, timeoutMs: number, signal: AbortSignal): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const socket = connect({ host: '127.0.0.1', port });
     let settled = false;
+    const onAbort = () => finish({ ok: false, error: 'TCP health probe cancelled.' });
     const finish = (result: { ok: boolean; error?: string }) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
       socket.destroy();
       resolve(result);
     };
@@ -162,6 +164,8 @@ function tcpHealth(port: number, timeoutMs: number): Promise<{ ok: boolean; erro
     );
     socket.once('connect', () => finish({ ok: true }));
     socket.once('error', (error) => finish({ ok: false, error: error.message }));
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
   });
 }
 
@@ -224,7 +228,7 @@ async function probeHealth(input: {
     target = port === undefined ? '127.0.0.1:(unallocated)' : `127.0.0.1:${port}`;
     result = port === undefined
       ? { ok: false, error: 'TCP health probe requires an allocated service port.' }
-      : await tcpHealth(port, timeoutMs);
+      : await tcpHealth(port, timeoutMs, input.signal);
   }
   return {
     kind,
