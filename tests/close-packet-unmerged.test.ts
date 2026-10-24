@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -694,10 +694,46 @@ process.exit(run.status ?? 1);
     expect(getLane(lane.id)?.status).toBe('archived');
     const calls = fixture.readLog();
     const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
-    const removalProbeIndex = calls.findIndex((call) => call.startsWith('lsof -nP -d cwd'));
+    const removalProbeIndex = calls.findIndex((call) => call === 'lsof -nP -Fpcftn');
     expect(releaseIndex).toBeGreaterThanOrEqual(0);
     expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(1);
+  });
+
+  it.each([false, true])('holds an owned checkout when cleanup proof fails (dirty=%s)', { timeout: 90_000 }, async (hasDirtyBytes) => {
+    const packetId = `pkt-opencode-close-incomplete-${hasDirtyBytes}`;
+    const branch = `issue/opencode-close-incomplete-${hasDirtyBytes}`;
+    const { root, repoPath, worktreePath, sessionKey } = await createManagedOpenCodeWorktree({ parent: dataDir, prefix: 'opencode-incomplete-', branch, packetId, ownedRoot });
+    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch, sessionKey });
+    const fixture = createOpenCodeServiceFixture(root, worktreePath);
+    const dirty = 'export const unsent = "keep these exact bytes";\n';
+    if (hasDirtyBytes) writeFileSync(join(worktreePath, 'dirty.ts'), dirty);
+    // Independently exercise dirty-source refusal and incomplete native evidence
+    // through the same route and owned binding as successful cleanup.
+    if (!hasDirtyBytes) writeFileSync(join(fixture.binDir, 'lsof'), `#!${process.execPath}\nprocess.stdout.write('p43210\\ncopencode\\n');\n`);
+    const originalPath = process.env.PATH;
+    const originalBinary = process.env.O8_OPENCODE_BIN;
+    let response: Response;
+    try {
+      process.env.PATH = `${fixture.binDir}:${originalPath ?? ''}`;
+      process.env.O8_OPENCODE_BIN = fixture.opencodeBin;
+      response = await closeRoute.POST(operatorRequest({ packetId, disposition: 'wontfix' }));
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalBinary === undefined) delete process.env.O8_OPENCODE_BIN;
+      else process.env.O8_OPENCODE_BIN = originalBinary;
+    }
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false, error: { code: 'close_failed', message: expect.stringContaining(hasDirtyBytes ? '(dirty)' : '(retirement-refused)') },
+    });
+    expect(existsSync(worktreePath)).toBe(true);
+    if (hasDirtyBytes) expect(readFileSync(join(worktreePath, 'dirty.ts'), 'utf8')).toBe(dirty);
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', worktreePath });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'blocked', queueState: 'held', blockedReason: 'worktree_cleanup_failed',
+      lane: { laneId: lane.id, worktreePath },
+    });
   });
 
   it('retries OpenCode cleanup once and names the remaining holder PID', { timeout: 90_000 }, async () => {
@@ -741,7 +777,11 @@ process.exit(run.status ?? 1);
     });
     const calls = fixture.readLog();
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(2);
-    expect(calls.filter((call) => call.startsWith('lsof -nP -d cwd'))).toHaveLength(2);
+    // Admission refuses before rename; cwd and descriptors share one snapshot.
+    expect(calls.filter((call) => call === 'lsof -nP -Fpcftn')).toHaveLength(1);
+    expect(getLaneEvents(lane.id).find((event) => event.payload.phase === 'retirement_process_refused')).toMatchObject({
+      payload: { state: 'live', failed: expect.arrayContaining([['filesystem_users', 'live', 'owned_process_live']]) },
+    });
     expect(calls.filter((call) => call.startsWith('lsof -Fn +D'))).toHaveLength(1);
   });
 });
