@@ -5304,6 +5304,7 @@
     {
       "path": "tests/sign-and-notarize.test.ts",
       "reasons": [
+        "child-process",
         "native-build"
       ]
     },

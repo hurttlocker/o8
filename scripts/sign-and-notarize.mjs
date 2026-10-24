@@ -21,7 +21,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
+import { resolveNotarizationCredentials, stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
 import { assertMacPackageSize } from './lib/mac-package-size.mjs';
 import {
   resolveMacosReleaseArtifacts,
@@ -46,13 +46,15 @@ if (args.length) {
 }
 const cpuArchitectures = macosCpuPackageArchitectures(process.env.O8_MACOS_CPU_PACKAGES);
 
-const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
-for (const key of REQUIRED) {
-  if (!process.env[key]) {
-    console.error(`[sign-and-notarize] missing env var: ${key}`);
-    console.error(`[sign-and-notarize] expected in ~/.zshenv`);
-    process.exit(1);
+let notarizationCredentials;
+try {
+  if (!process.env.APPLE_SIGNING_IDENTITY?.trim()) {
+    throw new Error('missing env var: APPLE_SIGNING_IDENTITY');
   }
+  notarizationCredentials = resolveNotarizationCredentials();
+} catch (error) {
+  console.error(`[sign-and-notarize] ${error.message}`);
+  process.exit(1);
 }
 
 const root = process.cwd();
@@ -74,11 +76,6 @@ const ENTITLEMENTS = join(root, 'src-tauri/entitlements.plist');
 // the nested node_modules Mach-O binaries are.
 const SPEECH_ENTITLEMENTS = join(root, 'src-tauri/entitlements.speech.plist');
 const SIGNING_KEY = `${process.env.HOME}/.tauri/cortex-ide.key`;
-const notarizationCredentials = {
-  appleId: process.env.APPLE_ID,
-  teamId: process.env.APPLE_TEAM_ID,
-  password: process.env.APPLE_PASSWORD,
-};
 const verifyApp = architecture ? (app) => verifyMacCpuApp(app, architecture) : verifyUniversalMacApp;
 const verifyArchive = architecture
   ? (app, tar) => verifyMacCpuUpdaterArchive(app, tar, architecture) : verifyUniversalMacUpdaterArchive;

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
 import { resolveReleaseConfig } from './release-config.mjs';
+import { resolveNotarizationCredentials } from './notarization.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -69,13 +70,28 @@ function checkReleaseConfig(root, env) {
   return [...REQUIRED_RELEASE_CONFIG];
 }
 
-function checkCredentialNames(env) {
-  const required = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
-  const missing = required.filter((name) => !env[name]?.trim());
-  if (missing.length > 0) {
-    throw new Error(`missing release credentials: ${missing.join(', ')}`);
+function checkCredentialNames(env, run, root) {
+  if (!env.APPLE_SIGNING_IDENTITY?.trim()) {
+    throw new Error('missing release credentials: APPLE_SIGNING_IDENTITY');
   }
-  return required;
+  const credentials = resolveNotarizationCredentials(env);
+  if ('keychainProfile' in credentials) {
+    let verified = false;
+    try {
+      const receipt = run('xcrun', ['notarytool', 'history', '--keychain-profile', credentials.keychainProfile], {
+        cwd: root, env, timeoutMs: 15_000,
+      });
+      verified = receipt.status === 0;
+    } catch {
+      // Command errors and output may contain the profile or credentials.
+    }
+    if (!verified) {
+      throw new Error('could not verify notarytool Keychain profile; check APPLE_KEYCHAIN_PROFILE and Keychain access');
+    }
+    return ['APPLE_SIGNING_IDENTITY', 'APPLE_KEYCHAIN_PROFILE'];
+  }
+  console.warn('[ship-preflight] WARNING: APPLE_PASSWORD is supplied through the environment; use APPLE_KEYCHAIN_PROFILE to keep notarization credentials in Keychain');
+  return ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 }
 
 function freeDiskGiB(root) {
@@ -268,7 +284,7 @@ export function performShipPreflight(options) {
     throw new Error(`could not verify whether release ${tag} exists: ${release.stderr.trim() || `exit ${release.status}`}`);
   }
 
-  const credentialNames = checkCredentialNames(env);
+  const credentialNames = checkCredentialNames(env, run, root);
   const releaseConfigKeys = checkReleaseConfig(root, env);
   const signingKey = join(env.HOME || '', '.tauri', 'cortex-ide.key');
   if (!env.HOME || !existsSync(signingKey)) {
