@@ -5190,6 +5190,18 @@
       ]
     },
     {
+      "path": "tests/reviewer-pr-checkout-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/reviewer-tool-contract-real-path.test.ts",
       "reasons": [
         "child-process",

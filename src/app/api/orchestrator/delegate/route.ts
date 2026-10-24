@@ -1,3 +1,4 @@
+import { resolveReviewerPrSource, reviewerCreationBase, ReviewerPrSourceError, ReviewerPrInputError, validateReviewPullRequest } from '@/lib/orchestrator/reviewer-pr-source';
 import { NextRequest, NextResponse } from 'next/server';
 import { dispatch } from '@/lib/lane/commands';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -113,6 +114,11 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     const now = new Date().toISOString();
     const defaults = getOperatorDefaultsSync().values;
     const { routing: workerRouting, carrier, launchEffort, executionCarrier } = await resolveDelegationSelection(body, repoPath);
+    const reviewPullRequest = validateReviewPullRequest(body);
+    const reviewSource = reviewPullRequest === undefined ? undefined : await resolveReviewerPrSource({
+      repoPath, packetId, pullRequest: reviewPullRequest,
+      existing: readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.reviewSource,
+    });
     const huddle = resolveWorkerHuddle({
       mode: defaults.workerStartMode,
       explicitHuddle: typeof body.huddle === 'boolean' ? body.huddle : undefined,
@@ -239,6 +245,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       workerRouting,
       huddle,
       prompt: launchPrompt,
+      ...(reviewSource ? { reviewSource } : {}),
       launchContext,
     };
 
@@ -251,7 +258,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
           ...buildPacketSelfReviewInstructions(baseBranch),
           'CRITICAL: Before reporting completion, commit all changes with a descriptive message. Uncommitted changes will be lost when the isolated worktree is cleaned up.',
         ];
-    const governedLaunchPrompt = [launchPrompt, ...completionContract].join('\n\n');
+    const governedLaunchPrompt = [launchPrompt, ...(reviewSource ? [`Review PR #${reviewSource.pullRequest} at exact HEAD ${reviewSource.headSha}. Its source is already checked out; do not fetch or switch branches.`] : []), ...completionContract].join('\n\n');
 
     // Append the packet by MUTATING the state object passed into the
     // withLockedState callback. Critical: do NOT call writeOrchestratorControlPlaneState
@@ -283,7 +290,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       label: taskName,
       packetId,
       actor: 'orchestrator',
-    });
+    }, ...(reviewSource ? [{ packetCreationBase: reviewerCreationBase({ repoPath, packetId, branch, baseBranch, source: reviewSource }) }] as const : []));
 
     if (!laneResult.ok || !laneResult.laneId) {
       return NextResponse.json({
@@ -365,10 +372,12 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       branch,
       baseBranch,
       workerRouting,
+      reviewSource: reviewSource ?? null,
       note: launchResult.note,
     });
   } catch (err) {
-    if (err instanceof DelegationSelectionError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
+    if (err instanceof ReviewerPrSourceError) return NextResponse.json({ ok: false, code: 'review_source_unavailable', error: err.message }, { status: 422 });
+    if (err instanceof DelegationSelectionError || err instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
     console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,
@@ -379,6 +388,10 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
 
 export async function POST(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
+  try { if (body) validateReviewPullRequest(body); } catch (error) {
+    if (error instanceof DelegationSelectionError || error instanceof ReviewerPrInputError) return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: 400 });
+    return NextResponse.json({ ok: false, code: 'invalid_review_pull_request', error: 'Unable to validate the PR review target.' }, { status: 400 });
+  }
   if (body?.checkoutMode === 'shared') {
     const authorization = authorizeFastDelegation({
       repoPath: typeof body.repoPath === 'string' ? body.repoPath.trim() : '',
@@ -418,6 +431,7 @@ export async function POST(request: NextRequest) {
     requestedProvider: body?.requestedProvider ?? null,
     huddle: body?.huddle ?? null,
     readOnly: body?.readOnly === true,
+    reviewPullRequest: body?.reviewPullRequest ?? null,
   });
   const binding = bindIdempotencyClientMutation({
     namespace: 'orchestrator_delegate',
@@ -494,6 +508,7 @@ export async function POST(request: NextRequest) {
           branch: lane.branch,
           baseBranch: lane.baseBranch,
           workerRouting: packet.workerRouting ?? null,
+          reviewSource: packet.reviewSource ?? null,
           launchContext: packet.launchContext,
           note: 'Recovered the delegated worker from its durable packet and lane binding.',
         },

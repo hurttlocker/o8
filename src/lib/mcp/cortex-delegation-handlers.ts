@@ -59,6 +59,7 @@ export function createCortexDelegationHandlers(config: {
           model: args.model || undefined,
           workerIntent: args.workerIntent || undefined,
           readOnly: args.readOnly === true,
+          ...(args.reviewPullRequest !== undefined ? { reviewPullRequest: args.reviewPullRequest } : {}),
         },
       });
       if (result.approvalId) return jsonResult({
@@ -98,6 +99,7 @@ export function createCortexDelegationHandlers(config: {
         teamId: result.teamId ?? null,
         checkoutMode: result.checkoutMode ?? 'isolated',
         workerRouting: result.workerRouting ?? null,
+        reviewSource: result.reviewSource ?? null,
         note: result.note,
       });
     } catch (error) {

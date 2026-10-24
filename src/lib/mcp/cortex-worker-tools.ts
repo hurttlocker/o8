@@ -88,6 +88,7 @@ export const CORTEX_WORKER_TOOLS = [
         requestedEffort: { type: 'string', enum: THINKING_EFFORTS, description: 'Optional task effort. Use a tier listed for this runtime/model. Unsupported or coerced tiers are refused.' },
         thinkingEffort: { type: 'string', enum: THINKING_EFFORTS, description: 'Alias for requestedEffort; when both are present they must match.' },
         workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
+        reviewPullRequest: { type: 'integer', minimum: 1, description: 'PR number in this repository for an isolated read-only review. Requires readOnly: true. The host fetches and pins its exact head before launch; the worker can run checks without fetching or switching branches.' },
         readOnly: {
           type: 'boolean',
           description: 'Set true for inspect, investigate, verify, or report tasks that must not change files. A clean zero-diff exit then completes as evidence.',

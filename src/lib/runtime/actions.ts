@@ -1,3 +1,4 @@
+import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -417,6 +418,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
       throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
     }
   }
+  await assertReviewerPrCheckout(payload.packetId, cwd);
   const result = await runtime.launch({
     cwd,
     sourceRepoPath: repoPath,
