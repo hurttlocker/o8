@@ -99,6 +99,68 @@ describe('inbox wake reservation ownership through actual routes', () => {
   afterEach(() => { vi.useRealTimers(); });
   afterAll(() => { closeDb(); });
 
+  it('keeps an accepted wake identifiable after acknowledgement and storage reopen', async () => {
+    const run = vi.fn().mockResolvedValue(undefined);
+    const target = await fixture('queued-wake-identity', (agent, text, canSubmit) => submitCodexQueuedUserTurn(agent, text, {
+      resolveSessionHome: async () => ({ threadId: agent.sessionKey!.replace('codex:', ''), configHomeRef: dataDir }),
+      resolveBinary: async () => process.execPath,
+      run,
+      canSubmit,
+    }));
+    const response = await target.post('Private peer content stays in the inbox.');
+    expect(response.status).toBe(201);
+    const { message } = await response.json() as { message: { id: string; sequence: number; timestamp: string } };
+    const reservation = target.state();
+    expect(run).toHaveBeenCalledTimes(1);
+    const args = run.mock.calls[0][1] as string[];
+    const queuedText = args[args.indexOf('--message') + 1];
+    expect(queuedText).toContain(`Wake ID: ${reservation.native_wake_id}`);
+    expect(queuedText).toContain(`Origin message: ${message.id}`);
+    expect(queuedText).toContain(`Origin sequence: ${message.sequence}`);
+    expect(queuedText).toContain(`Recorded at: ${message.timestamp}`);
+    expect(queuedText).not.toContain('Private peer content');
+    expect(queuedText).toContain('If the inbox is empty, this queued wake is stale.');
+    expect(queuedText).not.toContain('New peer messages are waiting');
+
+    expect((await target.read()).messages.map(message => message.id)).toEqual([message.id]);
+    expect(target.state().acknowledged_sequence).toBe(message.sequence);
+    closeDb();
+    expect((await target.read()).messages).toEqual([]);
+    expect(target.state().native_wake_id).toBeNull();
+    const nextResponse = await target.post('Genuinely new work after the stale wake.');
+    expect(nextResponse.status).toBe(201);
+    const { message: next } = await nextResponse.json() as { message: { id: string; sequence: number } };
+    expect(run).toHaveBeenCalledTimes(2);
+    const nextArgs = run.mock.calls[1][1] as string[];
+    const nextText = nextArgs[nextArgs.indexOf('--message') + 1];
+    expect(nextText).toContain(`Wake ID: ${target.state().native_wake_id}`);
+    expect(nextText).toContain(`Origin message: ${next.id}`);
+    expect(nextText).toContain(`Origin sequence: ${next.sequence}`);
+    expect(nextText).not.toContain(String(reservation.native_wake_id));
+    expect((await target.read()).messages.map(message => message.id)).toEqual([next.id]);
+    expect((await target.read()).messages).toEqual([]);
+  });
+
+  it('keeps the wake origin distinct from a coalesced unread watermark', async () => {
+    const sendCodex = vi.fn<AgentMessageDeliverySeams['sendCodex']>().mockResolvedValue(undefined);
+    const target = await fixture('coalesced-wake-origin', sendCodex);
+    const firstResponse = await target.post('First message');
+    const { message: first } = await firstResponse.json() as { message: { id: string; sequence: number } };
+    const reservation = target.state().native_wake_id;
+    const secondResponse = await target.post('Second coalesced message');
+    const { message: second } = await secondResponse.json() as { message: { id: string; sequence: number } };
+    expect(sendCodex).toHaveBeenCalledTimes(1);
+    const queuedText = sendCodex.mock.calls[0][1];
+    expect(queuedText).toContain(`Wake ID: ${reservation}`);
+    expect(queuedText).toContain(`Origin sequence: ${first.sequence}`);
+    expect(target.state().native_wake_through_sequence).toBe(second.sequence);
+    expect((await target.read(1)).messages.map(message => message.id)).toEqual([first.id]);
+    closeDb();
+    expect(target.state().native_wake_id).toBe(reservation);
+    expect((await target.read()).messages.map(message => message.id)).toEqual([second.id]);
+    expect((await target.read()).messages).toEqual([]);
+  });
+
   it.each(['session', 'binary'] as const)('drops a wake acknowledged during %s resolution and still wakes for new work', async (stage) => {
     const { started, preparation, run, sendCodex } = preparingCodexQueue(stage);
     const target = await fixture(`ack-during-${stage}`, sendCodex);
