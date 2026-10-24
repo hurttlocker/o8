@@ -266,7 +266,7 @@ async fn handle(
     if messages.is_empty() || messages.iter().any(|message| !native(message)) {
         return server.proxy(method, &headers, body).await;
     }
-    let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null())
+    let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null() && !batch)
         .map(|(index, message)| json!({"index": index, "arguments":message["params"].get("arguments").cloned().unwrap_or(json!({}))})).collect();
     let context = json!({"jsonrpc":"2.0","id":"o8d-context","method":"o8d/read-context","params":{"statusRequests":status_requests}});
     let upstream = match server
@@ -312,7 +312,34 @@ async fn handle(
                     .unwrap_or(json!({}));
                 // Path expansion and error/retry policy remain authoritative in TS.
                 // Fall back only for this read, never replay a mutating batch.
-                let status_source = context["result"]["statusSources"]
+                // Preserve sequential batch semantics: a fresh read must finish
+                // before the next cached status read or another read's reconciliation.
+                let refreshed_context = if batch && name == "o8_status" {
+                    let request = json!({"jsonrpc":"2.0","id":"o8d-context","method":"o8d/read-context","params":{"statusRequests":[{"index":index,"arguments":args}]}});
+                    let upstream = match server
+                        .request(
+                            Method::POST,
+                            "/api/mcp",
+                            &headers,
+                            Bytes::from(request.to_string()),
+                        )
+                        .await
+                    {
+                        Ok(value) => value,
+                        Err(_) => return unavailable(),
+                    };
+                    if !upstream.status().is_success() {
+                        return relay(upstream).await;
+                    }
+                    match upstream.json::<Value>().await {
+                        Ok(value) => Some(value),
+                        Err(_) => return unavailable(),
+                    }
+                } else {
+                    None
+                };
+                let read_context = refreshed_context.as_ref().unwrap_or(&context);
+                let status_source = read_context["result"]["statusSources"]
                     .as_array()
                     .and_then(|sources| sources.iter().find(|source| source["index"] == index))
                     .and_then(|source| source.get("source"));

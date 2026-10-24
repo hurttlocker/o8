@@ -185,6 +185,18 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     },
   );
 
+  it('preserves sequential fresh-then-cached status semantics within a batch', async () => {
+    await call(rust, 'o8_status', { fresh: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const result = await sendRecordedMcp(rust, token, { name: 'sequential snapshots', body: [
+      { jsonrpc: '2.0', id: 'fresh', method: 'tools/call', params: { name: 'o8_status', arguments: { fresh: true } } },
+      { jsonrpc: '2.0', id: 'cached', method: 'tools/call', params: { name: 'o8_status', arguments: {} } },
+    ] });
+    const snapshots = (result.body as Array<{ result: { content: Array<{ text: string }> } }>).map((entry) =>
+      JSON.parse(entry.result.content[0].text).data.snapshot.capturedAt);
+    expect(snapshots[1]).toBe(snapshots[0]);
+  });
+
   it.each([undefined, null])('does not refresh status for a notification id %s', async (id) => {
     seen.length = 0;
     const result = await sendRecordedMcp(rust, token, { name: 'status notification', body: {
