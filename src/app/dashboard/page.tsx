@@ -19,6 +19,7 @@ import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, mergeTranscriptEntries, WORKSPACE_
 import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
+import { FeedbackSettingsEntry } from '@/components/desktop/FeedbackSheet';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
@@ -301,6 +302,7 @@ function formatDrawElement(e: { selector: string; tag: string; text: string; com
 export default function DashboardPage() {
   return (
     <ThemeProvider>
+      <FeedbackSettingsEntry nativeMenu />
       <AlertProvider>
         <AccountAuthorizationSync>
           <ReactiveQueryProvider>

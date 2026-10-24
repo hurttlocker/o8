@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { canInstallFeedbackMenu, ensureNativeFeedbackMenu, requestFeedbackSheet, subscribeFeedbackSheet } from '@/lib/feedback/native-feedback-menu';
 import { submitFeedback } from '@/lib/feedback/minimal-feedback-client';
 import { useReportDataSharing } from '@/lib/feedback/report-data-sharing-client';
 import { REPORT_DATA_SHARING_OFF_ERROR } from '@/lib/feedback/data-sharing';
@@ -116,11 +117,18 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function FeedbackSettingsEntry() {
+export function FeedbackSettingsEntry({ nativeMenu = false }: { nativeMenu?: boolean }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!nativeMenu || !canInstallFeedbackMenu()) return;
+    const release = subscribeFeedbackSheet(() => setOpen(true));
+    void ensureNativeFeedbackMenu().catch((error) => { console.error('[feedback-menu] Setup failed:', error); });
+    return release;
+  }, [nativeMenu]);
+  if (nativeMenu) return open ? <FeedbackSheet onClose={() => setOpen(false)} /> : null;
   return (
     <div style={{ marginTop: 'auto', padding: 8 }}>
-      <RamsButton variant="ghost" onClick={() => setOpen(true)}>Send Feedback…</RamsButton>
+      <RamsButton variant="ghost" onClick={() => { if (!requestFeedbackSheet()) setOpen(true); }}>Send Feedback…</RamsButton>
       {open ? <FeedbackSheet onClose={() => setOpen(false)} /> : null}
     </div>
   );
