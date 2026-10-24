@@ -9,6 +9,12 @@
       ]
     },
     {
+      "path": "cli/src/commands/serve-processes.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "cli/src/commands/team.test.ts",
       "reasons": [
         "child-process",
@@ -3881,6 +3887,7 @@
       "path": "tests/o8-serve-owned-stop.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "network-listener",
         "process-signal"
       ]

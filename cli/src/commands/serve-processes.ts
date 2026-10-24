@@ -45,32 +45,61 @@ async function claimIsLive(claim: ServeProcessClaim, rows: Map<number, ProcessRo
   if (!row || row.zombie) return false;
   const probe = await probeMetadataLockProcessIdentity(claim.pid);
   if (probe.state === 'absent') return false;
-  if (probe.state !== 'live' || !claim.identity || !sameMetadataLockProcessIdentity(claim.identity, probe.identity)) {
-    throw new Error(`Process ${claim.pid} ownership changed or cannot be verified.`);
+  if (probe.state === 'unknown') {
+    const current = (await processTable()).get(claim.pid);
+    if (!current || current.zombie) return false;
+    throw new Error(`Process ${claim.pid} ownership cannot be verified: ${probe.detail}`);
+  }
+  if (!claim.identity || !sameMetadataLockProcessIdentity(claim.identity, probe.identity)) {
+    throw new Error(`Process ${claim.pid} ownership changed.`);
   }
   return true;
+}
+
+/** An exited owner must not hide a surviving, previously observed orphan. */
+function assertNoUnclaimedDescendants(
+  pid: number,
+  original: Map<number, ProcessRow>,
+  current: Map<number, ProcessRow>,
+  claims: Map<number, ServeProcessClaim>,
+): void {
+  const visited = new Set<number>([pid]);
+  for (const parent of visited) {
+    for (const row of original.values()) {
+      if (row.parent !== parent || visited.has(row.pid)) continue;
+      visited.add(row.pid);
+      const survivor = current.get(row.pid);
+      if (survivor && !survivor.zombie && !claims.has(row.pid)) {
+        throw new Error(`Exited process ${pid} has unclaimed descendant ${row.pid}.`);
+      }
+    }
+  }
 }
 
 /** Capture before signaling ancestors so detached children remain attributable after reparenting. */
 export async function captureServeProcesses(seeds: ServeProcessClaim[]): Promise<ServeProcessClaim[]> {
   const rows = await processTable();
-  const claims = new Map<number, ServeProcessClaim>();
+  const claims = new Map(seeds.map((seed) => [seed.pid, seed]));
   const live = new Set<number>();
   for (const seed of seeds) {
-    claims.set(seed.pid, seed);
     if (await claimIsLive(seed, rows)) live.add(seed.pid);
+    else assertNoUnclaimedDescendants(seed.pid, rows, await processTable(), claims);
   }
   for (let changed = true; changed;) {
     changed = false;
     for (const row of rows.values()) {
       if (row.zombie || claims.has(row.pid) || !live.has(row.parent)) continue;
       const claim = await serveProcessClaim(row.pid).catch(() => null);
-      if (!claim) {
-        if ((await processTable()).has(row.pid)) throw new Error(`Descendant ${row.pid} could not be identified.`);
+      const current = await processTable();
+      const currentRow = current.get(row.pid);
+      if (!currentRow || currentRow.zombie) {
+        assertNoUnclaimedDescendants(row.pid, rows, current, claims);
         continue;
       }
-      const current = await processTable();
-      if (current.get(row.pid)?.parent !== row.parent || !await claimIsLive(claims.get(row.parent)!, current)) {
+      if (!claim) {
+        throw new Error(`Descendant ${row.pid} could not be identified.`);
+      }
+      if (currentRow.parent !== row.parent || !await claimIsLive(claims.get(row.parent)!, current)) {
         throw new Error(`Descendant ${row.pid} ancestry changed before capture.`);
       }
       claims.set(row.pid, claim); live.add(row.pid); changed = true;
