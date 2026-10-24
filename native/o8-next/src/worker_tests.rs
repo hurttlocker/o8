@@ -201,7 +201,13 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     cx.simulate_input("Queued instruction");
     draw(cx);
     cx.simulate_keystrokes("enter");
-    cx.run_until_parked();
+    wait(&surface, cx, "persisted queued instruction", |s| {
+        s.queue["items"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["payload"]["text"] == "Queued instruction" && item["status"] == "queued"
+            })
+        })
+    });
     assert!(
         !surface.read_with(cx, |s, _| contains(s, "Queued instruction")),
         "queue waits for active turn"
@@ -224,6 +230,13 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         .unwrap();
     wait(&surface, cx, "queued worker result", |s| {
         contains(s, "Worker received: Queued instruction")
+    });
+    wait(&surface, cx, "completed worker steering receipt", |s| {
+        s.transcript.as_ref().unwrap().entries.iter().any(|e| {
+            e.role == "assistant"
+                && e.text.contains("Steered instruction")
+                && e.text.contains("Promoted instruction")
+        })
     });
     assert!(surface.read_with(cx, |s, _| {
         s.transcript.as_ref().unwrap().entries.iter().any(|e| {
