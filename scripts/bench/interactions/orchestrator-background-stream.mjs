@@ -117,14 +117,20 @@ try {
       };
       requestAnimationFrame(frame);
       window.__measureMutations = {};
+      window.__measureMutationBatches = {};
       window.__measureObserver = new MutationObserver(mutations => {
+        const changed = new Set();
         for (const mutation of mutations) {
           const element = (mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement)?.closest('[data-o8-message-id]');
           if (element) {
             const id = element.getAttribute('data-o8-message-id');
             window.__measureMutations[id] = (window.__measureMutations[id] ?? 0) + 1;
+            changed.add(id);
           }
         }
+        // One commit can remove hundreds of old Markdown nodes. Count its
+        // notification once per message when checking update cadence.
+        for (const id of changed) window.__measureMutationBatches[id] = (window.__measureMutationBatches[id] ?? 0) + 1;
       });
       window.__measureObserver.observe(document.body, { childList: true, characterData: true, subtree: true });
     });
@@ -151,11 +157,12 @@ try {
       return { frames: window.__measureFrames.length,
         framesOver34ms: window.__measureFrames.filter(value => value > 34).length,
         maxFrameMs: Math.max(...window.__measureFrames), mutations: window.__measureMutations,
+        mutationBatches: window.__measureMutationBatches,
         mountedMessages: document.querySelectorAll('[data-o8-message-id]').length };
     });
     const observedScrollTop = await scroller.evaluate(element => element.scrollTop);
-    const hiddenMutations = [3, 4].map(index => data.mutations[`orch-${index}-msg-79`] ?? 0);
-    const backgroundBounded = mode === 'visible-only' || hiddenMutations.every(count => count > 0 && count < 100);
+    const hiddenMutations = [3, 4].map(index => data.mutationBatches[`orch-${index}-msg-79`] ?? 0);
+    const backgroundBounded = mode === 'visible-only' || hiddenMutations.every(count => count > 0 && count < 30);
     receipt.observations.push({ mode, backgroundBounded, taskMs: before === null ? null : (after - before) * 1000,
       residentSubscriptions: [...sockets.values()], durationMs: performance.now() - started,
       scrollPreserved: Math.abs(observedScrollTop - scrollTop) < 2, ...data });
@@ -171,7 +178,8 @@ try {
   receipt.returnScrollPreserved = Math.abs(await scroller.evaluate(element => element.scrollTop) - scrollTop) < 2;
   receipt.controlDetected = receipt.observations.at(-1).framesOver34ms > 0;
   receipt.passed = receipt.errors.length === 0 && receipt.controlDetected && receipt.returnScrollPreserved
-    && receipt.observations.every(row => row.scrollPreserved && row.mountedMessages === 240 && row.residentSubscriptions.length === 3 && (!expectThrottle || row.backgroundBounded));
+    && receipt.observations.every(row => row.scrollPreserved && row.mountedMessages === 240 && row.residentSubscriptions.length === 3 && (row.mutationBatches['orch-1-msg-79'] ?? 0) > 100
+      && (!expectThrottle || row.backgroundBounded));
   if (!receipt.passed) process.exitCode = 1;
 } catch (error) {
   receipt.error = String(error); process.exitCode = 1;
