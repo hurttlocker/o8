@@ -161,7 +161,7 @@ pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
 fn keychain_secret_present(key: &str) -> bool {
     #[cfg(test)]
     if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") {
-        return false;
+        return std::env::var("O8_TEST_PRESENT_VOICE_PROVIDER_KEY").as_deref() == Ok(key);
     }
 
     use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
@@ -183,6 +183,9 @@ fn redact_config(
     mut value: serde_json::Value,
     stored_presence: impl Fn(&str) -> bool,
 ) -> serde_json::Value {
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
     if let Some(obj) = value.as_object_mut() {
         for secret in SECRET_PREF_KEYS {
             let legacy_present = obj
@@ -504,5 +507,89 @@ mod public_read_tests {
             .output().unwrap();
         assert!(output.status.success(), "isolated public-read regression failed: {}{}",
             String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod public_recovery_tests {
+    use super::{config_public, set_pref, SECRET_PREF_KEYS};
+
+    fn check_public_read(case: &str, contents: Option<&str>) {
+        const CHILD: &str = "O8_TEST_PUBLIC_VOICE_RECOVERY_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok(case) {
+            let path = std::path::PathBuf::from(std::env::var_os("O8_DATA_DIR").unwrap())
+                .join("dictation.json");
+            let original = std::fs::read(&path).ok();
+            for _ in 0..2 {
+                let public = config_public();
+                assert!(public.is_object(), "public preferences must recover an object");
+                for key in SECRET_PREF_KEYS {
+                    let expected = key == "elevenlabs_api_key"
+                        || (case == "object" && key == "gemini_api_key");
+                    assert_eq!(public[format!("{key}_set")], expected, "{key}");
+                    assert!(public.get(key).is_none());
+                }
+                assert!(!public.to_string().contains("fixture-secret"));
+                if case == "object" {
+                    assert_eq!(public["language"], "en");
+                    assert_eq!(public["reading_speed"], 1.5);
+                }
+                assert_eq!(std::fs::read(&path).ok(), original, "read must not repair or migrate the file");
+            }
+            // A later non-secret preference write keeps the existing recovery contract.
+            set_pref("language", serde_json::json!("fr")).unwrap();
+            let public = config_public();
+            assert_eq!(public["language"], "fr");
+            assert_eq!(public["elevenlabs_api_key_set"], true);
+            if case == "object" {
+                assert_eq!(public["reading_speed"], 1.5);
+                assert!(std::fs::read_to_string(&path).unwrap().contains("fixture-secret"));
+                assert!(!public.to_string().contains("fixture-secret"));
+            }
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "o8-public-voice-recovery-{case}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct RemoveFixture(std::path::PathBuf);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _fixture = RemoveFixture(dir.clone());
+        if let Some(raw) = contents {
+            std::fs::write(dir.join("dictation.json"), raw).unwrap();
+        }
+        let module = module_path!().split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("{module}::public_read_recovers_{case}_preferences"), "--nocapture"])
+            .env(CHILD, case)
+            .env("O8_DATA_DIR", &dir)
+            .env("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1")
+            .env("O8_TEST_PRESENT_VOICE_PROVIDER_KEY", "elevenlabs_api_key")
+            .output().unwrap();
+        assert!(output.status.success(), "isolated {case} public-read regression failed: {}{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+
+    #[test]
+    fn public_read_recovers_missing_preferences() { check_public_read("missing", None); }
+    #[test]
+    fn public_read_recovers_malformed_preferences() { check_public_read("malformed", Some("{fixture-secret")); }
+    #[test]
+    fn public_read_recovers_null_preferences() { check_public_read("null", Some("null")); }
+    #[test]
+    fn public_read_recovers_array_preferences() { check_public_read("array", Some("[]")); }
+    #[test]
+    fn public_read_recovers_string_preferences() { check_public_read("string", Some(r#""fixture-secret""#)); }
+    #[test]
+    fn public_read_recovers_number_preferences() { check_public_read("number", Some("42")); }
+    #[test]
+    fn public_read_recovers_boolean_preferences() { check_public_read("boolean", Some("false")); }
+    #[test]
+    fn public_read_recovers_object_preferences() {
+        check_public_read("object", Some(r#"{"gemini_api_key":" fixture-secret ","groq_api_key":" ","groq_api_key_set":true,"language":"en","reading_speed":1.5}"#));
     }
 }
