@@ -106,7 +106,11 @@ impl Client {
                 .build(),
         })
     }
-    fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> Result<T, String> {
+    pub(crate) fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T, String> {
         let mut url = self.origin.join(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
         let mut request = self.agent.get(url.as_str());
