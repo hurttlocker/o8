@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
 import { relativeAge } from './shared';
 import type { ActivityItem } from './types';
 
@@ -11,16 +12,6 @@ type ActivityExtras = {
 };
 const EMPTY_EXTRAS: ActivityExtras = { issues: [], prs: [], ciRuns: [], repoCommits: [] };
 const PAUSED = 'GitHub rate limit — paused until reset';
-
-function pauseUntil(response: Response): number {
-  const now = Date.now();
-  const retry = response.headers.get('retry-after');
-  const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-  const retryMs = retry ? Number(retry) * 1000 : NaN;
-  const retryAt = Number.isFinite(retryMs) && retryMs > 0 ? now + retryMs : Date.parse(retry ?? '');
-  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(reset) ? reset : 0);
-  return deadline > now ? deadline : now + 300_000;
-}
 
 /** Keep successful streams scoped to their repository through failed refreshes. */
 export function useActivityExtras(repo: string | null, allRepos: string[], isAllRepos: boolean, refreshKey?: number) {
@@ -57,8 +48,9 @@ export function useActivityExtras(repo: string | null, allRepos: string[], isAll
           ipcFetch(`/api/panel/commits?repo=${encodeURIComponent(repoSlug)}`, init).catch(() => null),
         ]);
         for (const response of [issuesRes, prsRes, ciRes, commitsRes]) {
-          if (response?.status === 403 || response?.status === 429) {
-            nextPause = Math.max(nextPause, pauseUntil(response));
+          const deadline = response ? githubQuotaDeadline(response) : null;
+          if (deadline !== null) {
+            nextPause = Math.max(nextPause, deadline);
             errors.push(PAUSED);
           }
         }
