@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server';
 import { attachReplaySocket } from './replay-socket';
 import { isolateTranscriptDiscovery, seedTranscriptFixtures } from './transcript-fixtures';
 import { attachTranscriptSocket } from './transcript-socket';
+import { startTerminalFixture } from './terminal-fixture';
 
 async function main() {
   if (process.argv.includes('--worker')) {
@@ -110,6 +111,9 @@ async function main() {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       requests.push(`${req.method} ${url.pathname}`);
+      if (process.argv.includes('--terminal') && req.method === 'GET' && url.pathname === '/api/panel/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'); return;
+      }
       const route = req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
@@ -152,19 +156,30 @@ async function main() {
       res.end(Buffer.from(await response.arrayBuffer()));
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
-  const closeSockets = (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, getOrCreateWsToken(), requests);
-  server.listen(0, '127.0.0.1', () => {
+  const terminal = process.argv.includes('--terminal');
+  const wsToken = getOrCreateWsToken();
+  const closeSockets = terminal ? () => {}
+    : (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, wsToken, requests);
+  let closeTerminal = async () => {};
+  server.listen(0, '127.0.0.1', async () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');
     Object.assign(process.env, { O8_WS_PORT:String(address.port), WS_PORT:String(address.port), O8_API_PORT:String(address.port) });
-    writeFileSync(join(dataDir,'ws-port'),String(address.port));
+    const peer = terminal ? await startTerminalFixture(dataDir, repo, address.port, wsToken) : null;
+    if (peer) {
+      closeTerminal = peer.close;
+      process.env.O8_WS_PORT = String(peer.port); process.env.WS_PORT = String(peer.port);
+    }
+    writeFileSync(join(dataDir,'ws-port'),String(peer?.port ?? address.port));
     if (process.argv.includes('--shell')) {
       writeFileSync(join(dataDir, 'api-port'), String(address.port));
       process.stdout.write(`${JSON.stringify({ configDir: dataDir })}\n`);
     }
-    process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}` })}\n`);
+    process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}`,
+      ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
   });
-  function close() {
+  async function close() {
+    await closeTerminal();
     closeSockets();
     server.closeAllConnections(); server.close();
     realtime.closeAllConnections(); realtime.close();

@@ -9,10 +9,11 @@ for (const line of output.trim().split('\n')) {
   const match = identity.match(/^(\S+) v(\S+)/);
   if (!match || !license) throw Error('Unrecognized package license');
   const [, name, version] = match;
-  if (/GPL/i.test(license) || ['editor', 'terminal', 'markdown', 'gpuix-native'].includes(name)) throw Error(`Disallowed dependency: ${name}`);
+  if (/GPL/i.test(license) || ['editor', 'terminal', 'terminal_view', 'markdown', 'gpuix-native'].includes(name)) throw Error(`Disallowed dependency: ${name}`);
   packages.set(`${name}@${version}`, { name, version, license });
 }
 if (packages.get('gpui@0.2.2')?.license !== 'Apache-2.0') throw Error('GPUI license mismatch');
+if (packages.get('alacritty_terminal@0.26.0')?.license !== 'Apache-2.0') throw Error('Alacritty license mismatch');
 writeFileSync(process.env.O8_NEXT_LICENSE_OUTPUT || 'native/o8-next/evidence/licenses.json', JSON.stringify({ target, gpui: '0.2.2', gplPackages: 0,
   note: 'Declared normal/build dependency graph. Includes permissive and MPL-2.0 transitive licenses.',
   packages: [...packages.values()].sort((a, b) => a.name.localeCompare(b.name)) }) + '\n');

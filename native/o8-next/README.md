@@ -1,4 +1,4 @@
-# o8 next: live sessions and composer
+# o8 next: live sessions, composer and opt-in terminal
 
 [Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
 
@@ -28,6 +28,53 @@ diagrams, visualization cards and real font-shaping/GPU/compositor measurements
 remain open. Linux TestAppContext timing uses a no-op text system; its three
 2,000-row runs are not substitutes for the existing macOS measurements. The
 composer and queue actions are described below.
+
+## Opt-in native terminal (#4487)
+
+Pass `--terminal SESSION_ID` to open a native terminal pane for an existing
+terminal session. This requires the normal `--enable-next`, explicit `--server`
+and `O8_NEXT_API_TOKEN`. The CLI launcher forwards the option. It uses the same
+published GPUI crate as the other native surfaces and `alacritty_terminal =
+0.26.0` (Apache-2.0), with no GPL application crates. The shipped Tauri app is
+unchanged. See [terminal protocol](TERMINAL-PROTOCOL.md) for attach, input, resize,
+replay and reconnection details.
+
+The pane paints ANSI/indexed/truecolor cells, combining/wide characters and
+cursor shapes, preserves alternate screen state, and retains 10,000 lines.
+Wheel and Shift+PageUp/PageDown/Home/End scroll without a scrollbar track.
+Input uses GPUI's text-input contract plus terminal control/function keys;
+resize follows the viewport. Clipboard escape requests are disabled. Terminal
+selection/copy, mouse reporting, graphics protocols and display presentation
+timing are outside this slice.
+
+Use the existing disposable host with its new fixture mode:
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/dev-server.ts --terminal
+# Use the printed origin and terminalSession; supply the same explicit fixture
+# O8_NEXT_API_TOKEN to the host and native process through the environment.
+node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --server ORIGIN --terminal SESSION_ID
+```
+
+Linux headless verification (Node 22, Rust stable, GPUI linker prerequisites):
+
+```sh
+npx vitest run tests/next-terminal-real-path.test.ts
+O8_NEXT_TERMINAL_RESULTS="$PWD/terminal-results.json" cargo test --release --locked --manifest-path native/o8-next/Cargo.toml terminal -- --nocapture --test-threads=1
+O8_NEXT_TARGET=x86_64-unknown-linux-gnu O8_NEXT_LICENSE_OUTPUT=terminal-licenses.json node scripts/next/license-audit.mjs
+```
+
+The GPUI test measures local key dispatch to CPU scene paint separately from
+the key → production WebSocket server → real PTY echo → CPU scene endpoint.
+Flood frame time includes taking the current grid snapshot and painting it while
+the socket thread parses output; the Python peer emits exactly 50,000,000 bytes
+at 2.5 MB/s before its marker, following the repository's fixed-rate workload
+pattern. The peer's separate `burst` command probes unpaced saturation; the
+existing server deliberately drops visible data under backpressure.
+RSS is sampled with the full 10,000-line history. Headless CPU scenes do not
+establish GPU, compositor or physical input latency.
+See [terminal verification and measurements](evidence/terminal/verification.md)
+for the three release receipts, license graphs and remaining latency limits.
 
 ## Build and use
 
