@@ -535,7 +535,8 @@ describe('provision failure diagnostics through agent entry points (#4071)', () 
     }
     const latest = createLane({ repoPath, branch: 'newest-diagnostic', packetId: 'pkt-newest-failure', runtime: 'codex' });
     setLaneStatus(latest.id, 'failed', 'system', 'newest_failure', { reason: 'newest fixture cause' });
-    const result = parseResult(await handleStatus({}));
+    // Refresh the snapshot after these writes instead of reusing an earlier status read.
+    const result = parseResult(await handleStatus({ fresh: true }));
     expect(result.data.terminalReasons).toHaveLength(50);
     expect(result.data.terminalReasonsTruncated).toBe(true);
     expect(result.data.terminalReasons[0]).toMatchObject({ packetId: 'pkt-newest-failure',
