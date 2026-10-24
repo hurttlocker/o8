@@ -1,0 +1,12 @@
+[
+  {"id":"thoughts-old","title":"Older chat","status":"ready","lastMessageAt":"2026-10-01T00:00:00Z"},
+  {"id":"thoughts-review","title":"Review change","status":"awaiting_review","lastMessageAt":"2026-10-02T00:00:00Z"},
+  {"id":"thoughts-working","title":"Working change","status":"running","lastMessageAt":"2026-10-02T00:00:00Z"},
+  {"id":"thoughts-failed","title":"Inspect failure","status":"failed","lastMessageAt":"2026-10-01T00:00:00Z"},
+  {"id":"thoughts-recent","title":"Recent chat","status":"ready","lastMessageAt":"2026-10-03T00:00:00Z"},
+  {"id":"thoughts-new-work","title":"New work","status":"launching","lastMessageAt":"2026-10-03T00:00:00Z"},
+  {"id":"thoughts-human","title":"Operator decision","status":"awaiting_input","lastMessageAt":"2026-10-02T00:00:00Z"},
+  {"id":"thoughts-rejected","title":"Revise change","status":"reviewing","rejected":true,"lastMessageAt":"2026-10-01T00:00:00Z"},
+  {"id":"thoughts-outcome","title":"PR opened","status":"completed","outcome":"pr_opened","lastMessageAt":"2026-10-03T00:00:00Z"},
+  {"id":"thoughts-idle","title":"Idle chat","status":"idle","lastMessageAt":"2026-10-04T00:00:00Z"}
+]

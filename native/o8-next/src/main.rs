@@ -1,9 +1,11 @@
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod client;
+mod composer;
 mod merge;
 mod model;
 mod retained;
+mod sidebar;
 mod stream;
 mod text;
 mod transport;
@@ -20,7 +22,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] {
         println!(
-            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE]\nRead-only saved session snapshot. No app or data-directory discovery.\no8-next --render-tree HISTORY.json"
+            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
         );
         return Ok(());
     }
@@ -42,6 +44,16 @@ fn run() -> Result<(), String> {
         println!(
             "{}",
             serde_json::to_string(&render_tree(&history.transcript)).unwrap()
+        );
+        return Ok(());
+    }
+    if args.first().is_some_and(|s| s == "--sidebar-tree") && args.len() == 3 {
+        let sessions: Vec<client::Session> =
+            serde_json::from_slice(&fs::read(&args[1]).map_err(|_| "Cannot read sidebar fixture")?)
+                .map_err(|_| "Invalid sidebar fixture")?;
+        println!(
+            "{}",
+            serde_json::to_string(&sidebar::tree(&sessions, Some(&args[2]))).unwrap()
         );
         return Ok(());
     }

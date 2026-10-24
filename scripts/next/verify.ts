@@ -7,14 +7,19 @@ import { createInterface } from 'node:readline';
 import { strict as assert } from 'node:assert';
 import type { MobileHistoryResponse } from '@/lib/mobile/types';
 import { webTree } from './web-tree';
+import { sidebarTree } from './sidebar-tree';
+import sidebar from '../../native/o8-next/fixtures/sidebar.json';
+import { randomBytes } from 'node:crypto';
 
 async function main() {
   const binary = process.env.O8_NEXT_BINARY;
   if (!binary) throw new Error('Set O8_NEXT_BINARY to the release binary built from this checkout');
   const directory = mkdtempSync(join(tmpdir(), 'o8-next-verify-'));
   const requests = join(directory, 'requests.json');
+  const token = randomBytes(32).toString('hex');
+  const headers = { Authorization: `Bearer ${token}` };
   const server = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'scripts/next/dev-server.ts'], {
-    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TZ: 'UTC', CORTEX_IDE_DB_PATH: join(directory, 'must-not-open.db'), O8_NEXT_REQUEST_LOG: requests, WS_TOKEN: 'fixture-inherited-token-must-not-reuse' },
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, O8_NEXT_API_TOKEN: token, WS_TOKEN: 'fixture-inherited-token-must-not-reuse', TZ: 'UTC', CORTEX_IDE_DB_PATH: join(directory, 'must-not-open.db'), O8_NEXT_REQUEST_LOG: requests },
   });
   let errors = '';
   server.stderr.on('data', chunk => { errors += String(chunk); });
@@ -25,7 +30,7 @@ async function main() {
       lines.on('line', line => { try { const value = JSON.parse(line) as { origin?: string }; if (value.origin) resolveOrigin(value.origin); } catch {} });
       server.once('exit', () => reject(new Error(`Disposable route host exited: ${errors.slice(-1000)}`)));
     });
-    const wsInfo = await (await fetch(`${origin}/api/panel/ws-info`)).json() as { wsPort: number; wsToken: string };
+    const wsInfo = await (await fetch(`${origin}/api/panel/ws-info`, { headers })).json() as { wsPort: number; wsToken: string };
     assert.notEqual(wsInfo.wsToken, 'fixture-inherited-token-must-not-reuse', 'fixture host must replace inherited credentials');
     assert.match(wsInfo.wsToken, /^[a-f0-9]{64}$/);
     assert.equal(wsInfo.wsPort, Number(new URL(origin).port));
@@ -39,11 +44,16 @@ async function main() {
     const invalid = join(directory, 'invalid.json'); writeFileSync(invalid, '{');
     assert.equal(spawnSync(binary, ['--render-tree', invalid], { encoding: 'utf8', timeout: 8000 }).status, 1);
     // Every native network request goes to this freshly bound owned server.
-    const list = await (await fetch(`${origin}/api/mobile/orchestrator/threads?limit=500`)).json() as { threads: Array<{ id: string; messageCount: number }> };
+    const list = await (await fetch(`${origin}/api/mobile/orchestrator/threads?limit=500`, { headers })).json() as { threads: Array<{ id: string; messageCount: number }> };
     assert.equal(list.threads.length, 3);
+    const nativeSidebar = JSON.parse(execFileSync(binary, ['--sidebar-tree',
+      resolve('native/o8-next/fixtures/sidebar.json'), 'thoughts-recent'], { encoding: 'utf8', timeout: 8000 }));
+    assert.deepEqual(nativeSidebar, sidebarTree(sidebar, 'thoughts-recent'));
+    console.log('[o8-next]', 'sidebar: 10 sessions, 3 groups match production web rules');
+
     for (const session of list.threads) {
       const name = session.id.replace('thoughts-', '');
-      const response = await fetch(`${origin}/api/mobile/history?sessionKey=${encodeURIComponent(`llm-chat:${session.id}`)}&limit=100`);
+      const response = await fetch(`${origin}/api/mobile/history?sessionKey=${encodeURIComponent(`llm-chat:${session.id}`)}&limit=100`, { headers });
       assert.equal(response.status, 200);
       const history = await response.json() as MobileHistoryResponse;
       const recorded = resolve(`native/o8-next/fixtures/${name}.history.json`);
@@ -62,10 +72,14 @@ async function main() {
       assert.deepEqual(native, expected, `${name}: native tree must match production web tree`);
       console.log('[o8-next]', `${name}: ${history.transcript.length} API messages, ${expected.length} parity rows`);
     }
+    if (process.argv.includes('--protocol-only')) {
+      console.log('[o8-next]', 'protocol-only: window measurements omitted; run the GPUI test context separately');
+      return;
+    }
     // Actual CLI dispatcher -> actual native executable, without showing a window.
     const result = join(directory, 'frame.json');
     const cli = ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary, '--server', origin, '--offscreen', '--benchmark', result];
-    execFileSync(process.execPath, cli, { encoding: 'utf8', timeout: 9000 });
+    execFileSync(process.execPath, cli, { encoding: 'utf8', timeout: 9000, env: { ...process.env, O8_NEXT_API_TOKEN: token } });
     const frame = JSON.parse(readFileSync(result, 'utf8'));
     assert.equal(frame.sessions, 3); assert.equal(frame.offscreen, true);
     assert.equal(frame.keyToFrameMs.length, 20); assert.equal(frame.scrollFrameMs.length, 50);
@@ -77,8 +91,8 @@ async function main() {
       for (let run = 1; run <= 3; run++) {
         const output = join(directory, `stream-${run}.json`);
         const args = ['--enable-next', '--server', origin, '--offscreen', '--stream-benchmark', output, '--stream-through', String(replay.lastSeq)];
-        if (run === 1) execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--binary', binary, ...args], { encoding: 'utf8', timeout: 9000 });
-        else execFileSync(binary, args, { encoding: 'utf8', timeout: 9000 });
+        if (run === 1) execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--binary', binary, ...args], { encoding: 'utf8', timeout: 9000, env: { ...process.env, O8_NEXT_API_TOKEN: token } });
+        else execFileSync(binary, args, { encoding: 'utf8', timeout: 9000, env: { ...process.env, O8_NEXT_API_TOKEN: token } });
         const bytes = readFileSync(output, 'utf8'); const receipt = JSON.parse(bytes);
         assert.equal(receipt.lastSeq, replay.lastSeq); assert.equal(receipt.offscreen, true);
         assert.equal(receipt.keyToFrameWhileStreamingMs.length, 20);
@@ -93,7 +107,7 @@ async function main() {
     if (process.env.O8_NEXT_RESULTS) {
       for (let run = 1; run <= 3; run++) {
         const output = join(directory, `run-${run}.json`);
-        execFileSync(binary, ['--enable-next', '--server', origin, '--offscreen', '--benchmark', output], { encoding: 'utf8', timeout: 9000 });
+        execFileSync(binary, ['--enable-next', '--server', origin, '--offscreen', '--benchmark', output], { encoding: 'utf8', timeout: 9000, env: { ...process.env, O8_NEXT_API_TOKEN: token } });
         const bytes = readFileSync(output, 'utf8');
         const receipt = JSON.parse(bytes);
         assert.equal(receipt.keyToFrameMs.length, 20);
@@ -108,8 +122,9 @@ async function main() {
     assert.equal(existsSync(join(directory, 'must-not-open.db')), false, 'inherited database override must never be opened');
     const calls = JSON.parse(readFileSync(requests, 'utf8')) as string[];
     assert.ok(calls.length > 0);
-    assert.ok(calls.every(call => ['GET /api/mobile/orchestrator/threads', 'GET /api/mobile/history', 'GET /api/panel/ws-info', 'WS /ws', 'WS realtime-subscribe', 'WS ping'].includes(call)));
-    console.log('[o8-next]', `${calls.length} requests; only existing GET/WebSocket contracts used`);
+    assert.ok(calls.every(call => ['GET /api/mobile/orchestrator/threads', 'GET /api/mobile/history',
+      'GET /api/panel/ws-info', 'WS /ws', 'WS realtime-subscribe', 'WS ping', 'GET /api/v2/chat-history', 'GET /api/orchestrator/state', 'GET /api/orchestrator/composer-queue'].includes(call)));
+    console.log('[o8-next]', `${calls.length} requests; only existing GET contracts used`);
     rmSync(directory, { recursive: true, force: true });
   }
 

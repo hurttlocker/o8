@@ -1,5 +1,6 @@
 use crate::model::History;
 use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 use std::net::{IpAddr, SocketAddr};
 use std::{io::Read, time::Duration};
 use url::{Host, Url};
@@ -9,9 +10,23 @@ use url::{Host, Url};
 pub struct Session {
     pub id: String,
     pub title: String,
+    #[serde(default)]
     pub runtime: String,
     pub status: String,
+    #[serde(default)]
     pub message_count: usize,
+    #[serde(default)]
+    pub last_message_at: String,
+    #[serde(default)]
+    pub repo_path: Option<String>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub rejected: bool,
+    #[serde(default)]
+    pub unread: bool,
 }
 #[derive(Deserialize)]
 struct Sessions {
@@ -23,14 +38,29 @@ struct WsInfo {
     ws_port: u16,
     ws_token: String,
 }
+#[derive(Debug)]
+pub struct QueueError {
+    pub message: String,
+    pub status: Option<u16>,
+}
 
 #[derive(Clone)]
 pub struct Client {
     origin: Url,
     agent: ureq::Agent,
+    token: Option<String>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
+        Self::authenticated(origin, std::env::var("O8_NEXT_API_TOKEN").ok())
+    }
+    pub fn authenticated(origin: &str, token: Option<String>) -> Result<Self, String> {
+        if token
+            .as_ref()
+            .is_some_and(|s| s.chars().any(char::is_control))
+        {
+            return Err("Invalid API credential format".into());
+        }
         let origin = Url::parse(origin).map_err(|_| "Invalid server URL")?;
         let loopback = match origin.host() {
             Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -50,6 +80,7 @@ impl Client {
         }
         Ok(Self {
             origin,
+            token: token.filter(|s| !s.trim().is_empty()),
             agent: ureq::AgentBuilder::new()
                 .redirects(0)
                 .try_proxy_from_env(false)
@@ -60,10 +91,17 @@ impl Client {
     fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> Result<T, String> {
         let mut url = self.origin.join(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
-        let response = self.agent.get(url.as_str()).call().map_err(|e| match e {
+        let mut request = self.agent.get(url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = request.call().map_err(|e| match e {
             ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
             _ => "Could not reach the selected server".into(),
         })?;
+        Self::read(response)
+    }
+    fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
         let mut bytes = Vec::new();
         response
             .into_reader()
@@ -77,9 +115,119 @@ impl Client {
             .map_err(|_| "Server returned an invalid transcript response".into())
     }
     pub fn sessions(&self) -> Result<Vec<Session>, String> {
-        Ok(self
+        let mut sessions = self
             .get::<Sessions>("/api/mobile/orchestrator/threads", &[("limit", "500")])?
-            .threads)
+            .threads;
+        let state: Value = self.get("/api/orchestrator/state", &[])?;
+        for session in &mut sessions {
+            if session.status == "busy" {
+                session.status = "running".into();
+            }
+            let mut candidates = Vec::new();
+            if let Some(packets) = state["mission"]["packets"].as_array() {
+                for packet in packets.iter().filter(|p| {
+                    p["orchestratorThreadId"] == session.id && p["status"] != "archived"
+                }) {
+                    let mut subject = session.clone();
+                    subject.status = packet["status"].as_str().unwrap_or("idle").into();
+                    subject.rejected = packet["review"]["approved"] == false;
+                    subject.outcome =
+                        (packet["releaseState"] == "released").then(|| "merged".into());
+                    let timestamp = packet["releaseStatePayload"]["releasedAt"]
+                        .as_str()
+                        .or(packet["archivedAt"].as_str())
+                        .or(packet["lastEventAt"].as_str())
+                        .or(packet["lane"]["lastEventAt"].as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    candidates.push((subject, timestamp));
+                }
+            }
+            candidates.sort_by(|(a, at), (b, bt)| {
+                crate::sidebar::rank(b)
+                    .cmp(&crate::sidebar::rank(a))
+                    .then_with(|| crate::sidebar::working(b).cmp(&crate::sidebar::working(a)))
+                    .then_with(|| bt.cmp(at))
+            });
+            if let Some((subject, _)) = candidates.first() {
+                session.status = subject.status.clone();
+                session.rejected = subject.rejected;
+                session.outcome = subject.outcome.clone();
+            }
+        }
+        Ok(sessions)
+    }
+    pub fn context(&self, session: &Session) -> Result<Value, String> {
+        let record: Value = self.get(
+            "/api/v2/chat-history",
+            &[("tabId", &session.id), ("limit", "100")],
+        )?;
+        if record["repoPath"].as_str() != session.repo_path.as_deref()
+            || record["backend"].as_str() != session.backend.as_deref()
+        {
+            return Err("Session routing changed. Refresh before sending.".into());
+        }
+        let backend = record["backend"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or("This session has no saved runtime")?;
+        let model = record["model"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or("This session has no saved model")?;
+        let receipt = record["messages"]
+            .as_array()
+            .and_then(|messages| messages.iter().rev().find(|m| m["role"] == "assistant"))
+            .map(|m| &m["receipt"]);
+        let permission = receipt
+            .and_then(|r| r["permissionMode"].as_str())
+            .filter(|p| *p != "outside-workspace")
+            .unwrap_or("full");
+        let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"single","pickedMode":"solo","collide":false});
+        if let Some(project) = record["projectId"].as_str() {
+            routing["projectId"] = json!(project);
+        }
+        Ok(routing)
+    }
+    pub fn queue(&self, session: &Session) -> Result<Value, String> {
+        self.get(
+            "/api/orchestrator/composer-queue",
+            &[
+                (
+                    "repoPath",
+                    session
+                        .repo_path
+                        .as_deref()
+                        .ok_or("Session has no repository")?,
+                ),
+                ("threadId", &session.id),
+                ("backend", session.backend.as_deref().unwrap_or("")),
+            ],
+        )
+    }
+    pub fn mutate_queue(&self, method: &str, body: &Value) -> Result<Value, QueueError> {
+        let url = self
+            .origin
+            .join("/api/orchestrator/composer-queue")
+            .unwrap();
+        let mut request = self.agent.request(method, url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = request.send_json(body.clone()).map_err(|e| match e {
+            ureq::Error::Status(code, _) => QueueError {
+                message: format!("Queue rejected the request (HTTP {code}). Draft retained."),
+                status: Some(code),
+            },
+            _ => QueueError {
+                message: "Delivery is unconfirmed. Retry checks the same message identity.".into(),
+                status: None,
+            },
+        })?;
+        Self::read(response).map_err(|message| QueueError {
+            message,
+            status: None,
+        })
     }
     pub fn history(&self, id: &str) -> Result<History, String> {
         let key = format!("llm-chat:{id}");

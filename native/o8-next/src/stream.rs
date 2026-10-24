@@ -17,6 +17,38 @@ pub struct Transcript {
     boot: Option<String>,
 }
 impl Transcript {
+    /// HTTP send receipts can expose a persisted operator echo before the next
+    /// WebSocket batch. Merge only operators so an older HTTP snapshot cannot
+    /// overwrite newer streamed agent content or advance its sequence fence.
+    pub fn operator_echoes(&mut self, history: History) -> bool {
+        if history.session_key != self.key {
+            return false;
+        }
+        let mut next = self.entries.clone();
+        for entry in history
+            .transcript
+            .into_iter()
+            .filter(|entry| entry.role == "user")
+        {
+            if next.iter().any(|current| current.id == entry.id) {
+                continue;
+            }
+            let timestamp = entry.extra.get("timestamp").and_then(Value::as_f64);
+            let index = timestamp
+                .and_then(|timestamp| {
+                    next.iter().position(|current| {
+                        current
+                            .extra
+                            .get("timestamp")
+                            .and_then(Value::as_f64)
+                            .is_some_and(|time| time > timestamp)
+                    })
+                })
+                .unwrap_or(next.len());
+            next.insert(index, entry);
+        }
+        self.merge(next, true)
+    }
     pub fn new(history: History) -> Self {
         let mut this = Self {
             key: history.session_key,

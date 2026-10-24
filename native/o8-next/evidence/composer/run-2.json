@@ -1,0 +1,30 @@
+{
+  "endpoint": "GPUI TestAppContext CPU scene paint; no GPU submission or presentation",
+  "keyToFrameMs": [
+    9.343860000000001,
+    8.496844999999999,
+    8.600812,
+    8.384868,
+    9.112121,
+    8.576274999999999,
+    8.668604,
+    8.796306,
+    8.501543,
+    9.31082,
+    9.097409,
+    8.350406,
+    8.323915,
+    9.690700999999999,
+    8.808294,
+    8.662234,
+    8.808214,
+    9.15087,
+    8.795004,
+    8.617778
+  ],
+  "sendToFirstEchoMs": 49.28163,
+  "queueBefore": 0,
+  "queueAfter": 1,
+  "transcriptBefore": 1,
+  "transcriptAfter": 2
+}
