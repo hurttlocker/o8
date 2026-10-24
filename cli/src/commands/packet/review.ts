@@ -24,6 +24,8 @@ interface ReviewArgs {
   coverageEntries: Array<{
     requirementId: string;
     productionPath: string;
+    source?: 'transcript' | 'lane-event' | 'command';
+    reference?: string;
   }>;
   processEntries: Array<{ constraintId: string; source: 'transcript' | 'lane-event' | 'command'; reference: string }>;
   missingContractWaiverReason: string | null;
@@ -40,7 +42,7 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
   const args = parsePacketArguments(rest, {
     command: 'review',
     valueFlags: ['expected-sha', 'commit-message', 'idempotency-key', 'contract-version', 'waive-missing-contract'],
-    repeatableValueFlags: ['coverage', 'process-evidence'],
+    repeatableValueFlags: ['coverage', 'requirement-evidence', 'process-evidence'],
     booleanFlags: ['approve', 'supplement-process-evidence'],
   });
 
@@ -54,7 +56,7 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
   }
 
   const seenRequirementIds = new Set<string>();
-  const coverageEntries = (args.multiValues.coverage ?? []).map((entry) => {
+  const coverageEntries: ReviewArgs['coverageEntries'] = (args.multiValues.coverage ?? []).map((entry) => {
     const separator = entry.indexOf('=');
     const requirementId = separator >= 0 ? entry.slice(0, separator).trim() : '';
     const productionPath = separator >= 0 ? entry.slice(separator + 1).trim() : '';
@@ -76,6 +78,23 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
     return { requirementId, productionPath };
   });
 
+  for (const entry of args.multiValues['requirement-evidence'] ?? []) {
+    const separator = entry.indexOf('=');
+    const requirementId = separator >= 0 ? entry.slice(0, separator).trim() : '';
+    const citation = separator >= 0 ? entry.slice(separator + 1).trim() : '';
+    const colon = citation.indexOf(':');
+    const source = citation.slice(0, colon);
+    const reference = colon >= 0 ? citation.slice(colon + 1).trim() : '';
+    if (!requirementId || !['transcript', 'lane-event', 'command'].includes(source) || !reference) {
+      throw new CliError('invalid_args', '--requirement-evidence must use <requirement-id>=<transcript|lane-event|command>:<concrete reference>.', EXIT.INVALID_ARGS);
+    }
+    if (seenRequirementIds.has(requirementId)) {
+      throw new CliError('invalid_args', `--requirement-evidence repeats requirement ${requirementId}.`, EXIT.INVALID_ARGS);
+    }
+    seenRequirementIds.add(requirementId);
+    coverageEntries.push({ requirementId, productionPath: '', source: source as 'transcript' | 'lane-event' | 'command', reference });
+  }
+
   const seenConstraintIds = new Set<string>();
   const processEntries = (args.multiValues['process-evidence'] ?? []).map((entry) => {
     const separator = entry.indexOf('=');
@@ -95,13 +114,13 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
   });
 
   if (processEntries.length > 0 && coverageEntries.length === 0) {
-    throw new CliError('invalid_args', '--process-evidence requires file-backed --coverage entries.', EXIT.INVALID_ARGS);
+    throw new CliError('invalid_args', '--process-evidence requires --coverage or --requirement-evidence entries.', EXIT.INVALID_ARGS);
   }
 
   if (contractVersion !== null && coverageEntries.length === 0) {
     throw new CliError(
       'invalid_args',
-      '--contract-version requires at least one --coverage entry.',
+      '--contract-version requires at least one --coverage or --requirement-evidence entry.',
       EXIT.INVALID_ARGS,
     );
   }
@@ -196,7 +215,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     } : undefined,
     ...(args.missingContractWaiverReason ? { missingContractWaiverReason: args.missingContractWaiverReason } : {}),
     clientMutationId: receiptKey,
-  });
+  }, { allowConflict: true });
   if (!reviewRes.data?.ok) {
     throw new CliError('review_failed', responseError(reviewRes.data, 'Packet review was rejected.'), EXIT.CONFLICT);
   }
@@ -212,7 +231,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
       'contract_coverage_failed',
       reviewResult.contractCoverage.reason,
       EXIT.CONFLICT,
-      'Provide --coverage <requirement-id>=<repo-relative-production-path> for each file requirement and --process-evidence <constraint-id>=<transcript|lane-event|command>:<reference> for each process constraint.',
+      'Provide --coverage <requirement-id>=<changed-path> for file requirements, --requirement-evidence <requirement-id>=<transcript|lane-event|command>:<reference> for non-file requirements, and --process-evidence <constraint-id>=<transcript|lane-event|command>:<reference> for process constraints.',
     );
   }
 

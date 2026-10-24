@@ -46,7 +46,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('[api] orchestrator/merge-preview failed:', error);
     if (error instanceof LaneBranchUnresolvedError) {
-      return NextResponse.json(branchUnresolvedPayload(error), { status: 409 });
+      return NextResponse.json({ ...branchUnresolvedPayload(error), packetId, wouldMerge: false,
+        blockers: ['worktree-branch'], checks: [{ name: 'worktree-branch', verdict: 'fail', detail: error.reason,
+          actions: [`Restore the packet checkout to its recorded branch ${error.lane.branch} at the reviewed HEAD, then rerun merge-preview.`] }],
+      }, { status: 409 });
     }
     if (error instanceof ImmutableReviewUnavailableError) {
       return NextResponse.json(immutableReviewUnavailablePayload(error), { status: 409 });

@@ -48,18 +48,16 @@ export async function POST(request: NextRequest) {
       principal.role === 'operator' ? 422 : 403);
   }
   const waiverInput = record.missingContractWaiverReason;
-  if (waiverInput !== undefined && (
-    principal.role !== 'operator'
-    || record.approved !== true
-    || typeof waiverInput !== 'string'
-    || !waiverInput.trim()
-    || waiverInput.trim().length > 500
-    || typeof record.reviewedHeadSha !== 'string'
-    || !/^[0-9a-f]{40}$/i.test(record.reviewedHeadSha.trim())
-  )) {
+  const waiverRefusal = principal.role !== 'operator' ? 'Only an operator can waive a missing runtime-default contract.'
+    : record.approved !== true ? 'A missing-contract waiver requires an approved review.'
+      : typeof waiverInput !== 'string' || !waiverInput.trim() || waiverInput.trim().length > 500
+        ? 'A missing-contract waiver requires a nonempty reason of at most 500 characters.'
+        : typeof record.reviewedHeadSha !== 'string' || !/^[0-9a-f]{40}$/i.test(record.reviewedHeadSha.trim())
+          ? 'A missing-contract waiver requires the full 40-character reviewed HEAD.' : null;
+  if (waiverInput !== undefined && waiverRefusal) {
     return operatorError(
       'invalid_missing_contract_waiver',
-      'A missing-contract waiver requires an operator, an approved review, a full reviewed HEAD, and a reason of at most 500 characters.',
+      waiverRefusal,
       principal.role === 'operator' ? 422 : 403,
     );
   }

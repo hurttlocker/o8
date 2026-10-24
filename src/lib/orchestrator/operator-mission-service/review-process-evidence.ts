@@ -60,7 +60,7 @@ export async function supplementPacketReviewProcessEvidence(input: {
   const changed = await listChangedPathsForCoverage(lane, lane.worktreePath || lane.repoPath, head);
   if (!changed.resolved) return refuse('The packet diff base could not be resolved.');
   const coverage = evaluateContractCoverage({ contract: gate.taskContract, contractRequired: true,
-    evidence, reviewedHeadSha: head, changedPaths: changed.paths });
+    evidence, reviewedHeadSha: head, changedPaths: changed.paths, repositoryPaths: changed.repositoryPaths });
   if (coverage.status !== 'passed') return refuse(coverage.reason);
   if (!supplementReviewCoverageEvidence(approval.id, approval.updatedAt, evidence,
     () => !findActiveReviewTurn(lane.id) && currentReview()?.id === approval.id)) {

@@ -7,6 +7,7 @@ import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { findCurrentSpokenReviewApproval } from '@/lib/orchestrator/spoken-review-evidence';
 import {
   fingerprintSpokenReviewGovernance,
+  projectSpokenReviewApproval,
   type SpokenReviewResolutionTransition,
 } from '@/lib/orchestrator/spoken-review-governance';
 
@@ -36,11 +37,15 @@ export async function currentSpokenReviewGovernanceFingerprint(
   const reviewApproval = current.dirtyFiles.length === 0 && current.untrackedFiles.length === 0
     ? findCurrentSpokenReviewApproval(approvals, currentLane.packetId, currentLane, current.headSha)
     : null;
+  const projectedApproval = projectSpokenReviewApproval(approval, resolutionTransition);
   const [completionContext, mergePreview] = await Promise.all([
     readPacketCompletionContext(currentLane.packetId),
     buildPreviewForLane(currentLane, currentLane.packetId, {
       orchestratorApproved: reviewApproval?.status === 'approved'
         && reviewApproval.args?.approved === true,
+      ...(projectedApproval !== approval && resolutionTransition ? {
+        reviewResolutionProjection: { approval: projectedApproval, laneStatus: resolutionTransition.reviewedLaneStatus },
+      } : {}),
     }),
   ]);
   return fingerprintSpokenReviewGovernance({

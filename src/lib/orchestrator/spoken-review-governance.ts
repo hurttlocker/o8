@@ -45,7 +45,7 @@ function isExactOwnedResolution(
   );
 }
 
-function targetApprovalProjection(
+export function projectSpokenReviewApproval(
   approval: ApprovalRecord,
   transition?: SpokenReviewResolutionTransition,
 ) {
@@ -75,7 +75,7 @@ export function fingerprintSpokenReviewGovernance(input: {
   mergePreview: MergePreviewResult | null;
   resolutionTransition?: SpokenReviewResolutionTransition;
 }) {
-  const targetApproval = targetApprovalProjection(
+  const targetApproval = projectSpokenReviewApproval(
     input.targetApproval,
     input.resolutionTransition,
   );
@@ -90,7 +90,7 @@ export function fingerprintSpokenReviewGovernance(input: {
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((approval) => (
         approval.id === input.targetApproval.id
-          ? targetApprovalProjection(approval, input.resolutionTransition)
+          ? projectSpokenReviewApproval(approval, input.resolutionTransition)
           : approval
       )),
     lane: {

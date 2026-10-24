@@ -3,7 +3,7 @@ import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchest
 
 export const CONTRACT_COVERAGE_EVIDENCE_SCHEMA = {
   type: 'object',
-  description: 'Required for contract-armed packets: changed-file evidence for each file requirement and separate process observations, bound to the reviewed HEAD and contract version.',
+  description: 'Required for contract-armed packets: changed-file evidence for file requirements, typed observations for non-file requirements, and separate process observations, bound to the reviewed HEAD and contract version.',
   properties: {
     contractVersion: { type: 'number' },
     headSha: { type: 'string' },
@@ -14,6 +14,8 @@ export const CONTRACT_COVERAGE_EVIDENCE_SCHEMA = {
         properties: {
           requirementId: { type: 'string' },
           productionPath: { type: 'string', description: 'Repo-relative file path touched by the change.' },
+          source: { type: 'string', enum: ['transcript', 'lane-event', 'command'], description: 'Only for a requirement whose production path is not a repository file; use an empty productionPath with source and reference.' },
+          reference: { type: 'string', description: 'Concrete reviewer observation for a non-file requirement.' },
           anchor: { type: 'string' },
           verification: { type: 'string' },
         },
