@@ -218,7 +218,7 @@ describe('packaging preflight through real filesystem and script entry points', 
       expect(readFileSync(join(standalone, file), 'utf8')).toBe('synthetic metadata');
     },
   );
-  it.each(['missing', 'existing', 'repo-denied', 'releases-denied', 'limited', 'ambiguous', 'wrong-tag', 'invalid-json'] as const)(
+  it.each(['missing', 'existing', 'repo-denied', 'releases-denied', 'limited', 'ambiguous', 'wrong-tag', 'invalid-json', 'output-existing', 'output-bound', 'output-linked'] as const)(
     'checks release absence through the actual preflight with REST response %s', (scenario) => {
       const f = fixture();
       mkdirSync(join(f.root, '.tauri'));
@@ -227,8 +227,19 @@ describe('packaging preflight through real filesystem and script entry points', 
         clerkPublishableKey: 'pk_test_synthetic', githubOAuthClientId: 'synthetic',
         sentryDsn: 'https://synthetic@example.invalid/1',
       }));
+      const existingOutput = scenario.startsWith('output-');
+      if (existingOutput) {
+        if (scenario === 'output-linked') {
+          symlinkSync(join(f.root, 'missing-output'), join(f.root, '.next'), 'dir');
+        } else {
+          mkdirSync(join(f.root, '.next'));
+          writeFileSync(join(f.root, '.next', 'keep'), 'existing-output');
+        }
+        if (scenario === 'output-bound') writeFileSync(join(f.root, '.o8-generated-output-store'), 'existing-store');
+      }
       const log = join(f.root, 'preflight-calls.jsonl');
       const childProcess = `import { appendFileSync } from 'node:fs';
+export function execFileSync() { throw new Error('UNEXPECTED_PLATFORM_EXEC'); }
 export function spawnSync(command, args) {
   appendFileSync(process.env.O8_PREFLIGHT_TEST_LOG, JSON.stringify({command, args}) + '\\n');
   const ok = stdout => ({ status: 0, stdout, stderr: '' });
@@ -270,6 +281,7 @@ export function spawnSync(command, args) {
           APPLE_SIGNING_IDENTITY: 'fixture', APPLE_ID: 'fixture', APPLE_PASSWORD: 'fixture', APPLE_TEAM_ID: 'fixture',
           O8_RELEASE_MIN_FREE_GIB: '0.001', O8_PREFLIGHT_TEST_LOG: log, O8_PREFLIGHT_TEST_SCENARIO: scenario },
       });
+      expect(existsSync(log), result.stderr).toBe(true);
       const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; args: string[] });
       const github = calls.filter(call => call.command === 'gh' && call.args[0] !== '--version');
       expect(github.every(call => call.args[0] === 'api'), result.stderr).toBe(true);
@@ -277,7 +289,14 @@ export function spawnSync(command, args) {
       expect(github.length).toBe(scenario === 'repo-denied' ? 1 : scenario === 'releases-denied' ? 2 : 3);
       expect(result.status, result.stderr).toBe(scenario === 'missing' ? 0 : 1);
       if (scenario === 'missing') expect(result.stdout).toContain('preflight passed for v0.1.742');
-      else expect(result.stderr).toMatch(/could not verify|already exists|invalid.*release/i);
+      else if (existingOutput) {
+        expect(result.stderr).toMatch(/\.next.*already exists/);
+        expect(result.stderr).toContain('clean release checkout');
+        expect(result.stdout).not.toContain('preflight passed');
+        expect(calls.some(call => call.args.includes('scripts/bench/quick.mjs'))).toBe(false);
+        if (scenario !== 'output-linked') expect(readFileSync(join(f.root, '.next', 'keep'), 'utf8')).toBe('existing-output');
+        if (scenario === 'output-bound') expect(readFileSync(join(f.root, '.o8-generated-output-store'), 'utf8')).toBe('existing-store');
+      } else expect(result.stderr).toMatch(/could not verify|already exists|invalid.*release/i);
       expect(calls.some(call => ['npm', 'cargo', 'codesign', 'xcrun'].includes(call.command)
         && !call.args.includes('--version'))).toBe(false);
     },
