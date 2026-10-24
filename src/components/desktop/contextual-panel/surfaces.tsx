@@ -210,7 +210,7 @@ export function BottomUtilitySurface({
   if (kind === 'files') {
     return (
       <Suspense fallback={null}>
-        <LazyFiles repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
+        <LazyFiles active={active} repoPath={repoPath} selectedFile={selectedFile} dirtyFiles={dirtyFiles} onSelectFile={onSelectFile} />
       </Suspense>
     );
   }

@@ -292,7 +292,7 @@ export function O8Panel({
     if (tab === 'device') return <DevicePanel active={active} />;
     if (tab === 'files') {
       return (
-        <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedUtilityFile} dirtyFiles={dirtyFiles} onSelectFile={handleSelectUtilityFile} />
+        <WorkspaceFilesPane active={active} repoPath={repoPath} selectedFile={selectedUtilityFile} dirtyFiles={dirtyFiles} onSelectFile={handleSelectUtilityFile} />
       );
     }
 
