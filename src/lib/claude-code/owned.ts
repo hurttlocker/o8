@@ -1,3 +1,4 @@
+import { readLiveClaudeRuntimeCapacity } from './live-capacity';
 import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
 import { controlledProviderConfig, providerFromConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
 import { prepareControlledGateway } from './controlled-gateway';
@@ -41,6 +42,10 @@ import {
 
 export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'claude-code',
+  observeCapacity: async session => ({
+    ...await readLiveClaudeRuntimeCapacity({ env: { NODE_ENV: process.env.NODE_ENV, CLAUDE_CONFIG_DIR: session.identity?.configHomeRef ?? process.env.CLAUDE_CONFIG_DIR } }),
+    identityId: session.identity?.id ?? null,
+  }),
   surfaceIdPrefix: 'claude-code-owned:',
   rootEnvVar: 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
   rootDefault: path.join(getDataDir(), 'owned-claude-code'),

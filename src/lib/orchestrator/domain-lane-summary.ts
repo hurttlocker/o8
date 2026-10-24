@@ -1,3 +1,4 @@
+import { capacityWaitLabel } from '@/lib/lane/capacity-wait-label';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { PacketContextObservation } from '@/lib/orchestrator/packet-context-telemetry';
@@ -8,6 +9,13 @@ export function preferRuntimeRecoveryMessage(reason: string | null | undefined, 
 }
 
 export function applyLanePendingStatus(packet: OrchestratorPacket, lane: DomainLaneSummary): boolean {
+  const waiting = capacityWaitLabel(lane.status, lane.lastEventLabel);
+  if (waiting) {
+    packet.status = 'blocked';
+    packet.lastEventLabel = lane.lastEventLabel;
+    packet.blockedReason = waiting;
+    return true;
+  }
   if (lane.status === 'merging') {
     packet.status = 'awaiting_review';
     packet.blockedReason = 'Merge in progress';

@@ -1,3 +1,5 @@
+import { createWorkerFailureHandler } from './worker-failure';
+import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
@@ -9,7 +11,6 @@ import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
-import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
 import { assertOwnedActionAdmission } from './action-admission';
 import { withOwnedArtifactAdmission } from './artifact-admission';
 import { createFailureRetry } from './failure-retry';
@@ -72,7 +73,6 @@ import type {
   OwnedRuntimeAdapter,
   OwnedSessionRecord,
 } from './types';
-
 export interface OwnedRunController {
   readRunArtifacts(run: OwnedRunRecord): Promise<{
     stdoutRaw: string;
@@ -112,6 +112,8 @@ export function createOwnedRunController({
   workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
+  const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
+  const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
   const runArtifactCache = new Map<string, {
     key: string;
     /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
@@ -232,16 +234,12 @@ export function createOwnedRunController({
     let finishedClean = false;
     let exitedRun: OwnedRunRecord | null = null;
     let laneId: string | undefined;
-    let model: string | undefined;
-    let latestPrompt = '';
     let sandboxDenial: OwnedRunRecord['sandboxDenial'];
     let artifacts: Awaited<ReturnType<typeof readRunArtifacts>> | null = null;
     await withSurfaceLock(surfaceId, async () => {
       const current = await io.findSession(surfaceId);
       if (!current) return;
       laneId = current.laneId;
-      model = current.model;
-      latestPrompt = current.latestPrompt;
       const currentRun = current.recentRuns.find((run) => run.id === runId);
       artifacts = currentRun ? await readRunArtifacts({ ...currentRun, childExit }).catch(() => null) : null;
       let dirty = false;
@@ -279,6 +277,8 @@ export function createOwnedRunController({
         current.activeRun = undefined;
         dirty = true;
       }
+      if (finishedClean) current.capacityResumeCount = 0;
+      if (!current.threadId && artifacts?.parsed.threadId) current.threadId = artifacts.parsed.threadId;
       if (dirty) await io.saveSession(current);
     });
     invalidateFleetCache();
@@ -289,7 +289,6 @@ export function createOwnedRunController({
     const recordedArtifacts = artifacts as Awaited<ReturnType<typeof readRunArtifacts>> | null;
     if (laneId && recordedRun) {
       const stderr = compactText(recordedArtifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
-      const rawFailure = `${recordedArtifacts?.stdoutRaw ?? ''}\n${recordedArtifacts?.stderrRaw ?? childExit.stderrTail ?? ''}`;
       try {
         recordLaneEvent(laneId, 'runtime_process_exit', 'system', ownedProcessExitPayload(
           runtimeId, surfaceId, recordedRun, childExit, recordedArtifacts?.parsed, stderr,
@@ -304,21 +303,8 @@ export function createOwnedRunController({
           console.warn(`[owned-store] Failed to record sandbox_denied for lane ${laneId}:`, error);
         }
       } else if (recordedRun.outcome === 'failed' && !recovered) {
-        const failedLaneId = laneId;
         try {
-          const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
-          await withSurfaceLock(surfaceId, async () => {
-            const current = await io.findSession(surfaceId);
-            if (!current || current.executionPolicy !== undefined || currentRecoveryRun(current)?.id !== runId || recoveryInterrupted(current)) return;
-            await handleWorkerRuntimeFailure({
-              laneId: failedLaneId,
-              runtime: runtimeId,
-              model,
-              surfaceId,
-              prompt: latestPrompt,
-              rawFailure: compactText(rawFailure, 4_000),
-            });
-          });
+          await withSurfaceLock(surfaceId, () => handleWorkerFailure(surfaceId, runId));
         } catch (error) {
           console.error(`[owned-store] Worker quota fallback handling failed for lane ${laneId}:`, error);
         }
@@ -438,6 +424,25 @@ export function createOwnedRunController({
       await io.saveSession(session);
     }
 
+    if (allowRetry && !session.activeRun && session.recentRuns[0]?.outcome === 'failed') {
+      const handleFailure = async () => {
+        await handleWorkerFailure(session.surfaceId, session.recentRuns[0].id);
+        const current = await io.findSession(session.surfaceId);
+        if (current) Object.assign(session, current);
+      };
+      if (surfaceLockHeld) await handleFailure();
+      else await withSurfaceLock(session.surfaceId, handleFailure);
+    }
+    if (session.capacityWait || session.capacityResumeClaim) {
+      if (allowRetry) {
+        if (surfaceLockHeld) await capacityRecovery.refresh(session);
+        else await withSurfaceLock(session.surfaceId, async () => {
+          const current = await io.findSession(session.surfaceId);
+          if (current) { await capacityRecovery.refresh(current); Object.assign(session, current); }
+        });
+      }
+      return session;
+    }
     if (allowRetry && await recoverModelCompatibility(session, surfaceLockHeld)) return session;
     if (allowRetry) scheduleFailureRetry(session);
 
