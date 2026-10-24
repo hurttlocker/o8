@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type {
   TerminalStatusAuthority,
   TerminalStatusEvidence,
@@ -153,6 +153,7 @@ export function TerminalStatusEvidenceDisclosure({
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const evidencePanelId = useId();
   const caption = terminalStatusCaption(evidence);
   const evidenceRows = displayEvidenceRows(evidence);
 
@@ -173,6 +174,7 @@ export function TerminalStatusEvidenceDisclosure({
       <button
         type="button"
         aria-expanded={expanded}
+        aria-controls={expanded ? evidencePanelId : undefined}
         aria-label={`${expanded ? 'Hide' : 'Show'} status evidence for ${evidence.sessionId}`}
         title={evidence.summary}
         onClick={() => setExpanded((current) => !current)}
@@ -254,7 +256,7 @@ export function TerminalStatusEvidenceDisclosure({
       </button>
 
       {expanded ? (
-        <div role="group" aria-label="Session status diagnostics">
+        <div id={evidencePanelId} role="group" aria-label="Session status diagnostics">
           <EvidenceRow source="authority" value={evidence.authority} />
           <EvidenceRow
             source="observed"
