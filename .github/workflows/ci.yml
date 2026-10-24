@@ -51,6 +51,12 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
+      - uses: actions/cache/restore@v4
+        id: typecheck-cache
+        with:
+          path: tsconfig.tsbuildinfo
+          key: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-
       - run: npm run protocol:check
       - run: npm run typecheck
         env:
@@ -59,6 +65,11 @@ jobs:
       # build an app. Keep the stable/preview boundary on every PR.
       - name: Release channel policy
         run: npx vitest run tests/release-channel-real-path.test.ts
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/main' && steps.typecheck-cache.outputs.cache-hit != 'true'
+        with:
+          path: tsconfig.tsbuildinfo
+          key: ${{ steps.typecheck-cache.outputs.cache-primary-key }}
 
   # Lint restored to the PR lane 2026-07-18 (#1547): the error debt is burned
   # to zero on main (the old 398 baseline was mostly a stale nested worktree
@@ -80,13 +91,28 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
-      - run: npm run lint
+      - uses: actions/cache/restore@v4
+        id: lint-cache
+        with:
+          path: .cache/eslint
+          key: ${{ runner.os }}-node22-eslint-v1-${{ hashFiles('package-lock.json', 'eslint.config.mjs') }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-node22-eslint-v1-${{ hashFiles('package-lock.json', 'eslint.config.mjs') }}-
+      - run: npm run lint -- --cache --cache-strategy content --cache-location .cache/eslint
+      - uses: actions/cache/save@v4
+        if: github.ref == 'refs/heads/main' && steps.lint-cache.outputs.cache-hit != 'true'
+        with:
+          path: .cache/eslint
+          key: ${{ steps.lint-cache.outputs.cache-primary-key }}
 
-  test:
-    name: Hermetic Unit Tests
+  test-shards:
+    name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
     if: github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -99,8 +125,27 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
-      - run: npm run test:classification:check
-      - run: npm run test:unit
+      - if: matrix.shard == 1
+        run: npm run test:classification:check
+      - if: matrix.shard == 1
+        run: node scripts/ci/check-hermetic-shards.mjs
+      - run: npm run test:unit -- --shard=${{ matrix.shard }}/4
+
+  # Keep branch protection and the merge queue on one stable required name.
+  # always() prevents a failed/cancelled matrix from skipping this check.
+  test:
+    name: Hermetic Unit Tests
+    needs: [test-shards]
+    if: always() && github.event.schedule != '41 13 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every hermetic shard
+        env:
+          SHARD_RESULT: ${{ needs.test-shards.result }}
+        run: |
+          echo "Hermetic shard result: $SHARD_RESULT"
+          test "$SHARD_RESULT" = success
 
   # PR lane (#2391): runs exactly the resource-owning test files the branch
   # touches, diffed from the merge-base with the base branch. No touched files
@@ -351,12 +396,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Select native inputs
+        id: native
+        run: node scripts/ci/native-changes.mjs
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        if: steps.native.outputs.changed == 'true'
         with:
           toolchain: stable
       # PR caches are scoped to their own ref and evict main's (#4335).
       # Save on main only; every PR restores the main cache.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.native.outputs.changed == 'true'
         with:
           workspaces: src-tauri
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -365,10 +418,13 @@ jobs:
       # at (../out/frontend, ../out/server). The dev-mcp-plugin dep needs no
       # stub anymore — the plugin is vendored in-repo (tauri-plugin-mcp/).
       - run: New-Item -ItemType Directory -Force -Path out/frontend, out/server | Out-Null
+        if: steps.native.outputs.changed == 'true'
         shell: pwsh
       - run: cargo check --locked
+        if: steps.native.outputs.changed == 'true'
         working-directory: src-tauri
       - name: Native update ping contract
+        if: steps.native.outputs.changed == 'true'
         run: node scripts/test-update-ping-native.mjs
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
@@ -380,28 +436,41 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Select native inputs
+        id: native
+        run: node scripts/ci/native-changes.mjs
       # Tauri v2 system deps for linux builds (webkit2gtk 4.1 line). No ALSA
       # headers needed — the audio crates are target-gated to macOS.
       - run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf libssl-dev build-essential
+        if: steps.native.outputs.changed == 'true'
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        if: steps.native.outputs.changed == 'true'
         with:
           toolchain: stable
       # PR caches are scoped to their own ref and evict main's (#4335).
       # Save on main only; every PR restores the main cache.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: steps.native.outputs.changed == 'true'
         with:
           workspaces: src-tauri
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: mkdir -p out/frontend out/server
+        if: steps.native.outputs.changed == 'true'
       - run: cargo check --locked
+        if: steps.native.outputs.changed == 'true'
         working-directory: src-tauri
       - name: Native update ping contract
+        if: steps.native.outputs.changed == 'true'
         run: node scripts/test-update-ping-native.mjs
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
       - name: Experimental o8d delivery bus
+        if: steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
 
   roadmap-check:
