@@ -82,6 +82,7 @@ import {
   assertManagedWorktreeMaterializationBoundary,
   managedPacketWorktreeId,
   resolveWorktreeRootLayout,
+  WORKTREE_INDEX_EXCLUSION_SUFFIX,
 } from './root-layout';
 import { withManagedWorktreeStorageAdmission } from './launch-storage-admission';
 import {
@@ -279,7 +280,12 @@ function sanitizeTaskName(name: string): string {
  */
 function deriveWorktreeId(opts: CreateWorktreeOptions): string {
   const packetWorktreeId = opts.packetId ? managedPacketWorktreeId(opts.packetId) : null;
-  if (packetWorktreeId) return packetWorktreeId;
+  if (packetWorktreeId) {
+    // Keep the metadata namespace stable; only new manager-created packet leaves
+    // carry Spotlight's directory suffix, before any checkout/dependency writes.
+    return opts.agentType === 'claude-code' && !opts.managed
+      ? packetWorktreeId : `${packetWorktreeId}${WORKTREE_INDEX_EXCLUSION_SUFFIX}`;
+  }
   return sanitizeTaskName(opts.taskName);
 }
 

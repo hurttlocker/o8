@@ -4286,6 +4286,16 @@
       ]
     },
     {
+      "path": "tests/packet-worktree-index-exclusion-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/panel-repos-add-response.test.ts",
       "reasons": [
         "child-process",

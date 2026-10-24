@@ -69,6 +69,12 @@ describe('external worktree root layout (#1594)', () => {
     expect(isManagedPacketWorktreeId(baseId, packetId)).toBe(true);
     expect(collisionId).toMatch(new RegExp(`^${baseId}-[a-z0-9]{4}$`));
     expect(isManagedPacketWorktreeId(collisionId, packetId)).toBe(true);
+    const excludedCollision = appendWorktreeCollisionSuffix(`${baseId}-index.noindex`);
+    expect(excludedCollision).toMatch(new RegExp(`^${baseId}-[a-z0-9]{4}-index\\.noindex$`));
+    expect(isManagedPacketWorktreeId(`${baseId}-index.noindex`, packetId)).toBe(true);
+    expect(isManagedPacketWorktreeId(excludedCollision, packetId)).toBe(true);
+    expect(isManagedPacketWorktreeId(`${baseId}-index.noindex-index.noindex`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`${baseId}-index.noindex-abcd`, packetId)).toBe(false);
     expect(isManagedPacketWorktreeId(`${baseId}-retry`, packetId)).toBe(false);
     expect(isManagedPacketWorktreeId(`${baseId}-abc`, packetId)).toBe(false);
     expect(isManagedPacketWorktreeId(`${baseId}-abcde`, packetId)).toBe(false);
