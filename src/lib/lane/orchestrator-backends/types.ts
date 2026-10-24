@@ -51,6 +51,8 @@ export function isOrchestratorBackendId(value: unknown): value is OrchestratorBa
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 
 export interface OrchestratorTurnOptions {
+  /** Operator-authored text, kept separate from model-facing wrappers for Codex app history. */
+  rawMessage?: string;
   /** Full access keeps the built-in command workspace boundary; outside-workspace explicitly lifts it. Plan is read-only. */
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */

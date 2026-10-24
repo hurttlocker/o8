@@ -5635,6 +5635,7 @@ async function handleOrchestratorSendMsgOnce(
     ): Promise<void> => {
       const effectiveModel = resolveTurnModel(turnBackend, overrideModel);
       return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
+        rawMessage: transcriptMessage,
         permissionMode,
         thinkingEffort,
         serviceTier: serviceTierForTurn(serviceTier, requestedBackend.id, model, turnBackend.id, effectiveModel),

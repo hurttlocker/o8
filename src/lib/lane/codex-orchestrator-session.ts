@@ -83,6 +83,8 @@ export interface CodexOrchestratorSession {
 // Mirror of OrchestratorPermissionMode from orchestrator-session.ts.
 export type CodexOrchestratorPermissionMode = 'full' | 'plan';
 export interface SendToCodexOrchestratorOptions {
+  /** Original operator text for the app-server user input; absent on automated continuations. */
+  rawMessage?: string;
   permissionMode?: CodexOrchestratorPermissionMode;
   orchestrationMode?: OrchestratorExecutionMode;
   /**
@@ -434,7 +436,7 @@ async function sendToCodexOrchestratorAttempt(
   let cleanupSingleLaunch = () => {};
   if (codexApp) {
     try {
-      const prompt = splitCodexOrchestratorPrompt(message);
+      const prompt = splitCodexOrchestratorPrompt(message, options.rawMessage);
       const specPath = writeCodexAppBridgeSpec({
         codexBin,
         cwd: session.repoPath,
