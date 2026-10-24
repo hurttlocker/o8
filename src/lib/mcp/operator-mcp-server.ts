@@ -34,6 +34,7 @@ import {
   type OperatorMcpResponse as JsonRpcResponse,
 } from '@/lib/mcp/operator-mcp-host';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { modernMcpHttpStatus, prepareMcpHttp } from './operator-mcp-protocol';
 
 const ORPHAN_MIN_AGE_SECONDS = 30;
 const OPERATOR_COMMAND_RE = /^(?:\S+\/)?(?:npm|npx|node|tsx)\b.*(?:^|\s)\S*operator-mcp-server\.ts(?:\s|$)/;
@@ -298,6 +299,12 @@ function startHttp(port: number): void {
           return;
         }
 
+        const protocol = prepareMcpHttp(parsed, new Headers(req.headers as Record<string, string>));
+        if (protocol.refusal) {
+          res.writeHead(protocol.status ?? 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(protocol.refusal));
+          return;
+        }
         const batch = Array.isArray(parsed);
         const messages = (batch ? parsed : [parsed]) as JsonRpcRequest[];
         const responses: JsonRpcResponse[] = [];
@@ -315,14 +322,14 @@ function startHttp(port: number): void {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         // A Streamable-HTTP client expects a session id on initialize (a bare
         // reply downgrades some clients to SSE).
-        if (messages.some((m) => m && m.method === 'initialize')) headers['Mcp-Session-Id'] = randomUUID();
+        if (!protocol.modern && messages.some((m) => m && m.method === 'initialize')) headers['Mcp-Session-Id'] = randomUUID();
 
         if (!responses.length) {
           res.writeHead(202, headers);
           res.end();
           return;
         }
-        res.writeHead(200, headers);
+        res.writeHead(protocol.modern ? modernMcpHttpStatus(responses[0]) : 200, headers);
         res.end(JSON.stringify(batch ? responses : responses[0]));
       })();
     });

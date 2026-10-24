@@ -277,6 +277,23 @@ async fn handle(
         .as_array()
         .cloned()
         .unwrap_or_else(|| vec![payload.clone()]);
+    // Modern protocol metadata and mirrored routing headers are validated by
+    // the shared TypeScript host. Native projections retain legacy envelopes;
+    // forward modern requests intact until they implement that contract too.
+    if headers.contains_key("mcp-protocol-version")
+        || headers.contains_key("mcp-method")
+        || headers.contains_key("mcp-name")
+        || messages.iter().any(|message| {
+            message["params"]["_meta"]
+                .get("io.modelcontextprotocol/protocolVersion")
+                .is_some()
+                || message["params"]["_meta"]
+                    .get("io.modelcontextprotocol/clientCapabilities")
+                    .is_some()
+        })
+    {
+        return server.proxy(method, &headers, body).await;
+    }
     // A mixed batch is forwarded byte for byte, once, so mutations keep ordering,
     // correlation ids, notifications and all existing TypeScript side effects.
     if messages.is_empty() || messages.iter().any(|message| !native(message)) {

@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -118,14 +119,17 @@ function fixture() {
   control.writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: repo, packets: [packet] });
   return id;
 }
-async function call(name: string, args: Record<string, unknown>, timeoutMs = 5000) {
+async function call(name: string, args: Record<string, unknown>, timeoutMs = 5000, modern = false) {
   const response = await fetch(`http://127.0.0.1:${h.port}/api/mcp`, {
-    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json',
+      ...(modern ? { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name } : {}) },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args,
+      ...(modern ? { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } : {}) } }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   expect(response.status).toBe(200);
   const body = await response.json();
+  if (modern) expect(body.result.resultType).toBe('complete');
   return { ...JSON.parse(body.result.content[0].text), isError: body.result.isError };
 }
 function heldLaunch() {
@@ -327,6 +331,25 @@ it('leaves explicit cloud lane attachment to the guarded caller after Stop', asy
   expect(lanes.findLaneByPacket(id)).toMatchObject({ status: 'paused', sessionKey: null });
 });
 
+it('returns a modern receipt and cursor poll without holding a socket during provisioning', async () => {
+  const id = fixture();
+  const release = heldLaunch();
+  try {
+    const started = performance.now();
+    const receipt = await call('o8_task_dispatch', { taskId: id }, 5000, true);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(receipt).toMatchObject({ ok: true, status: 'launching', laneId: expect.any(String) });
+    const since = Date.now() + 1000;
+    const pollStart = performance.now();
+    const tail = await call('mission_tail', { packetId: id, since, timeoutMs: 25000 }, 3000, true);
+    expect(performance.now() - pollStart).toBeLessThan(1000);
+    expect(tail.data).toMatchObject({ packetId: id, events: [], nextSince: since });
+    closeDb();
+    expect((await call('mission_tail', { packetId: id, since }, 3000, true)).data).toEqual(tail.data);
+  } finally { release(); }
+  await vi.waitFor(() => expect(lanes.findLaneByPacket(id)?.status).toBe('running'), { timeout: 10000 });
+}, 20000);
+
 it('holds a real HTTP mission_tail for its documented maximum and returns normally', async () => {
   const id = fixture();
   const since = Date.now() + 1000;
@@ -337,3 +360,56 @@ it('holds a real HTTP mission_tail for its documented maximum and returns normal
   expect(performance.now() - started).toBeGreaterThanOrEqual(24500);
   expect(performance.now() - started).toBeLessThan(31000);
 }, 40000);
+
+it('resumes a modern persisted event cursor after restarting the standalone MCP process', async () => {
+  const id = fixture();
+  const lane = lanes.createLane({ repoPath: repo, runtime: 'codex', branch: `fixture/${id}`, label: 'Restart fixture', packetId: id });
+  const reservation = createServer();
+  await new Promise<void>((resolve) => reservation.listen(0, '127.0.0.1', resolve));
+  const port = (reservation.address() as { port: number }).port;
+  await new Promise<void>((resolve) => reservation.close(() => resolve()));
+  const url = `http://127.0.0.1:${port}`;
+  let child: ChildProcess | undefined;
+  async function stop() {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, 'exit'); child.kill(); await exited;
+  }
+  async function start() {
+    child = spawn(process.execPath, ['--import=tsx', 'src/lib/mcp/operator-mcp-server.ts', '--transport', 'http', '--port', String(port)], {
+      env: { ...process.env, O8_API_BASE: `http://127.0.0.1:${h.port}`, O8_MCP_TOOL_LOADING: 'full' }, stdio: 'ignore',
+    });
+    await vi.waitFor(async () => {
+      expect(child!.exitCode).toBeNull();
+      expect((await fetch(`${url}/health`, { signal: AbortSignal.timeout(500) })).status).toBe(200);
+    }, { timeout: 20000, interval: 100 });
+  }
+  async function poll(since: number) {
+    const response = await fetch(`${url}/mcp`, { method: 'POST', signal: AbortSignal.timeout(3000),
+      headers: { 'content-type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'mission_tail' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'restart', method: 'tools/call', params: {
+        name: 'mission_tail', arguments: { packetId: id, since, timeoutMs: 25000 }, _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      } }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.has('mcp-session-id')).toBe(false);
+    const body = await response.json();
+    expect(body.result.resultType).toBe('complete');
+    expect(body.result.isError).not.toBe(true);
+    return JSON.parse(body.result.content[0].text).data;
+  }
+  try {
+    await start();
+    const firstPid = child!.pid;
+    const first = await poll(0);
+    await stop();
+    closeDb();
+    lanes.appendEvent(lane.id, 'update', 'system', { afterRestart: true });
+    await start();
+    expect(child!.pid).not.toBe(firstPid);
+    const next = await poll(first.nextSince);
+    expect(next.events).toContainEqual(expect.objectContaining({ verb: 'update', payload: { afterRestart: true } }));
+    expect(next.nextSince).toBeGreaterThanOrEqual(first.nextSince);
+  } finally { await stop(); }
+}, 60000);

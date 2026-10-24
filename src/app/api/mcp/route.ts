@@ -9,6 +9,7 @@ import {
 import { setApiBase } from '@/lib/mcp/operator-handlers/shared';
 import { getApiBase } from '@/lib/panel/api-port';
 import { publishNativeReadPolicy } from '@/lib/mcp/native-read-publication';
+import { modernMcpHttpStatus, prepareMcpHttp } from '@/lib/mcp/operator-mcp-protocol';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,6 +28,8 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return jsonRpcError('Parse error', 400);
   }
+  const protocol = prepareMcpHttp(payload, request.headers);
+  if (protocol.refusal) return NextResponse.json(protocol.refusal, { status: protocol.status ?? 400 });
 
   const isBatch = Array.isArray(payload);
   const messages = (isBatch ? payload : [payload]) as OperatorMcpRequest[];
@@ -56,11 +59,11 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (messages.some((message) => message?.method === 'initialize')) {
+  if (!protocol.modern && messages.some((message) => message?.method === 'initialize')) {
     headers.set('Mcp-Session-Id', randomUUID());
   }
   if (responses.length === 0) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(isBatch ? responses : responses[0]), { status: 200, headers });
+  return new Response(JSON.stringify(isBatch ? responses : responses[0]), { status: protocol.modern ? modernMcpHttpStatus(responses[0]) : 200, headers });
 }
 
 // Streamable HTTP permits servers that don't offer a resumable SSE stream to

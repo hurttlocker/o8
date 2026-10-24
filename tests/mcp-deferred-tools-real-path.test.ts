@@ -68,6 +68,34 @@ async function call(peer: StdioJsonRpcPeer, name: string, args: Record<string, u
 }
 
 describe('deferred o8 tools through generated runtime configs and real servers', () => {
+  it.each(['full', 'deferred'])('forwards modern operator requests through the generated %s stdio bridge', async (loading) => {
+    const config = toClaudeServersMap(buildToolRegistry(process.cwd())).operator;
+    if (config.type !== 'stdio') throw new Error('Expected stdio');
+    const peer = new StdioJsonRpcPeer({ command: config.command, args: config.args, cwd: process.cwd(),
+      env: { ...process.env, ...config.env, O8_MCP_TOOL_LOADING: loading } }, 30000);
+    const _meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} };
+    try {
+      const discovery = await peer.request<{ resultType: string; supportedVersions: string[] }>('server/discover', { _meta });
+      expect(discovery.resultType).toBe('complete');
+      expect(discovery.supportedVersions).toContain('2026-07-28');
+      await expect(peer.request('server/discover', { _meta: { ..._meta, 'io.modelcontextprotocol/protocolVersion': '1900-01-01' } }))
+        .rejects.toMatchObject({ code: -32022 });
+      await expect(peer.request('fixture/unknown', { _meta })).rejects.toMatchObject({ code: -32601 });
+      await expect(peer.request('tools/call', { _meta, name: 'mission_tail', arguments: null }))
+        .rejects.toMatchObject({ code: -32602 });
+      const catalog = await peer.request<{ resultType: string; tools: Tool[] }>('tools/list', { _meta });
+      expect(catalog.resultType).toBe('complete');
+      expect(catalog.tools.some(tool => tool.name === (loading === 'deferred' ? 'o8_tool_search' : 'o8_create_project'))).toBe(true);
+      const projectName = `Modern bridge ${loading}`;
+      const result = await peer.request<Result & { resultType: string }>('tools/call', {
+        _meta, name: loading === 'deferred' ? 'o8_tool_call' : 'o8_create_project',
+        arguments: loading === 'deferred' ? { name: 'o8_create_project', arguments: JSON.stringify({ name: projectName }) } : { name: projectName },
+      });
+      expect(result.resultType).toBe('complete');
+      expect(result.isError).not.toBe(true);
+      expect(listProjects().some(project => project.name === projectName)).toBe(true);
+    } finally { await peer.close({ gracefulMs: 200 }); }
+  });
   it('keeps restricted profiles, external client configs and explicit full loading on complete catalogs', () => {
     vi.stubEnv('O8_MCP_TOOL_LOADING', 'deferred');
     for (const profile of ['propose', 'solo', 'fable', 'fable-solo'] as const) {

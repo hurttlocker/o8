@@ -17,12 +17,13 @@ process.env.PORT = '47120';
 const { panelGateMiddleware } = await import('@/middleware');
 const { POST } = await import('@/app/api/mcp/route');
 
-function mcpRequest(body: Record<string, unknown>): Request {
+function mcpRequest(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('http://127.0.0.1:47120/api/mcp', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify(body),
   });
@@ -134,5 +135,102 @@ describe('/api/mcp — real operator host reachability', () => {
       localFoldersPreserved: true,
       activeProjectId: 'workspace',
     });
+  });
+});
+
+const modernMeta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+  'io.modelcontextprotocol/clientCapabilities': {} };
+function modern(method = 'server/discover', params: Record<string, unknown> = {}) {
+  return { jsonrpc: '2.0', id: 'modern', method, params: { ...params, _meta: modernMeta } };
+}
+function modernHeaders(method = 'server/discover', name?: string) {
+  return { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method,
+    ...(name ? { 'Mcp-Name': name } : {}) };
+}
+describe('stateless MCP revision through the real HTTP route', () => {
+  it('discovers the modern revision without a handshake or session', async () => {
+    const response = await POST(mcpRequest(modern(), modernHeaders()));
+    expect(response.status).toBe(200);
+    expect(response.headers.has('mcp-session-id')).toBe(false);
+    expect(await response.json()).toMatchObject({ result: { resultType: 'complete',
+      supportedVersions: ['2026-07-28', '2024-11-05'], capabilities: { tools: {} },
+      _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'o8-operator' } } } });
+  });
+  it('serves a self-contained catalog and retains the legacy initialization shape', async () => {
+    const response = await POST(mcpRequest(modern('tools/list'), modernHeaders('tools/list')));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result).toMatchObject({ resultType: 'complete', ttlMs: 0, cacheScope: 'private' });
+    expect(body.result.tools.some((tool: { name: string }) => tool.name === 'o8_status')).toBe(true);
+    const legacy = await POST(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } }));
+    expect(legacy.headers.has('mcp-session-id')).toBe(true);
+    expect(await legacy.json()).toMatchObject({ result: { protocolVersion: '2024-11-05' } });
+    const legacyList = await POST(mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' }));
+    expect((await legacyList.json()).result.resultType).toBeUndefined();
+  });
+  it.each([
+    ['missing version header', modern(), { 'Mcp-Method': 'server/discover' }, -32020],
+    ['mismatched method', modern(), modernHeaders('tools/list'), -32020],
+    ['mismatched version', modern(), { ...modernHeaders(), 'MCP-Protocol-Version': '1900-01-01' }, -32020],
+    ['missing capabilities', { ...modern(), params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } } }, modernHeaders(), -32602],
+    ['unsupported version', { ...modern(), params: { _meta: { ...modernMeta, 'io.modelcontextprotocol/protocolVersion': '1900-01-01' } } }, { ...modernHeaders(), 'MCP-Protocol-Version': '1900-01-01' }, -32022],
+    ['batch', [modern()], modernHeaders(), -32600],
+  ])('rejects %s before executing a tool', async (_label, body, headers, code) => {
+    const response = await POST(mcpRequest(body, headers));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code } });
+  });
+  it.each([undefined, 'o8_delete_project'])('refuses a missing or contradictory tool-name header (%s) without side effects', async (name) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Tool must not execute'));
+    const response = await POST(mcpRequest(modern('tools/call', { name: 'o8_list_projects', arguments: {} }), modernHeaders('tools/call', name)));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: -32020 } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('returns modern method-not-found and does not initialize a session', async () => {
+    const response = await POST(mcpRequest(modern('initialize'), modernHeaders('initialize')));
+    expect(response.status).toBe(404);
+    expect(response.headers.has('mcp-session-id')).toBe(false);
+    expect(await response.json()).toMatchObject({ error: { code: -32601 } });
+  });
+  it('refuses routing-only malformed modern requests instead of downgrading', async () => {
+    const response = await POST(mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { 'Mcp-Method': 'tools/list' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: -32020 } });
+  });
+  it('rejects an untrusted browser origin before tools execute', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Tool must not execute'));
+    const response = await POST(mcpRequest(modern('tools/call', { name: 'o8_list_projects' }), {
+      ...modernHeaders('tools/call', 'o8_list_projects'), origin: 'https://untrusted.invalid',
+    }));
+    expect(response.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('decodes sentinel tool names before comparing routing to the body', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ projects: [] }));
+    const response = await POST(mcpRequest(modern('tools/call', { name: 'o8_list_projects' }),
+      modernHeaders('tools/call', `=?base64?${Buffer.from('o8_list_projects').toString('base64')}?=`)));
+    expect(response.status).toBe(200);
+    expect((await response.json()).result.resultType).toBe('complete');
+    expect(fetch).toHaveBeenCalled();
+  });
+  it.each([null, [], 'invalid'])('refuses malformed modern tool arguments (%j) before dispatch', async (args) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Tool must not execute'));
+    const response = await POST(mcpRequest(modern('tools/call', { name: 'mission_tail', arguments: args }), modernHeaders('tools/call', 'mission_tail')));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: -32602 } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('keeps profile narrowing local to each modern request', async () => {
+    const scoped = await POST(mcpRequest(modern('tools/list'), { ...modernHeaders('tools/list'), 'x-o8-mcp-profile': 'solo' }));
+    const scopedNames = (await scoped.json()).result.tools.map((tool: { name: string }) => tool.name);
+    expect(scopedNames).not.toContain('approve_and_merge');
+    const full = await POST(mcpRequest(modern('tools/list'), modernHeaders('tools/list')));
+    expect((await full.json()).result.tools.map((tool: { name: string }) => tool.name)).toContain('approve_and_merge');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Tool must not execute'));
+    const refused = await POST(mcpRequest(modern('tools/call', { name: 'approve_and_merge', arguments: {} }),
+      { ...modernHeaders('tools/call', 'approve_and_merge'), 'x-o8-mcp-profile': 'solo' }));
+    expect((await refused.json()).result).toMatchObject({ resultType: 'complete', isError: true });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

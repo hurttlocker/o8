@@ -1,4 +1,5 @@
 import { safeErrorText } from '@/lib/mcp/api-error';
+import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
 import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
@@ -128,7 +129,7 @@ export interface OperatorMcpResponse {
   jsonrpc: '2.0';
   id: number | string | null;
   result?: unknown;
-  error?: { code: number; message: string };
+  error?: { code: number; message: string; data?: unknown };
 }
 
 
@@ -450,6 +451,18 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
 };
 
 export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string): Promise<OperatorMcpResponse | null> {
+  if (isModernMcpRequest(message)) {
+    const refusal = modernMcpError(message);
+    if (refusal) return refusal;
+    if (message.method === 'server/discover') return { jsonrpc: '2.0', id: message.id!, result: discoverMcp() };
+    if (message.method === 'initialize') return { jsonrpc: '2.0', id: message.id!, error: { code: -32601, message: 'Modern MCP uses server/discover' } };
+    const response = await dispatchOperatorMcpMessage(modernMcpCall(message), requestedProfile);
+    return response?.result === undefined ? response : { ...response, result: modernMcpResult(response.result, message.method === 'tools/list') };
+  }
+  return dispatchOperatorMcpMessage(message, requestedProfile);
+}
+
+async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string): Promise<OperatorMcpResponse | null> {
   const { method, id, params } = message;
   if (id === undefined || id === null) return null;
 
