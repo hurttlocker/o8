@@ -3,14 +3,15 @@
 import {
   createContext,
   createElement,
-  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import {
   EMPTY_TRANSCRIPT_SLICE,
+  isAssistantTextEdit,
   transcriptStore,
   type TranscriptSlice,
 } from './store';
@@ -33,6 +34,36 @@ export function TranscriptSessionSubscriptionProvider({
 
 export interface UseTranscriptOptions {
   live?: boolean;
+  /** Slow only text presentation while retaining urgent changes and the live cache. */
+  visible?: boolean;
+}
+
+function createTranscriptPresentation(sessionKey: string | null | undefined, visible: boolean) {
+  let snapshot = transcriptStore.getPresentedSlice(sessionKey);
+  return {
+    getSnapshot: () => visible ? transcriptStore.getPresentedSlice(sessionKey) : snapshot,
+    subscribe: (listener: () => void) => {
+      if (!sessionKey) return () => {};
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let latest = snapshot;
+      const cancel = () => { if (timer !== null) clearTimeout(timer); timer = null; };
+      const update = (next: TranscriptSlice) => {
+        if (next === snapshot) return;
+        latest = next;
+        // Reuse the store's text-only boundary so questions, receipts,
+        // errors and new turns can never wait behind a background timer.
+        if (visible || !isAssistantTextEdit(snapshot, next)) {
+          cancel(); snapshot = next; listener();
+        } else if (timer === null) {
+          timer = setTimeout(() => { timer = null; snapshot = latest; listener(); }, 1000);
+        }
+      };
+      const unsubscribe = transcriptStore.subscribe(sessionKey, update);
+      // Account for a store change between render and subscription.
+      update(transcriptStore.getPresentedSlice(sessionKey));
+      return () => { cancel(); unsubscribe(); };
+    },
+  };
 }
 
 export function useTranscript(
@@ -41,24 +72,21 @@ export function useTranscript(
 ): TranscriptSlice {
   const subscribeToSession = useContext(TranscriptSessionSubscriptionContext);
   const liveSessionKey = options?.live === false ? null : sessionKey;
+  const visible = options?.visible !== false;
 
   useEffect(() => {
     if (!liveSessionKey || !subscribeToSession) return;
     return subscribeToSession(liveSessionKey);
   }, [liveSessionKey, subscribeToSession]);
 
-  const subscribeToStore = useCallback((listener: () => void) => {
-    if (!sessionKey) return () => {};
-    return transcriptStore.subscribe(sessionKey, listener);
-  }, [sessionKey]);
-  const getSnapshot = useCallback(
-    () => transcriptStore.getPresentedSlice(sessionKey),
-    [sessionKey],
+  const presentation = useMemo(
+    () => createTranscriptPresentation(sessionKey, visible),
+    [sessionKey, visible],
   );
 
   return useSyncExternalStore(
-    subscribeToStore,
-    getSnapshot,
+    presentation.subscribe,
+    presentation.getSnapshot,
     getServerSnapshot,
   );
 }

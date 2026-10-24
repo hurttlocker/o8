@@ -15,7 +15,7 @@ export function OutsideConversationPane({ sessionKey, runtime, tab, active }: {
   tab: TerminalTab;
   active: boolean;
 }) {
-  const slice = useTranscript(sessionKey, { live: active });
+  const slice = useTranscript(sessionKey, { live: active, visible: active });
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();

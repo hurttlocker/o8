@@ -55,7 +55,7 @@ function shareTranscriptEntries(previous: MobileTranscriptEntry[] | undefined, i
   return shared.length === previous.length && shared.every((entry, index) => entry === previous[index]) ? previous : shared;
 }
 
-function isAssistantTextEdit(previous: TranscriptSlice | undefined, next: TranscriptSlice): boolean {
+export function isAssistantTextEdit(previous: TranscriptSlice | undefined, next: TranscriptSlice): boolean {
   if (previous?.status !== 'fresh' || next.status !== 'fresh' || !next.messages.length
     || previous.messages.length !== next.messages.length) return false;
   const last = next.messages.length - 1;
