@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { issueListQuery } from '@/lib/github-client/queries';
+import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
 
 export interface IssueDetail {
   number: number;
@@ -16,18 +17,6 @@ export interface IssueDetail {
 
 class IssueDetailDeferredError extends Error {
   constructor(readonly retryAt: number) { super('Unable to read issue'); }
-}
-
-function quotaDeadline(response: Response): number | null {
-  if (response.status !== 429 && response.status !== 403) return null;
-  const now = Date.now();
-  const retry = response.headers.get('retry-after');
-  const seconds = Number(retry);
-  const retryAt = Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1000 : Date.parse(retry ?? '');
-  if (response.status === 403 && !(retryAt > now) && response.headers.get('x-ratelimit-remaining') !== '0') return null;
-  const resetAt = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0);
-  return Math.min(now + 24 * 60 * 60_000, deadline > now ? deadline : now + 60_000);
 }
 
 export function useIssueDetail(repo: string | undefined, issueNumber: number) {
@@ -50,7 +39,7 @@ export function useIssueDetail(repo: string | undefined, issueNumber: number) {
     queryFn: async ({ signal }) => {
       const repoParam = slug ? `?repo=${encodeURIComponent(slug)}` : '';
       const response = await fetch(`/api/panel/issues/${issueNumber}${repoParam}`, { signal });
-      const retryAt = quotaDeadline(response);
+      const retryAt = githubQuotaDeadline(response);
       if (retryAt !== null) throw new IssueDetailDeferredError(retryAt);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();

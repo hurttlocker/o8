@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { pullRequestListQuery } from '@/lib/github-client';
+import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
 import type { CIHoverDetail } from './types';
 
 export interface ActivityCiHoverStatus {
@@ -26,17 +27,7 @@ function validDetail(value: unknown, repo: string, id: number): value is RunDeta
 class CiHoverDeferredError extends Error {
   constructor(readonly retryAt: number) { super('CI detail refresh is paused'); }
 }
-function quotaDeadline(response: Response): number | null {
-  if (response.status !== 429 && response.status !== 403) return null;
-  const now = Date.now();
-  const retry = response.headers.get('retry-after');
-  const seconds = Number(retry);
-  const retryAt = Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1000 : Date.parse(retry ?? '');
-  if (response.status === 403 && !(retryAt > now) && response.headers.get('x-ratelimit-remaining') !== '0') return null;
-  const resetAt = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0);
-  return Math.min(now + 24 * 60 * 60_000, deadline > now ? deadline : now + 60_000);
-}
+
 function hoverQuery(repo: string, id: number | null) {
   return {
     ...pullRequestListQuery(repo),
@@ -45,7 +36,7 @@ function hoverQuery(repo: string, id: number | null) {
     queryFn: async ({ signal }: { signal: AbortSignal }): Promise<CIHoverDetail> => {
       if (!repo || id === null) throw new Error('No CI run selected');
       const response = await fetch(`/api/panel/ci/${id}?repo=${encodeURIComponent(repo)}`, { signal });
-      const retryAt = quotaDeadline(response);
+      const retryAt = githubQuotaDeadline(response);
       if (retryAt !== null) throw new CiHoverDeferredError(retryAt);
       if (!response.ok) throw new Error(`CI detail request failed (${response.status})`);
       const detail: unknown = await response.json();

@@ -267,3 +267,46 @@ it.each(['close', 'filter', 'unmount'])('does no deadline read after the hover b
   }
   reply = () => Response.json(body()); await settle(31_100); await settle(); expect(reads()).toHaveLength(1);
 });
+
+it('holds a PR hover until the later reset when Retry-After is shorter', async () => {
+  reply = () => new Response(null, { status: 429, headers: {
+    'retry-after': '30', 'x-ratelimit-reset': String(Date.now() / 1000 + 90),
+  } });
+  await render(); await hover(); expect(reads()).toHaveLength(1);
+  reply = () => Response.json(body(7, 'after-reset.ts'));
+  await settle(31_000);
+  expect(reads()).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('after-reset.ts');
+  await settle(60_000); await settle();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent).toContain('after-reset.ts');
+});
+it('treats a 403 with remaining quota as an ordinary error that can retry on reopen', async () => {
+  reply = () => new Response(null, { status: 403, headers: {
+    'x-ratelimit-remaining': '5', 'x-ratelimit-reset': String(Date.now() / 1000 + 300),
+  } });
+  await render(); await hover(); await hover(0, 7, false);
+  reply = () => Response.json(body(7, 'ordinary-retry.ts'));
+  await hover();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent).toContain('ordinary-retry.ts');
+});
+it.each(['seconds', 'HTTP-date'])('caps an overlong %s PR quota hold at 24 hours across reopen', async format => {
+  const start = Date.now();
+  const retryAfter = format === 'seconds' ? '172800' : new Date(start + 48 * 60 * 60_000).toUTCString();
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': retryAfter } });
+  await render(); await hover(); await hover(0, 7, false);
+  reply = () => Response.json(body(7, 'bounded-recovery.ts'));
+  // With the hover closed, moving the clock exercises cache/reopen recovery
+  // without running a day of one-second display-age intervals.
+  vi.setSystemTime(start + 24 * 60 * 60_000 - 1000); await hover();
+  expect(reads()).toHaveLength(1); await hover(0, 7, false);
+  vi.setSystemTime(start + 24 * 60 * 60_000 + 1000); await hover();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent).toContain('bounded-recovery.ts');
+});
+it('uses the shared one-minute fallback for a 429 without a usable deadline', async () => {
+  reply = () => new Response(null, { status: 429 });
+  await render(); await hover(); expect(reads()).toHaveLength(1);
+  reply = () => Response.json(body(7, 'fallback-recovery.ts'));
+  await settle(59_000); expect(reads()).toHaveLength(1);
+  await settle(2100); await settle();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent).toContain('fallback-recovery.ts');
+});
