@@ -1,6 +1,7 @@
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import os from 'node:os';
 import path from 'node:path';
+import { codexNativeExecBinary } from '@/lib/codex/native-exec-binary';
 import { resolveCli, type CliResolverSpec } from './cli-resolver';
 import {
   composeExecutionCarrierInvocation,
@@ -40,7 +41,9 @@ export async function resolveExecutionCarrierInvocation(input: {
     const invocation = composeExecutionCarrierInvocation({
       carrier: null,
       runtime: input.runtime,
-      runtimeBinary: input.runtimeBinary,
+      runtimeBinary: input.runtime === 'codex' && input.runtimeArgs[0] === 'exec'
+        ? await codexNativeExecBinary(input.runtimeBinary)
+        : input.runtimeBinary,
       runtimeArgs: input.runtimeArgs,
     });
     return { ...invocation, carried: false };
