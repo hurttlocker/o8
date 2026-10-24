@@ -389,6 +389,12 @@
       ]
     },
     {
+      "path": "src/lib/codex/native-exec-binary.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/codex/read-only-worker-launch.test.ts",
       "reasons": [
         "child-process",
@@ -2125,6 +2131,16 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-native-worker-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
