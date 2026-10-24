@@ -1,0 +1,149 @@
+{
+  "schema": "o8/worker-launch-4136/v1",
+  "baseCommit": "2a623b195571c0176da77e0c9bf37051e31ac964",
+  "environment": {
+    "platform": "linux",
+    "nodeMajor": 22
+  },
+  "fixture": {
+    "test": "tests/packet-launch-budget-real-path.test.ts",
+    "entryPoint": "runDispatchTick",
+    "runtime": "qoder executable fixture",
+    "payload": "private copy of installed node_modules with a synthetic project manifest",
+    "payloadInventoryFiles": 168361,
+    "samplesPerArm": 3
+  },
+  "observer": "scripts/speed/workers.mjs:persistedWorkerStages",
+  "command": "node scripts/speed/dispatch-fixture.mjs --payload=node_modules --output=work/worker-launch",
+  "limits": [
+    "Small tracked fixture repository with the installed dependency payload, not the full application checkout or dependency graph.",
+    "Fixture installer and runtime; no downloads, provider output latency, real accounts or desktop.",
+    "Output is checked in the persisted owned-run stdout; duration uses the fixture timestamp adjacent to its first output.",
+    "Recorded run-start timestamp is not a kernel process-spawn observation.",
+    "Phase medians are independent and need not sum to the total median.",
+    "No macOS reference timing, physical block accounting or mission dispatch wait-window acceptance was verified."
+  ],
+  "before": {
+    "samples": [
+      {
+        "sample": 1,
+        "admissionMs": 225,
+        "otherWorkspaceMs": 978,
+        "dependencyPreparationMs": 10666,
+        "runtimePreparationToRecordedStartMs": 142,
+        "recordedStartToOutputMs": 72,
+        "dispatchToOutputMs": 12083,
+        "dispatchToPersistedLaunchMs": 12188,
+        "installerScaffoldOperations": 9,
+        "maxObservedFixtureStatConcurrency": 1
+      },
+      {
+        "sample": 2,
+        "admissionMs": 210,
+        "otherWorkspaceMs": 961,
+        "dependencyPreparationMs": 10707,
+        "runtimePreparationToRecordedStartMs": 108,
+        "recordedStartToOutputMs": 67,
+        "dispatchToOutputMs": 12053,
+        "dispatchToPersistedLaunchMs": 12161,
+        "installerScaffoldOperations": 9,
+        "maxObservedFixtureStatConcurrency": 1
+      },
+      {
+        "sample": 3,
+        "admissionMs": 207,
+        "otherWorkspaceMs": 944,
+        "dependencyPreparationMs": 10584,
+        "runtimePreparationToRecordedStartMs": 152,
+        "recordedStartToOutputMs": 77,
+        "dispatchToOutputMs": 11964,
+        "dispatchToPersistedLaunchMs": 12080,
+        "installerScaffoldOperations": 9,
+        "maxObservedFixtureStatConcurrency": 1
+      }
+    ],
+    "medians": {
+      "admissionMs": 210,
+      "otherWorkspaceMs": 961,
+      "dependencyPreparationMs": 10666,
+      "runtimePreparationToRecordedStartMs": 142,
+      "recordedStartToOutputMs": 72,
+      "dispatchToOutputMs": 12053,
+      "dispatchToPersistedLaunchMs": 12161,
+      "installerScaffoldOperations": 9,
+      "maxObservedFixtureStatConcurrency": 1
+    },
+    "worstDispatchToOutputMs": 12083
+  },
+  "after": {
+    "samples": [
+      {
+        "sample": 1,
+        "admissionMs": 259,
+        "otherWorkspaceMs": 1049,
+        "dependencyPreparationMs": 8551,
+        "runtimePreparationToRecordedStartMs": 120,
+        "recordedStartToOutputMs": 74,
+        "dispatchToOutputMs": 10053,
+        "dispatchToPersistedLaunchMs": 10160,
+        "installerScaffoldOperations": 1,
+        "maxObservedFixtureStatConcurrency": 24
+      },
+      {
+        "sample": 2,
+        "admissionMs": 254,
+        "otherWorkspaceMs": 1007,
+        "dependencyPreparationMs": 7945,
+        "runtimePreparationToRecordedStartMs": 138,
+        "recordedStartToOutputMs": 67,
+        "dispatchToOutputMs": 9411,
+        "dispatchToPersistedLaunchMs": 9531,
+        "installerScaffoldOperations": 1,
+        "maxObservedFixtureStatConcurrency": 28
+      },
+      {
+        "sample": 3,
+        "admissionMs": 221,
+        "otherWorkspaceMs": 1018,
+        "dependencyPreparationMs": 8387,
+        "runtimePreparationToRecordedStartMs": 125,
+        "recordedStartToOutputMs": 65,
+        "dispatchToOutputMs": 9816,
+        "dispatchToPersistedLaunchMs": 9933,
+        "installerScaffoldOperations": 1,
+        "maxObservedFixtureStatConcurrency": 25
+      }
+    ],
+    "medians": {
+      "admissionMs": 254,
+      "otherWorkspaceMs": 1018,
+      "dependencyPreparationMs": 8387,
+      "runtimePreparationToRecordedStartMs": 125,
+      "recordedStartToOutputMs": 67,
+      "dispatchToOutputMs": 9816,
+      "dispatchToPersistedLaunchMs": 9933,
+      "installerScaffoldOperations": 1,
+      "maxObservedFixtureStatConcurrency": 25
+    },
+    "worstDispatchToOutputMs": 10053
+  },
+  "target": {
+    "dispatchToOutputMsExclusive": 10000,
+    "allFinalSamplesPassed": false,
+    "remainingWorstOverrunMs": 53
+  },
+  "redTail": [
+    "expected 12083 to be less than 10000",
+    "expected 9 to be 1",
+    "expected 1 to be greater than 1",
+    "Test Files 1 failed (1); Tests 1 failed (1)"
+  ],
+  "greenTail": [
+    "Test Files 3 passed (3)",
+    "Tests 51 passed (51)"
+  ],
+  "largePayloadBudgetTail": [
+    "Final samples: 10053 / 9411 / 9816 ms",
+    "One timing assertion failed; two passed. The target is not consistently met."
+  ]
+}

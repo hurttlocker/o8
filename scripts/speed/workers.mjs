@@ -58,7 +58,7 @@ export function persistedWorkerStages(dataDir, packetId, dispatchAt, spawnAt) {
       workspaceProvisioningMs: opened && provisioned ? provisioned.at - opened.at : null,
       runtimeSpawnMs: provisioned && spawnAt ? spawnAt - provisioned.at : null,
       dependencyProvisioningMs: timings.find(row => row.stage === 'dependency_materialization')?.durationMs ?? 0,
-      timings, limits: 'Dependency-free fixture; zero means no install was requested. Workspace stage includes launch preparation until the persisted worktree binding, not just clone I/O.' };
+      timings, limits: 'Zero dependency time means no materialization timing event was recorded. Workspace stage includes launch preparation until the persisted worktree binding, not just clone I/O.' };
   } finally { database.close(); }
 }
 export async function measureWorker(stack, seeded, evidence, runtime, sample, timeoutMs = 240000) {
