@@ -16,6 +16,7 @@ export function RamsButton({
   'aria-label': ariaLabel,
   'aria-expanded': ariaExpanded,
   'aria-controls': ariaControls,
+  'aria-describedby': ariaDescribedBy,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -28,6 +29,7 @@ export function RamsButton({
   'aria-label'?: string;
   'aria-expanded'?: boolean;
   'aria-controls'?: string;
+  'aria-describedby'?: string;
 }) {
   const tone = variant === 'solid' ? 'var(--t-accent-contrast)' : variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
   const border = variant === 'solid' ? 'transparent' : variant === 'ghost'
@@ -53,6 +55,7 @@ export function RamsButton({
       aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
       aria-controls={ariaControls}
+      aria-describedby={ariaDescribedBy}
       style={{
         ...RAMS_BUTTON_GEOMETRY,
         width,

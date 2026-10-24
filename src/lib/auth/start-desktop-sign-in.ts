@@ -14,6 +14,12 @@ import { clearDesktopAuthError, reportDesktopAuthError } from '@/lib/auth/deskto
 import { desktopAuthHandoffGeneration } from '@/lib/auth/desktop-auth-callback';
 import { isTauri } from '@/lib/tauri/bridge';
 
+// Account identity is separate from the GitHub repository connection. Provider
+// OAuth scopes are configured by the hosted Clerk sign-in, outside this repo;
+// do not promise an exclusive scope list based on the desktop handoff alone.
+export const O8_SIGN_IN_DISCLOSURE =
+  'Sign-in shares your account profile and email. GitHub repository access is a separate connection.';
+
 export const O8_SIGN_IN_URL =
   process.env.NEXT_PUBLIC_O8_SIGN_IN_URL || 'https://o8.run/desktop/sign-in';
 
