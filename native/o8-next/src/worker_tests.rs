@@ -82,7 +82,15 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         "render the default mode in words"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    // GPUI installs the native input handler during paint after focus changes.
+    draw(cx);
     cx.simulate_input("Start streaming");
+    assert_eq!(
+        surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone()),
+        "Start streaming",
+        "native input must reach the focused composer before Enter"
+    );
+    draw(cx);
     let start = Instant::now();
     cx.simulate_keystrokes("enter");
     wait(&surface, cx, "first worker transcript", |s| {
