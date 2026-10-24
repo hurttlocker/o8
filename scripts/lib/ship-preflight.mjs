@@ -489,6 +489,15 @@ export function runQuickBenchmarkPreflight(options) {
     if (!settlement.confirmed) pending.push(previous);
   }
 
+  // The dev benchmark writes into .next. Even lifecycle-bound output belongs
+  // to its producer, not this advisory check. Recover our own interrupted runs
+  // first, then refuse all remaining entries, including dangling symlinks,
+  // before recording or spawning a new run. This is a preflight failure, not
+  // an unavailable speed measurement that the ship can ignore.
+  if (lstatSync(join(root, '.next'), { throwIfNoEntry: false })) {
+    throw new Error('.next already exists; the ship benchmark requires absent output. Stop checkout users and use a clean release checkout; preserve the existing output for recovery.');
+  }
+
   const current = {
     marker: randomUUID(),
     outputExisted: Boolean(lstatSync(join(root, '.next'), { throwIfNoEntry: false })),

@@ -136,15 +136,17 @@ describe('ship preflight quick benchmark cleanup', () => {
     expect(existsSync(shipPreflightInternals.benchmarkStatePath(root))).toBe(false);
   }, 30_000);
 
-  it('never removes generated output that existed before the benchmark', () => {
+  it('refuses to start a benchmark against existing output and preserves it', () => {
     const root = fixture({ writeOutput: true, hang: true });
     mkdirSync(join(root, '.next'), { recursive: true });
     writeFileSync(join(root, '.next', 'BUILD_ID'), 'prior-build');
 
-    const receipt = runQuickBenchmarkPreflight({ root, timeoutMs: 3000 });
+    expect(() => runQuickBenchmarkPreflight({ root, timeoutMs: 3000 }))
+      .toThrow(/\.next.*already exists/);
 
-    expect(alive(grandchildPid(root))).toBe(false);
+    expect(existsSync(join(root, 'grandchild.pid'))).toBe(false);
+    expect(existsSync(join(root, '.next', 'dev', 'lock'))).toBe(false);
     expect(readFileSync(join(root, '.next', 'BUILD_ID'), 'utf8')).toBe('prior-build');
-    expect(receipt.cleanup).toMatchObject({ confirmed: true, removedOutput: false });
+    expect(existsSync(shipPreflightInternals.benchmarkStatePath(root))).toBe(false);
   }, 30_000);
 });
