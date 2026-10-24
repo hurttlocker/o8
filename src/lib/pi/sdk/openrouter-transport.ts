@@ -9,8 +9,9 @@
  * after the call the reservation settles to the cost OpenRouter reported.
  */
 
-import type { AssistantMessageEvent, Model } from '@earendil-works/pi-ai/compat';
+import type { AssistantMessageEvent, Context, Model } from '@earendil-works/pi-ai/compat';
 import type { PiModelTransport } from './transport';
+import { applyPromptCache, cachePrefixContext, promptCacheEnabled, promptCachePolicy } from './prompt-cache';
 
 export { isOpenRouterPiModelChoice, OPENROUTER_PI_MODEL_PREFIX } from './openrouter-model-choice';
 export const OPENROUTER_CHAT_COMPLETIONS_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -37,6 +38,10 @@ export interface OpenRouterPiReceipt {
   reservedUsd: number;
   startedAt: string;
   finishedAt: string;
+  purpose?: 'turn' | 'prewarm' | 'keepalive';
+  cacheWriteTokens?: number;
+  cachedTokenRatio?: number | null;
+  timeToFirstTokenMs?: number | null;
 }
 
 /**
@@ -124,10 +129,15 @@ function withoutProviderDiagnostics(event: AssistantMessageEvent): AssistantMess
 
 export function createOpenRouterPiTransport(options: OpenRouterPiTransportOptions): PiModelTransport {
   const maxOutputTokens = options.maxOutputTokens ?? OPENROUTER_PI_MAX_OUTPUT_TOKENS;
-  return async function* (context, signal) {
+  const policy = promptCachePolicy(options.model.id);
+  const preparedSessions = new WeakSet<AbortSignal>();
+  const run = async function* (context: Context, signal: AbortSignal, purpose: OpenRouterPiReceipt['purpose'] = 'turn'): AsyncGenerator<AssistantMessageEvent> {
     signal.throwIfAborted();
-    const startedAt = new Date().toISOString();
-    const timeout = AbortSignal.timeout(options.timeoutMs ?? 120_000);
+    const started = Date.now();
+    const startedAt = new Date(started).toISOString();
+    let timeToFirstTokenMs: number | null = null;
+    const outputLimit = purpose === 'turn' ? maxOutputTokens : 1;
+    const timeout = AbortSignal.timeout(purpose === 'turn' ? options.timeoutMs ?? 120_000 : 10_000);
     const requestSignal = AbortSignal.any([signal, timeout]);
     let failure: string | null = null;
     let reservedUsd = 0;
@@ -139,9 +149,20 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
     const guardedFetch: typeof fetch = async (_input, init) => {
       requestSignal.throwIfAborted();
       const key = (await options.resolveKey())?.trim();
+      requestSignal.throwIfAborted();
+      if (purpose !== 'turn' && !promptCacheEnabled()) throw new Error('Cache warming disabled');
       if (!key) { failure = 'OpenRouter is not connected'; throw new Error(failure); }
-      const body = typeof init?.body === 'string' ? init.body : '';
-      reservedUsd = worstCaseCallUsd(Buffer.byteLength(body, 'utf8'), maxOutputTokens, options.pricing);
+      let body = typeof init?.body === 'string' ? init.body : '';
+      if (policy && promptCacheEnabled()) body = applyPromptCache(body, policy);
+      if (purpose !== 'turn') {
+        const warm = JSON.parse(body);
+        warm.tool_choice = 'none';
+        body = JSON.stringify(warm);
+      }
+      // Extended cache writes have a higher input price. Reserve that price
+      // even for a hit: a provider eviction can turn any hit into a write.
+      reservedUsd = worstCaseCallUsd(Buffer.byteLength(body, 'utf8'), outputLimit,
+        { ...options.pricing, inputPerMillion: options.pricing.inputPerMillion * (policy && promptCacheEnabled() ? policy.writeMultiplier : 1) });
       if (!options.ceiling.reserve(reservedUsd)) {
         reservedUsd = 0;
         status = 'refused';
@@ -180,9 +201,12 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
           if (typeof record.id === 'string' && record.id) generationId = record.id;
           if (record.usage && typeof record.usage === 'object') usage = record.usage as Record<string, unknown>;
         },
-        maxRetries: 0, maxTokens: maxOutputTokens, transport: 'sse',
+        maxRetries: 0, maxTokens: outputLimit, transport: 'sse',
       });
       for await (const event of stream) {
+        if (timeToFirstTokenMs === null && (event.type === 'text_delta' || event.type === 'thinking_delta' || event.type === 'toolcall_delta')) {
+          timeToFirstTokenMs = Date.now() - started;
+        }
         if (event.type !== 'error') {
           if (event.type === 'done') status = 'completed';
           yield withoutProviderDiagnostics(event);
@@ -214,7 +238,27 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
         reservedUsd: admitted ? reservedUsd : 0,
         startedAt,
         finishedAt: new Date().toISOString(),
+        purpose,
+        cacheWriteTokens: finiteNumber(details?.cache_write_tokens) ?? 0,
+        cachedTokenRatio: finiteNumber(reported?.prompt_tokens) ? Math.min(1,
+          (finiteNumber(details?.cached_tokens) ?? 0) / Number(reported?.prompt_tokens)) : null,
+        timeToFirstTokenMs,
       });
     }
   };
+
+  const transport: PiModelTransport = async function* (context, signal) {
+    yield* run(context, signal);
+  };
+  if (!policy) return transport;
+  transport.prepare = async (context, signal) => {
+    if (preparedSessions.has(signal) || signal.aborted || !promptCacheEnabled()) return;
+    preparedSessions.add(signal);
+    const prefix = cachePrefixContext(context);
+    if (!prefix) return;
+    // Warm output is never delivered to the agent or added to its conversation.
+    try { for await (const _event of run(prefix, signal, 'prewarm')) { /* receipt owns usage */ } }
+    catch { /* Warming is best effort; ordinary turns retain their error handling. */ }
+  };
+  return transport;
 }

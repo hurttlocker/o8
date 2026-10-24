@@ -4442,6 +4442,12 @@
       ]
     },
     {
+      "path": "tests/pi-prompt-cache-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-approved-write-races-real-path.test.ts",
       "reasons": [
         "executable-fixture",

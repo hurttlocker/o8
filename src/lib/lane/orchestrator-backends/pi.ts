@@ -271,6 +271,10 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
       await close(pi);
       pi = undefined;
     }
+    if (pi) {
+      pi.receipts = [];
+      pi.ceiling?.reset();
+    }
     if (!pi) {
       try {
         pi = await start(name, repoPath, options, surface, route);
@@ -294,11 +298,9 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     sessionId = current.session.sessionId;
     clearTimeout(current.idle);
     current.emit = onEvent;
-    current.receipts = [];
     turnReceipts = current.receipts;
     for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
     Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
-    current.ceiling?.reset();
     onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium',
       permissionMode: options.permissionMode ?? 'full' });
     const stop = () => { void current.session.abort(); };

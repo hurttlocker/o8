@@ -113,6 +113,8 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     // No inherited provider keys, NODE_OPTIONS, user extension paths or proxy variables.
     env: providerSpawnEnvironment({ NODE_ENV: 'production', HOME: stateDir, USERPROFILE: stateDir, PI_OFFLINE: '1', NO_COLOR: '1' }, { inject: false }) });
   let run: AbortController | undefined;
+  const sessionWarming = new AbortController();
+  let preparation: Promise<void> | undefined;
   // Set only by abort(), so a timeout or a worker exit is never reported as the operator's Stop.
   let operatorStopped = false;
   let closed = false;
@@ -127,8 +129,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     if (params.event.type === 'agent_settled') settled = true;
     try { options.onEvent?.(params.event); } catch { /* Observer failure cannot change worker authority. */ }
   });
-  peer.on('fatal', () => run?.abort());
-  peer.on('exit', () => run?.abort());
+  const stop = () => { sessionWarming.abort(); run?.abort(); };
+  peer.on('fatal', stop);
+  peer.on('exit', stop);
   async function handleRequest(request: StdioJsonRpcInboundRequest) {
     const signal = run?.signal;
     if (!signal || signal.aborted) throw new Error('No active authorized run');
@@ -152,6 +155,8 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       if (++modelCalls > (options.maxModelCalls ?? 8)) throw new Error('Model-call budget exhausted');
       const context = request.params.context as Context;
       if (!context || !Array.isArray(context.messages)) throw new Error('Invalid model context');
+      if (preparation) await preparation;
+      signal.throwIfAborted();
       for await (const event of transport(context, signal)) {
         signal.throwIfAborted();
         await peer.request('model_event', { id: request.id, event });
@@ -173,7 +178,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       else peer.respondError(request.id, -32001, 'Host operation denied or unavailable');
     }).catch(() => { run?.abort(); });
   });
-  let ready: { sessionFile: string; sessionId: string; tools: string[]; messageCount: number };
+  let ready: { sessionFile: string; sessionId: string; tools: string[]; messageCount: number; cacheContext?: Context };
   try {
     ready = await peer.request('initialize', { cwd: root, stateDir, sessionFile,
       model: { id: options.model.id, name: options.model.name, reasoning: false, input: ['text'],
@@ -183,8 +188,15 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}) });
   } catch (error) { await peer.close(); throw error; }
   surfaceId = `pi-sdk:${ready.sessionId}`;
+  const { cacheContext, ...sessionInfo } = ready;
+  // Use idle time after initialization, once per session. Later prompts reuse
+  // the prefix populated by real model calls instead of sending another warmup.
+  if (cacheContext && transport.prepare) {
+    preparation = transport.prepare(cacheContext, sessionWarming.signal).catch(() => {})
+      .finally(() => { preparation = undefined; });
+  }
   return {
-    ...ready,
+    ...sessionInfo,
     surfaceId,
     get pid() { return peer.pid; },
     get running() { return peer.running; },
@@ -198,6 +210,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       run = new AbortController(); modelCalls = 0; toolCalls = 0; settled = false; operatorStopped = false;
       const timeoutMs = options.runTimeoutMs ?? 120_000;
       const timeout = setTimeout(() => {
+        sessionWarming.abort();
         run?.abort();
         void peer.request('abort').catch(() => peer.close());
       }, timeoutMs);
@@ -207,21 +220,25 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
         if (result.errorMessage !== undefined) result.errorMessage = o8FailureText(result.errorMessage);
         return result;
       } catch (error) {
+        sessionWarming.abort();
         run.abort();
         await peer.close();
         closed = true;
         throw error;
-      } finally { clearTimeout(timeout); run = undefined; }
+      } finally { clearTimeout(timeout); run?.abort(); run = undefined; }
     },
     async abort() {
       if (run) operatorStopped = true;
+      sessionWarming.abort();
       run?.abort();
       await peer.request('abort').catch(async () => { await peer.close(); closed = true; });
     },
     async close() {
       closed = true;
+      sessionWarming.abort();
       run?.abort();
       await peer.close();
+      await preparation;
     },
   };
 }

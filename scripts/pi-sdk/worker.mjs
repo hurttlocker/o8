@@ -78,7 +78,8 @@ async function initialize(params) {
   }));
   session.subscribe(event => send({ method: 'event', params: { event } }));
   return { sessionFile: session.sessionManager.getSessionFile(), sessionId: session.sessionManager.getSessionId(),
-    tools: session.getActiveToolNames(), messageCount: session.messages.length };
+    tools: session.getActiveToolNames(), messageCount: session.messages.length,
+    cacheContext: { systemPrompt: session.systemPrompt, tools, messages: [] } };
 }
 async function command(method, params = {}) {
   if (method === 'initialize') return initialize(params);
