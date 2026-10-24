@@ -1,4 +1,26 @@
 use super::*;
+
+// The queue returns realpath(repoPath), while saved histories can retain a
+// symlink spelling (notably /var versus /private/var on macOS). Keep the frozen
+// request intact for retries and compare actual directory identity on mismatch.
+fn receipt_matches(method: &str, body: &Value, response: &Value) -> bool {
+    let item = &response["item"];
+    let same_repo = match (item["repoPath"].as_str(), body["repoPath"].as_str()) {
+        (Some(actual), Some(expected)) if actual == expected => true,
+        (Some(actual), Some(expected)) => {
+            match (fs::canonicalize(actual), fs::canonicalize(expected)) {
+                (Ok(actual), Ok(expected)) => actual == expected,
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    item["id"] == body["id"]
+        && item["threadId"] == body["threadId"]
+        && same_repo
+        && (method != "POST" || item["payload"] == body["payload"])
+        && item["status"] != "cancelled"
+}
 impl Surface {
     pub(super) fn send(&mut self, promote: Option<String>, cx: &mut Context<Self>) {
         if self.saving || !self.queue_ready || self.composer.read(cx).composing() {
@@ -69,13 +91,7 @@ impl Surface {
                     error.status.is_some_and(|code| (400..500).contains(&code)),
                 )
             })?;
-            let item = &response["item"];
-            if item["id"] != body["id"]
-                || item["threadId"] != body["threadId"]
-                || item["repoPath"] != body["repoPath"]
-                || (method == "POST" && item["payload"] != body["payload"])
-                || item["status"] == "cancelled"
-            {
+            if !receipt_matches(method, &body, &response) {
                 return Err((
                     "Message receipt did not match. Draft retained; inspect the shared queue."
                         .into(),
@@ -268,5 +284,54 @@ impl Surface {
                     })
             })))
             .into_any_element()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_receipt_keeps_request_session_payload_and_repository_fences() {
+        let root = std::env::temp_dir().join(format!(
+            "o8-next-receipt-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let repo = root.join("repo");
+        let other = root.join("other");
+        let alias = root.join("alias");
+        fs::create_dir(&repo).unwrap();
+        fs::create_dir(&other).unwrap();
+        std::os::unix::fs::symlink(&repo, &alias).unwrap();
+        let body = json!({"id":"fixture-id", "threadId":"thoughts-fixture", "repoPath":alias,
+            "payload":{"text":"hello"}});
+        let mut response = json!({"item":body.clone()});
+        response["item"]["repoPath"] = json!(fs::canonicalize(&repo).unwrap());
+        response["item"]["status"] = json!("applied");
+        assert!(receipt_matches("POST", &body, &response));
+        for (key, value) in [
+            ("id", json!("other-id")),
+            ("threadId", json!("thoughts-other")),
+            ("payload", json!({"text":"other"})),
+            ("status", json!("cancelled")),
+            ("repoPath", json!(other)),
+            ("repoPath", json!(root.join("missing"))),
+            ("repoPath", Value::Null),
+        ] {
+            let mut wrong = response.clone();
+            wrong["item"][key] = value;
+            assert!(!receipt_matches("POST", &body, &wrong), "{key}");
+        }
+        assert_eq!(
+            body["repoPath"],
+            json!(alias),
+            "retry identity stays frozen"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

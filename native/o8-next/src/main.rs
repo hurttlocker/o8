@@ -22,7 +22,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--help"] {
         println!(
-            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
+            "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--benchmark FILE | --composer-benchmark FILE]\nSaved sessions and composer. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"
         );
         return Ok(());
     }
@@ -61,6 +61,7 @@ fn run() -> Result<(), String> {
     let mut offscreen = false;
     let mut enabled = false;
     let mut benchmark = None;
+    let mut composer_benchmark = None;
     let mut unattended = false;
     let mut stream_output = None;
     let mut stream_through = None;
@@ -70,13 +71,19 @@ fn run() -> Result<(), String> {
             "--enable-next" => enabled = true,
             "--offscreen" => offscreen = true,
             "--unattended-on-screen" => unattended = true,
-            "--server" | "--benchmark" | "--stream-benchmark" | "--stream-through" => {
+            "--server"
+            | "--benchmark"
+            | "--composer-benchmark"
+            | "--stream-benchmark"
+            | "--stream-through" => {
                 i += 1;
                 let value = args.get(i).ok_or("Missing flag value")?.clone();
                 if args[i - 1] == "--server" {
                     server = Some(value);
                 } else if args[i - 1] == "--benchmark" {
                     benchmark = Some(value);
+                } else if args[i - 1] == "--composer-benchmark" {
+                    composer_benchmark = Some(value);
                 } else if args[i - 1] == "--stream-benchmark" {
                     stream_output = Some(value);
                 } else {
@@ -94,8 +101,15 @@ fn run() -> Result<(), String> {
     if !enabled {
         return Err("This surface is opt-in; pass --enable-next".into());
     }
-    if (benchmark.is_some() || stream_output.is_some()) && !offscreen {
+    if (benchmark.is_some() || composer_benchmark.is_some() || stream_output.is_some())
+        && !offscreen
+    {
         return Err("Automated benchmarks require --offscreen".into());
+    }
+    if composer_benchmark.is_some()
+        && (benchmark.is_some() || stream_output.is_some() || unattended)
+    {
+        return Err("Use --composer-benchmark alone with --offscreen".into());
     }
     let stream_benchmark = match (stream_output, stream_through) {
         (Some(path), Some(seq)) if seq > 0 && benchmark.is_none() => Some((path, seq)),
@@ -115,6 +129,7 @@ fn run() -> Result<(), String> {
         offscreen,
         unattended,
         benchmark,
+        composer_benchmark,
         stream_benchmark,
         started,
     );

@@ -152,7 +152,13 @@ impl Composer {
             return;
         }
         let command = key.modifiers.control || key.modifiers.platform;
+        let mac_command = cfg!(target_os = "macos") && key.modifiers.platform;
         let cursor = self.cursor();
+        let line_start = self.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = self.text[cursor..]
+            .find('\n')
+            .map(|i| cursor + i)
+            .unwrap_or(self.text.len());
         match key.key.as_str() {
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
@@ -198,7 +204,9 @@ impl Composer {
                 }
             }
             "left" => self.move_to(
-                if !key.modifiers.shift && !self.selection.is_empty() {
+                if mac_command {
+                    line_start
+                } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.start
                 } else {
                     self.previous(cursor)
@@ -207,11 +215,18 @@ impl Composer {
                 cx,
             ),
             "right" => self.move_to(
-                if !key.modifiers.shift && !self.selection.is_empty() {
+                if mac_command {
+                    line_end
+                } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.end
                 } else {
                     self.next(cursor)
                 },
+                key.modifiers.shift,
+                cx,
+            ),
+            "up" | "down" if mac_command => self.move_to(
+                if key.key == "up" { 0 } else { self.text.len() },
                 key.modifiers.shift,
                 cx,
             ),
@@ -230,32 +245,29 @@ impl Composer {
                 }
             }
             "home" => self.move_to(
-                if command {
-                    0
-                } else {
-                    self.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
-                },
+                if command { 0 } else { line_start },
                 key.modifiers.shift,
                 cx,
             ),
             "end" => self.move_to(
-                if command {
-                    self.text.len()
-                } else {
-                    self.text[cursor..]
-                        .find('\n')
-                        .map(|i| cursor + i)
-                        .unwrap_or(self.text.len())
-                },
+                if command { self.text.len() } else { line_end },
                 key.modifiers.shift,
                 cx,
             ),
             "backspace" | "delete" => {
                 if self.selection.is_empty() {
                     self.selection = if key.key == "backspace" {
-                        self.previous(cursor)..cursor
+                        (if mac_command {
+                            line_start
+                        } else {
+                            self.previous(cursor)
+                        })..cursor
                     } else {
-                        cursor..self.next(cursor)
+                        cursor..(if mac_command {
+                            line_end
+                        } else {
+                            self.next(cursor)
+                        })
                     };
                 }
                 self.replace_text_in_range(None, "", window, cx);

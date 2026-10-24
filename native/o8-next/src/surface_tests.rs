@@ -109,6 +109,11 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     });
     let echo = start.elapsed().as_secs_f64() * 1000.;
     let first = surface.read_with(cx, |s, _| s.queue["items"][0].clone());
+    assert!(
+        !first.is_null(),
+        "{}",
+        surface.read_with(cx, |s, _| s.notice.clone())
+    );
     assert_eq!(first["intent"], "steer-now");
     assert_eq!(first["threadId"], "thoughts-composer-first");
     assert_eq!(
