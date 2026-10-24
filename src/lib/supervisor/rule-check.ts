@@ -1,7 +1,6 @@
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { scanSpawnEnvironment } from './spawn-environment-rule';
 
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const FILE_CEILING = 800;
@@ -34,6 +33,8 @@ export interface RuleCheckResult {
 
 /** Standalone checks can supply a Git reader without loading application secrets. */
 export type RuleCheckGitReader = (cwd: string, args: string[]) => Promise<{ stdout: string }>;
+/** Whole-file scanner for rules that belong to one repository rather than to every packet. */
+export type RuleCheckFileScanner = (relPath: string, content: string) => RuleViolation[];
 
 const applicationGitReader: RuleCheckGitReader = async (cwd, args) => {
   const { execFile } = await import('../providers/child-process');
@@ -184,7 +185,8 @@ async function getOldLineCount(
   }
 }
 
-export async function runRuleCheck(cwd: string, baseRef = 'main', git: RuleCheckGitReader = applicationGitReader): Promise<RuleCheckResult> {
+export async function runRuleCheck(cwd: string, baseRef = 'main', git: RuleCheckGitReader = applicationGitReader,
+  fileScanners: readonly RuleCheckFileScanner[] = []): Promise<RuleCheckResult> {
   const touched = await listTouchedFiles(cwd, baseRef, git);
   if (!touched) {
     // Fail-open: if git can't resolve the base branch, skip the check cleanly
@@ -220,7 +222,9 @@ export async function runRuleCheck(cwd: string, baseRef = 'main', git: RuleCheck
     const changedLines = changedLinesByFile.get(relPath) ?? null;
     const oldLineCount = await getOldLineCount(cwd, baseRef, relPath, git);
 
-    violations.push(...scanSpawnEnvironment(relPath, content).slice(0, MAX_VIOLATIONS_REPORTED - violations.length));
+    for (const scan of fileScanners) {
+      violations.push(...scan(relPath, content).slice(0, MAX_VIOLATIONS_REPORTED - violations.length));
+    }
     scanFileContent(relPath, content, violations, { changedLines, oldLineCount });
   }
 

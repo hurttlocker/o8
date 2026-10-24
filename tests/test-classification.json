@@ -1090,6 +1090,13 @@
       ]
     },
     {
+      "path": "src/lib/supervisor/rule-check-runtime-scope.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/supervisor/rule-check-spawn.test.ts",
       "reasons": [
         "child-process",
